@@ -118,16 +118,7 @@ on:
   # Paths assume install layout in the Spring REST API repo:
   #   .github/workflows/integration-pipeline.yml
   #   .github/workflows/rest-api-ci-caller.yml
-  push:
-    branches: [master, develop]
-    paths:
-      - ".github/workflows/integration-pipeline.yml"
-      - ".github/workflows/rest-api-ci-caller.yml"
-  pull_request:
-    branches: [master, develop]
-    paths:
-      - ".github/workflows/integration-pipeline.yml"
-      - ".github/workflows/rest-api-ci-caller.yml"
+
 
 # GitHub Flow: one concurrent run per PR (or branch); newer pushes cancel stale runs
 concurrency:

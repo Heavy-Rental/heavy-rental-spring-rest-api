@@ -122,20 +122,7 @@ on:
         default: master
         type: string
 
-  # When the release workflow definitions themselves change, re-validate (master/develop only).
-  # Paths assume install layout in the Spring REST API repo:
-  #   .github/workflows/release-pipeline.yml
-  #   .github/workflows/rest-api-release-caller.yml
-  push:
-    branches: [master, develop]
-    paths:
-      - ".github/workflows/release-pipeline.yml"
-      - ".github/workflows/rest-api-release-caller.yml"
-  pull_request:
-    branches: [master, develop]
-    paths:
-      - ".github/workflows/release-pipeline.yml"
-      - ".github/workflows/rest-api-release-caller.yml"
+
 
 # GitHub Flow post-merge: one run per branch/tag; do not cancel in-flight packaging mid-upload
 concurrency:
