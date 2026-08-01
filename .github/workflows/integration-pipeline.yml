@@ -14,20 +14,25 @@
 #   - CodeQL → GitHub Code Scanning (native SARIF via analyze)
 # Human-readable console output is for gates/logs only, not the report standard.
 #
-# GitHub Flow (https://docs.github.com/en/get-started/using-github/github-flow)
+# GitHub Flow for develop (validate only — NEVER deploys)
 # --------------------------------------------------------------------------
-# Designed for short-lived feature branches → pull request → review → merge
-# into master/main. This workflow is the PR / merge validation gate.
+# This pipeline is CI only: merge-into-develop validation. It does not
+# publish images, push to GHCR, write cloud JDBC deploy config, or deploy.
 #
-#   1. Create a branch from master/main
-#   2. Open a pull request → this CI runs on the PR head (Integration first)
-#   3. Require status checks on master/main (branch protection):
+#   1. Branch from develop
+#   2. Open PR → develop (or push to develop) → rest-api-ci-caller → this workflow
+#   3. Branch protection on develop should require:
 #        - "Integration"              ← highest priority / must pass first
 #        - "Quality Control"
 #        - "Security Testing"
+#        - "CodeQL Analysis"
 #        - "GitHub Flow CI Gate"       ← optional single aggregate check
-#   4. Merge PR when green → master/main stays deployable
-#   5. Release packaging runs separately (rest-api-release.yml) on main / tags
+#   4. Merge when green → develop is integration-tested, not production-deployed
+#   5. Deploy packaging / GHCR lives only in release-pipeline.yml
+#      (GitHub Release publish, or PR develop → master via rest-api-release-caller)
+#
+# QC "Package WAR" + artifact upload = build verification only (not a deploy).
+# environment: integration on QC = secrets isolation for local Docker Postgres tests.
 #
 # How the REST API uses this
 # --------------------------

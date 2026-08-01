@@ -1006,10 +1006,13 @@ jobs:
           ls -lh "${VERSIONED_PATH}" "${STABLE_PATH}" "${BUILD_FILE}"
 
           IMAGE_TAG="v${VERSION}-build${RUN_ID}-${SHORT_SHA}"
-          IMAGE_LOCAL="${IMAGE_NAME}:${IMAGE_TAG}"
-          IMAGE_LOCAL_LATEST="${IMAGE_NAME}:latest"
-          IMAGE_REMOTE="ghcr.io/${GH_REPOSITORY_OWNER}/${IMAGE_NAME}:${IMAGE_TAG}"
-          IMAGE_REMOTE_LATEST="ghcr.io/${GH_REPOSITORY_OWNER}/${IMAGE_NAME}:latest"
+          # GHCR (and Docker Hub) require image repository path segments to be lowercase
+          IMAGE_NAME_LC="${IMAGE_NAME,,}"
+          OWNER_LC="${GH_REPOSITORY_OWNER,,}"
+          IMAGE_LOCAL="${IMAGE_NAME_LC}:${IMAGE_TAG}"
+          IMAGE_LOCAL_LATEST="${IMAGE_NAME_LC}:latest"
+          IMAGE_REMOTE="ghcr.io/${OWNER_LC}/${IMAGE_NAME_LC}:${IMAGE_TAG}"
+          IMAGE_REMOTE_LATEST="ghcr.io/${OWNER_LC}/${IMAGE_NAME_LC}:latest"
           IMAGE_TAR="heavy-rental-rest-api-v${VERSION}-build${RUN_ID}-${SHORT_SHA}.tar.gz"
 
           {
@@ -1105,6 +1108,13 @@ jobs:
           IMAGE_TAR: ${{ steps.package.outputs.image_tar }}
         run: |
           set -euo pipefail
+          # Enforce lowercase repository path (GHCR rejects mixed-case names)
+          IMAGE_NAME_LC="${IMAGE_NAME,,}"
+          OWNER_LC="${GH_REPOSITORY_OWNER,,}"
+          IMAGE_LOCAL="${IMAGE_LOCAL,,}"
+          IMAGE_LOCAL_LATEST="${IMAGE_LOCAL_LATEST,,}"
+          IMAGE_REMOTE="${IMAGE_REMOTE,,}"
+          IMAGE_REMOTE_LATEST="${IMAGE_REMOTE_LATEST,,}"
 
           docker build \
             --pull \
@@ -1115,8 +1125,10 @@ jobs:
             .
 
           echo "==> Images built"
-          docker images "${IMAGE_NAME}" --format 'table {{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.Size}}'
-          docker images "ghcr.io/${GH_REPOSITORY_OWNER}/${IMAGE_NAME}" --format 'table {{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.Size}}' || true
+          echo "Local:  ${IMAGE_LOCAL}"
+          echo "GHCR:   ${IMAGE_REMOTE}"
+          docker images "${IMAGE_NAME_LC}" --format 'table {{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.Size}}'
+          docker images "ghcr.io/${OWNER_LC}/${IMAGE_NAME_LC}" --format 'table {{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.Size}}' || true
 
           # Export image for deploy pipelines that load from artifact (no registry required)
           TAR_PATH="${GITHUB_WORKSPACE}/${IMAGE_TAR}"
@@ -1150,13 +1162,19 @@ jobs:
 
       - name: Push Docker image to GHCR
         if: github.event_name != 'pull_request'
+        env:
+          IMAGE_REMOTE: ${{ steps.package.outputs.image_remote }}
+          IMAGE_REMOTE_LATEST: ${{ steps.package.outputs.image_remote_latest }}
         run: |
           set -euo pipefail
-          docker push "${{ steps.package.outputs.image_remote }}"
-          docker push "${{ steps.package.outputs.image_remote_latest }}"
+          # Repository path already lowercased at package time; re-enforce for GHCR
+          IMAGE_REMOTE="${IMAGE_REMOTE,,}"
+          IMAGE_REMOTE_LATEST="${IMAGE_REMOTE_LATEST,,}"
+          docker push "${IMAGE_REMOTE}"
+          docker push "${IMAGE_REMOTE_LATEST}"
           echo "Pushed:"
-          echo "  ${{ steps.package.outputs.image_remote }}"
-          echo "  ${{ steps.package.outputs.image_remote_latest }}"
+          echo "  ${IMAGE_REMOTE}"
+          echo "  ${IMAGE_REMOTE_LATEST}"
 
       - name: Packaging summary
         env:

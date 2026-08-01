@@ -2,17 +2,22 @@
 # Install into: heavy-rental-spring-rest-api
 # Path:         .github/workflows/rest-api-ci-caller.yml
 # =============================================================================
-# GitHub Flow CI caller — validates feature-branch pull requests before merge.
+# GitHub Flow CI caller — validate PRs/pushes to develop only.
+# Does NOT deploy. Does NOT run release packaging / GHCR.
 #
 # Place both files in the Spring REST API repository:
 #
 #   .github/workflows/rest-api-ci-caller.yml      ← this file (triggers)
 #   .github/workflows/integration-pipeline.yml    ← reusable pipeline (called)
 #
+# Triggers: PR → develop, push → develop, workflow_dispatch.
+# Release / deploy packaging: rest-api-release-caller.yml only.
+#
 # Secrets (in heavy-rental-spring-rest-api)
 # ----------------------------------------
 # Do NOT set `environment:` on this caller job (invalid with uses:).
-# QC inside the reusable workflow uses environment: integration.
+# QC inside the reusable workflow uses environment: integration
+# (for test DB secrets only — not a production deploy target).
 #
 # Add secrets (Environment "integration" and/or Repository secrets):
 #   REST_API_DB_NAME
