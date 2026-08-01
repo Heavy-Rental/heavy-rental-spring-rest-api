@@ -564,11 +564,13 @@ jobs:
           set -euo pipefail
           REPORT_DIR="${{ github.workspace }}/security-reports"
           # Standard security report format: SARIF 2.1.0
+          # Note: p/spring was removed from the Semgrep registry (HTTP 404).
+          # Use p/java + OWASP + security-audit + secrets for Java/Spring apps.
           semgrep scan \
             --config=p/java \
-            --config=p/spring \
             --config=p/owasp-top-ten \
             --config=p/security-audit \
+            --config=p/secrets \
             --metrics=off \
             --sarif \
             --output="${REPORT_DIR}/semgrep.sarif" \
@@ -577,9 +579,9 @@ jobs:
           echo "==> SAST gate (ERROR severity)"
           semgrep scan \
             --config=p/java \
-            --config=p/spring \
             --config=p/owasp-top-ten \
             --config=p/security-audit \
+            --config=p/secrets \
             --metrics=off \
             --severity=ERROR \
             --error \
