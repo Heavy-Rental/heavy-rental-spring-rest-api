@@ -12,11 +12,16 @@
 # QC inside the reusable workflow uses environment: production.
 #
 # Add secrets (Environment "production" and/or Repository secrets):
+#   REST_API_CLOUD_DB_HOST     e.g. mydb.postgres.database.azure.com
 #   REST_API_CLOUD_DB_NAME
 #   REST_API_CLOUD_DB_USER
 #   REST_API_CLOUD_DB_PASSWORD
 #   REST_API_CLOUD_DB_PORT
-#   REST_API_CLOUD_DB_URL
+#
+# JDBC URLs are derived (not secrets):
+#   QC tests:    jdbc:postgresql://localhost:<PORT>/<NAME>
+#   Cloud deploy: jdbc:postgresql://<HOST>:<PORT>/<NAME>
+# Packaging writes spring-datasource.env for deploy (no password).
 #
 # secrets: inherit forwards repository secrets; Environment secrets load on QC
 # via environment: production (PR develop→master and published release).

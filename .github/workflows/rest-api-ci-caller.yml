@@ -19,7 +19,9 @@
 #   REST_API_DB_USER
 #   REST_API_DB_PASSWORD
 #   REST_API_DB_PORT
-#   REST_API_DB_URL
+#
+# REST_API_DB_URL is optional — after Docker Postgres starts, QC builds:
+#   jdbc:postgresql://localhost:<PORT>/<NAME>
 #
 # secrets: inherit forwards repository secrets into the reusable workflow;
 # Environment secrets are available on the QC job via environment: integration.
