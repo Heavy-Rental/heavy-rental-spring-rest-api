@@ -52,11 +52,15 @@
 #      .github/workflows/release-pipeline.yml
 # 2. Configure repository secrets (Settings → Secrets and variables → Actions):
 #
-#      REST_API_DB_NAME
-#      REST_API_DB_USER
-#      REST_API_DB_PASSWORD
-#      REST_API_DB_PORT
-#      REST_API_DB_URL
+#    Cloud deploy secrets (release pipeline — distinct from CI):
+#      REST_API_CLOUD_DB_NAME
+#      REST_API_CLOUD_DB_USER
+#      REST_API_CLOUD_DB_PASSWORD
+#      REST_API_CLOUD_DB_PORT
+#      REST_API_CLOUD_DB_URL
+#
+#    CI secrets (integration pipeline only — do not use here):
+#      REST_API_DB_NAME / _USER / _PASSWORD / _PORT / _URL
 #
 #    Forwarded via secrets: inherit. Do not put secret values in this file.
 # =============================================================================
@@ -97,9 +101,9 @@ jobs:
        github.base_ref == 'master')
     # Same-repo reusable workflow — both files live under .github/workflows/
     uses: ./.github/workflows/release-pipeline.yml
-    # Forward repository secrets (REST_API_DB_*) into the reusable workflow.
-    # Required: REST_API_DB_NAME, REST_API_DB_USER, REST_API_DB_PASSWORD,
-    #           REST_API_DB_PORT, REST_API_DB_URL
+    # Forward cloud deploy secrets (REST_API_CLOUD_DB_*) into the reusable workflow.
+    # Required: REST_API_CLOUD_DB_NAME, REST_API_CLOUD_DB_USER, REST_API_CLOUD_DB_PASSWORD,
+    #           REST_API_CLOUD_DB_PORT, REST_API_CLOUD_DB_URL
     secrets: inherit
     # No inputs: checks out this REST API repo at github.sha
     # (release tag commit, or PR merge commit for develop→master)

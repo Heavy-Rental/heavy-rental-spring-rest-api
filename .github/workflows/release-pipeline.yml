@@ -58,13 +58,16 @@
 # Configure under Settings → Secrets and variables → Actions on:
 #   - heavy-rental-spring-rest-api  (via rest-api-release-caller.yml + secrets: inherit)
 #
-#   REST_API_DB_NAME      PostgreSQL database name (service POSTGRES_DB)
-#   REST_API_DB_USER      PostgreSQL username    (service POSTGRES_USER + Spring)
-#   REST_API_DB_PASSWORD  PostgreSQL password    (service POSTGRES_PASSWORD + Spring)
-#   REST_API_DB_PORT      Host port mapped to the Postgres service (e.g. 5432)
-#   REST_API_DB_URL       JDBC URL for tests; port must match REST_API_DB_PORT
-#                         e.g. jdbc:postgresql://localhost:<port>/<db>
+# Cloud deployment secrets (distinct from CI REST_API_DB_* used by integration-pipeline):
+#   REST_API_CLOUD_DB_NAME      Cloud PostgreSQL database name
+#   REST_API_CLOUD_DB_USER      Cloud PostgreSQL username
+#   REST_API_CLOUD_DB_PASSWORD  Cloud PostgreSQL password
+#   REST_API_CLOUD_DB_PORT      Host port for release-time Postgres container / cloud port
+#   REST_API_CLOUD_DB_URL       JDBC URL for release tests / cloud deploy
+#                               e.g. jdbc:postgresql://localhost:<port>/<db>
+#                               or cloud host URL for deploy consumers
 #
+# Do not reuse REST_API_DB_* here — those are reserved for integration CI.
 # Never commit real values. Callers must use secrets: inherit (or map these secrets).
 # Secret values are never written to logs or step summaries.
 # =============================================================================
@@ -91,24 +94,26 @@ on:
         type: string
         default: ""
     secrets:
-      REST_API_DB_NAME:
-        description: PostgreSQL database name for the CI service container
+      # Cloud deployment DB credentials (not the same as CI REST_API_DB_*)
+      REST_API_CLOUD_DB_NAME:
+        description: Cloud deploy — PostgreSQL database name
         required: true
-      REST_API_DB_USER:
-        description: PostgreSQL username for the CI service container and Spring tests
+      REST_API_CLOUD_DB_USER:
+        description: Cloud deploy — PostgreSQL username
         required: true
-      REST_API_DB_PASSWORD:
-        description: PostgreSQL password for the CI service container and Spring tests
+      REST_API_CLOUD_DB_PASSWORD:
+        description: Cloud deploy — PostgreSQL password
         required: true
-      REST_API_DB_PORT:
+      REST_API_CLOUD_DB_PORT:
         description: >
-          Host port published for the CI PostgreSQL service container
-          (must match the port in REST_API_DB_URL)
+          Cloud deploy — host port for the release PostgreSQL service container
+          (must match the port in REST_API_CLOUD_DB_URL when testing locally)
         required: true
-      REST_API_DB_URL:
+      REST_API_CLOUD_DB_URL:
         description: >
-          Full JDBC URL for Spring tests (typically
-          jdbc:postgresql://localhost:<REST_API_DB_PORT>/<database>)
+          Cloud deploy — full JDBC URL for Spring tests / deploy
+          (e.g. jdbc:postgresql://localhost:<REST_API_CLOUD_DB_PORT>/<database>
+          or a cloud-hosted JDBC URL)
         required: true
 
 # One run per release tag or develop→master PR; do not cancel in-flight packaging
@@ -316,31 +321,31 @@ jobs:
         env:
           # Bind secrets into env so emptiness can be checked without printing values.
           # GitHub masks secret values in logs automatically.
-          REST_API_DB_NAME: ${{ secrets.REST_API_DB_NAME }}
-          REST_API_DB_USER: ${{ secrets.REST_API_DB_USER }}
-          REST_API_DB_PASSWORD: ${{ secrets.REST_API_DB_PASSWORD }}
-          REST_API_DB_PORT: ${{ secrets.REST_API_DB_PORT }}
-          REST_API_DB_URL: ${{ secrets.REST_API_DB_URL }}
+          REST_API_CLOUD_DB_NAME: ${{ secrets.REST_API_CLOUD_DB_NAME }}
+          REST_API_CLOUD_DB_USER: ${{ secrets.REST_API_CLOUD_DB_USER }}
+          REST_API_CLOUD_DB_PASSWORD: ${{ secrets.REST_API_CLOUD_DB_PASSWORD }}
+          REST_API_CLOUD_DB_PORT: ${{ secrets.REST_API_CLOUD_DB_PORT }}
+          REST_API_CLOUD_DB_URL: ${{ secrets.REST_API_CLOUD_DB_URL }}
         run: |
           set -euo pipefail
           missing=()
-          [ -n "${REST_API_DB_NAME}" ] || missing+=(REST_API_DB_NAME)
-          [ -n "${REST_API_DB_USER}" ] || missing+=(REST_API_DB_USER)
-          [ -n "${REST_API_DB_PASSWORD}" ] || missing+=(REST_API_DB_PASSWORD)
-          [ -n "${REST_API_DB_PORT}" ] || missing+=(REST_API_DB_PORT)
-          [ -n "${REST_API_DB_URL}" ] || missing+=(REST_API_DB_URL)
+          [ -n "${REST_API_CLOUD_DB_NAME}" ] || missing+=(REST_API_CLOUD_DB_NAME)
+          [ -n "${REST_API_CLOUD_DB_USER}" ] || missing+=(REST_API_CLOUD_DB_USER)
+          [ -n "${REST_API_CLOUD_DB_PASSWORD}" ] || missing+=(REST_API_CLOUD_DB_PASSWORD)
+          [ -n "${REST_API_CLOUD_DB_PORT}" ] || missing+=(REST_API_CLOUD_DB_PORT)
+          [ -n "${REST_API_CLOUD_DB_URL}" ] || missing+=(REST_API_CLOUD_DB_URL)
           if [ "${#missing[@]}" -gt 0 ]; then
-            echo "::error::Missing required GitHub Actions secrets: ${missing[*]}"
+            echo "::error::Missing required cloud deploy GitHub Actions secrets: ${missing[*]}"
             echo "Configure them under Settings → Secrets and variables → Actions."
-            echo "See header comments in rest-api-release.yml for secret names."
+            echo "Use REST_API_CLOUD_DB_* (not CI REST_API_DB_*). See release-pipeline.yml header."
             exit 1
           fi
           # Port must be numeric (do not echo the secret value)
-          if ! [[ "${REST_API_DB_PORT}" =~ ^[0-9]+$ ]]; then
-            echo "::error::REST_API_DB_PORT must be a numeric TCP port."
+          if ! [[ "${REST_API_CLOUD_DB_PORT}" =~ ^[0-9]+$ ]]; then
+            echo "::error::REST_API_CLOUD_DB_PORT must be a numeric TCP port."
             exit 1
           fi
-          echo "All required database secrets are present (values not logged)."
+          echo "All required cloud deploy database secrets are present (values not logged)."
 
       - name: Checkout calling repository (release / push head)
         if: needs.integration.outputs.checkout_mode == 'caller'
@@ -368,34 +373,34 @@ jobs:
         working-directory: ${{ env.APP_PATH }}
         run: chmod +x ./mvnw
 
-      - name: Start PostgreSQL (Docker; credentials and port from secrets)
+      - name: Start PostgreSQL (Docker; cloud deploy secrets)
         env:
-          REST_API_DB_NAME: ${{ secrets.REST_API_DB_NAME }}
-          REST_API_DB_USER: ${{ secrets.REST_API_DB_USER }}
-          REST_API_DB_PASSWORD: ${{ secrets.REST_API_DB_PASSWORD }}
-          REST_API_DB_PORT: ${{ secrets.REST_API_DB_PORT }}
+          REST_API_CLOUD_DB_NAME: ${{ secrets.REST_API_CLOUD_DB_NAME }}
+          REST_API_CLOUD_DB_USER: ${{ secrets.REST_API_CLOUD_DB_USER }}
+          REST_API_CLOUD_DB_PASSWORD: ${{ secrets.REST_API_CLOUD_DB_PASSWORD }}
+          REST_API_CLOUD_DB_PORT: ${{ secrets.REST_API_CLOUD_DB_PORT }}
         run: |
           set -euo pipefail
           docker rm -f rest-api-release-postgres >/dev/null 2>&1 || true
-          # Host port from secret → container listens on Postgres image default 5432
+          # Host port from cloud deploy secret → container listens on Postgres default 5432
           docker run -d --name rest-api-release-postgres \
-            -e POSTGRES_DB="${REST_API_DB_NAME}" \
-            -e POSTGRES_USER="${REST_API_DB_USER}" \
-            -e POSTGRES_PASSWORD="${REST_API_DB_PASSWORD}" \
-            -p "${REST_API_DB_PORT}:5432" \
+            -e POSTGRES_DB="${REST_API_CLOUD_DB_NAME}" \
+            -e POSTGRES_USER="${REST_API_CLOUD_DB_USER}" \
+            -e POSTGRES_PASSWORD="${REST_API_CLOUD_DB_PASSWORD}" \
+            -p "${REST_API_CLOUD_DB_PORT}:5432" \
             postgres:16-alpine
-          echo "PostgreSQL container started (port from REST_API_DB_PORT secret)."
+          echo "PostgreSQL container started (port from REST_API_CLOUD_DB_PORT secret)."
 
       - name: Wait for PostgreSQL
         env:
-          REST_API_DB_PORT: ${{ secrets.REST_API_DB_PORT }}
-          REST_API_DB_USER: ${{ secrets.REST_API_DB_USER }}
+          REST_API_CLOUD_DB_PORT: ${{ secrets.REST_API_CLOUD_DB_PORT }}
+          REST_API_CLOUD_DB_USER: ${{ secrets.REST_API_CLOUD_DB_USER }}
         run: |
           set -euo pipefail
-          PORT="${REST_API_DB_PORT}"
+          PORT="${REST_API_CLOUD_DB_PORT}"
           for i in $(seq 1 30); do
-            if docker exec rest-api-release-postgres pg_isready -U "${REST_API_DB_USER}" >/dev/null 2>&1; then
-              echo "PostgreSQL is accepting connections (port from REST_API_DB_PORT secret)"
+            if docker exec rest-api-release-postgres pg_isready -U "${REST_API_CLOUD_DB_USER}" >/dev/null 2>&1; then
+              echo "PostgreSQL is accepting connections (port from REST_API_CLOUD_DB_PORT secret)"
               exit 0
             fi
             if timeout 1 bash -c "cat < /dev/null > /dev/tcp/127.0.0.1/${PORT}" 2>/dev/null; then
@@ -418,9 +423,9 @@ jobs:
         env:
           # Spring Boot binds these env vars automatically — do not pass passwords
           # on the Maven CLI (would appear in process listings).
-          SPRING_DATASOURCE_URL: ${{ secrets.REST_API_DB_URL }}
-          SPRING_DATASOURCE_USERNAME: ${{ secrets.REST_API_DB_USER }}
-          SPRING_DATASOURCE_PASSWORD: ${{ secrets.REST_API_DB_PASSWORD }}
+          SPRING_DATASOURCE_URL: ${{ secrets.REST_API_CLOUD_DB_URL }}
+          SPRING_DATASOURCE_USERNAME: ${{ secrets.REST_API_CLOUD_DB_USER }}
+          SPRING_DATASOURCE_PASSWORD: ${{ secrets.REST_API_CLOUD_DB_PASSWORD }}
           SPRING_DATASOURCE_DRIVER_CLASS_NAME: ${{ env.SPRING_DATASOURCE_DRIVER_CLASS_NAME }}
           SPRING_JPA_DATABASE_PLATFORM: ${{ env.SPRING_JPA_DATABASE_PLATFORM }}
         run: |
