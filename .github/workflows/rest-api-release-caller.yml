@@ -6,78 +6,47 @@
 #   1. A GitHub Release is published, or
 #   2. A pull request is opened/updated from develop → master
 #
-# Feature-branch PR validation remains CI (rest-api-ci-caller.yml).
-#
 # Place both files in the Spring REST API repository:
 #
 #   .github/workflows/rest-api-release-caller.yml  ← this file (triggers)
 #   .github/workflows/release-pipeline.yml         ← reusable pipeline (called)
 #
-# When this runs
-# --------------
-#   A) GitHub → Releases → Publish release
-#      (or gh release create / API that publishes a release)
+# GitHub Environments + secrets
+# -----------------------------
+# This job uses environment: production so environment-scoped secrets work
+# with secrets: inherit for both:
 #
-#   B) Pull request whose head is develop and base is master
-#      (opened, synchronize, reopened, ready_for_review)
+#   develop → master PR
+#   release published
 #
-#   Does NOT run on:
-#     - push to master/develop alone
-#     - PRs from feature branches (even into master)
-#     - PRs into develop
-#     - tag push alone (publish a GitHub Release, or open develop→master PR)
+# Create Environment "production" (Settings → Environments) and add:
 #
-# Flow
-# ----
-#   feature → develop (CI) → PR develop→master (this release pipeline)
-#   and/or: publish GitHub Release → this pipeline
-#     → Integration → QC → Security → Packaging
-#   (GHCR push is skipped on pull_request; packaging still produces artifacts)
+#   REST_API_CLOUD_DB_NAME
+#   REST_API_CLOUD_DB_USER
+#   REST_API_CLOUD_DB_PASSWORD
+#   REST_API_CLOUD_DB_PORT
+#   REST_API_CLOUD_DB_URL
 #
-# Reusable workflow (same repository):
-#   ./.github/workflows/release-pipeline.yml
+# CI (rest-api-ci-caller) uses environment: integration with REST_API_DB_* instead.
 #
-# Job priority inside the reusable workflow
-# -----------------------------------------
-#   1. Integration           ← HIGHEST PRIORITY
-#   2. Quality Control       (needs Integration)
-#   2. Security Testing      (needs Integration)
-#   2. CodeQL Analysis       (needs Integration; GitHub CodeQL Java scan)
-#   3. Packaging             (needs Integration + QC + Security + CodeQL)
-#      → WAR artifact + Docker image (tar + GHCR push outside PRs)
-#
-# Setup
-# -----
-# 1. Copy into the REST API repo:
-#      .github/workflows/rest-api-release-caller.yml
-#      .github/workflows/release-pipeline.yml
-# 2. Configure repository secrets (Settings → Secrets and variables → Actions):
-#
-#    Cloud deploy secrets (release pipeline — distinct from CI):
-#      REST_API_CLOUD_DB_NAME
-#      REST_API_CLOUD_DB_USER
-#      REST_API_CLOUD_DB_PASSWORD
-#      REST_API_CLOUD_DB_PORT
-#      REST_API_CLOUD_DB_URL
-#
-#    CI secrets (integration pipeline only — do not use here):
-#      REST_API_DB_NAME / _USER / _PASSWORD / _PORT / _URL
-#
-#    Forwarded via secrets: inherit. Do not put secret values in this file.
+# Job priority
+# ------------
+#   1. Integration
+#   2. Quality Control (uses Environment cloud secrets)
+#   2. Security Testing
+#   2. CodeQL Analysis
+#   3. Packaging (needs QC + Security + CodeQL)
 # =============================================================================
 
 name: Release
 
 on:
-  # When a GitHub Release is published
   release:
     types: [published]
-  # PRs targeting master; job-level if further requires head branch == develop
   pull_request:
     branches: [master]
     types: [opened, synchronize, reopened, ready_for_review]
 
-# One run per release tag or develop→master PR; do not cancel in-flight packaging
 concurrency:
   group: rest-api-release-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: false
@@ -85,26 +54,22 @@ concurrency:
 permissions:
   contents: read
   pull-requests: read
-  # Forwarded to reusable workflow for github/codeql-action/upload-sarif@v2
   security-events: write
   actions: read
-  # Required so packaging can push the Docker image to GHCR (non-PR runs)
   packages: write
 
 jobs:
   release-pipeline:
     name: Release pipeline
-    # release published, OR pull request develop → master only
     if: >
       github.event_name == 'release' ||
       (github.event_name == 'pull_request' &&
        github.head_ref == 'develop' &&
        github.base_ref == 'master')
-    # Same-repo reusable workflow — both files live under .github/workflows/
+    # Production Environment for secrets: inherit (PR develop→master and published release)
+    environment: production
     uses: ./.github/workflows/release-pipeline.yml
-    # Forward cloud deploy secrets (REST_API_CLOUD_DB_*) into the reusable workflow.
-    # Required: REST_API_CLOUD_DB_NAME, REST_API_CLOUD_DB_USER, REST_API_CLOUD_DB_PASSWORD,
-    #           REST_API_CLOUD_DB_PORT, REST_API_CLOUD_DB_URL
+    with:
+      # Must match `environment:` so QC attaches the same Environment
+      github_environment: production
     secrets: inherit
-    # No inputs: checks out this REST API repo at github.sha
-    # (release tag commit, or PR merge commit for develop→master)

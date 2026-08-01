@@ -9,64 +9,40 @@
 #   .github/workflows/rest-api-ci-caller.yml      ← this file (triggers)
 #   .github/workflows/integration-pipeline.yml    ← reusable pipeline (called)
 #
-# GitHub Flow
-# -----------
-#   1. Branch from master/develop
-#   2. Open a pull request  → this workflow runs (Integration first)
-#   3. Review + green checks → merge into master/develop
-#   4. Release packaging    → rest-api-release-caller.yml on GitHub Release
-#                             publish, or on PR develop → master
-#
 # Reusable workflow (same repository):
 #   ./.github/workflows/integration-pipeline.yml
 #
-# Job priority (do not reorder conceptually)
-# -----------------------------------------
-#   1. Integration           ← HIGHEST PRIORITY (required status check)
-#   2. Quality Control       (needs Integration)
-#   2. Security Testing      (needs Integration; parallel with QC)
-#   2. CodeQL Analysis       (needs Integration; GitHub CodeQL Java scan)
-#   3. GitHub Flow CI Gate   (aggregate; requires Integration success first)
+# GitHub Environment + secrets
+# ----------------------------
+# This job uses environment: integration so environment-scoped secrets are
+# available and forwarded with secrets: inherit.
 #
-# Setup
-# -----
-# 1. Copy into the REST API repo:
-#      .github/workflows/rest-api-ci-caller.yml
-#      .github/workflows/integration-pipeline.yml
-# 2. Configure repository secrets (Settings → Secrets and variables → Actions):
+# Create Environment "integration" (Settings → Environments) and add secrets:
+#   REST_API_DB_NAME
+#   REST_API_DB_USER
+#   REST_API_DB_PASSWORD
+#   REST_API_DB_PORT
+#   REST_API_DB_URL
 #
-#      REST_API_DB_NAME
-#      REST_API_DB_USER
-#      REST_API_DB_PASSWORD
-#      REST_API_DB_PORT
-#      REST_API_DB_URL
-#
-#    Forwarded via secrets: inherit. Do not put values in this file.
-#
-# 3. Branch protection on master and develop (Settings → Branches):
-#      - Require a pull request before merging
-#      - Require status checks to pass before merging:
-#          * Integration              ← require this first / highest priority
-#          * Quality Control
-#          * Security Testing
-#          * CodeQL Analysis
-#          * GitHub Flow CI Gate      ← optional single aggregate check
-#      - Do not allow bypassing the above for administrators (recommended)
+# Job priority
+# ------------
+#   1. Integration           ← HIGHEST PRIORITY
+#   2. Quality Control       (uses Environment secrets for Postgres tests)
+#   2. Security Testing
+#   2. CodeQL Analysis
+#   3. GitHub Flow CI Gate
 # =============================================================================
 
 name: CI
 
 on:
-  # GitHub Flow: every PR targeting the allowed branches
   pull_request:
     branches: [develop]
     types: [opened, synchronize, reopened, ready_for_review]
-  # Re-validate after merge (and direct pushes to the allowed branches)
   push:
     branches: [develop]
   workflow_dispatch:
 
-# One run per PR (or branch); cancel superseded commits on the same PR
 concurrency:
   group: rest-api-ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
@@ -74,19 +50,16 @@ concurrency:
 permissions:
   contents: read
   pull-requests: read
-  # Forwarded to reusable workflow for github/codeql-action/upload-sarif@v2
   security-events: write
   actions: read
 
 jobs:
-  # Integration is the first / highest-priority job inside the reusable workflow
   integration-pipeline:
     name: Integration pipeline
-    # Same-repo reusable workflow — both files live under .github/workflows/
+    # Required: load Environment secrets, then pass them into the reusable workflow
+    environment: integration
     uses: ./.github/workflows/integration-pipeline.yml
-    # Forward repository secrets (REST_API_DB_*) into the reusable workflow.
-    # Required: REST_API_DB_NAME, REST_API_DB_USER, REST_API_DB_PASSWORD,
-    #           REST_API_DB_PORT, REST_API_DB_URL
+    with:
+      # Must match `environment:` above so QC can attach the same Environment
+      github_environment: integration
     secrets: inherit
-    # No inputs: checks out this REST API repo at github.sha
-    # (PR head merge commit on pull_request — correct for GitHub Flow PR CI).

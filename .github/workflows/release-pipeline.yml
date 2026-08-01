@@ -64,18 +64,19 @@
 # Configure under Settings → Secrets and variables → Actions on:
 #   - heavy-rental-spring-rest-api  (via rest-api-release-caller.yml + secrets: inherit)
 #
-# Cloud deployment secrets (distinct from CI REST_API_DB_* used by integration-pipeline):
-#   REST_API_CLOUD_DB_NAME      Cloud PostgreSQL database name
-#   REST_API_CLOUD_DB_USER      Cloud PostgreSQL username
-#   REST_API_CLOUD_DB_PASSWORD  Cloud PostgreSQL password
-#   REST_API_CLOUD_DB_PORT      Host port for release-time Postgres container / cloud port
-#   REST_API_CLOUD_DB_URL       JDBC URL for release tests / cloud deploy
-#                               e.g. jdbc:postgresql://localhost:<port>/<db>
-#                               or cloud host URL for deploy consumers
+# Cloud deployment secrets (distinct from CI REST_API_DB_* used by integration-pipeline).
+# Prefer GitHub Environments (Settings → Environments). Caller sets `environment:`
+# and secrets: inherit so environment-scoped secrets are visible.
 #
-# Do not reuse REST_API_DB_* here — those are reserved for integration CI.
-# Never commit real values. Callers must use secrets: inherit (or map these secrets).
-# Secret values are never written to logs or step summaries.
+# Environment: production  (develop → master PR and published GitHub Release)
+#   REST_API_CLOUD_DB_NAME
+#   REST_API_CLOUD_DB_USER
+#   REST_API_CLOUD_DB_PASSWORD
+#   REST_API_CLOUD_DB_PORT
+#   REST_API_CLOUD_DB_URL
+#
+# Do not reuse REST_API_DB_* here — those are for integration CI (env: integration).
+# Never commit real values.
 # =============================================================================
 
 name: REST API Release CI
@@ -99,6 +100,14 @@ on:
         required: false
         type: string
         default: ""
+      github_environment:
+        description: >
+          GitHub Environment name for environment-scoped cloud secrets.
+          Release uses production (develop→master PR and published release).
+          Must match the caller's `environment:`.
+        required: false
+        type: string
+        default: production
     secrets:
       # Cloud deployment DB credentials (not the same as CI REST_API_DB_*)
       REST_API_CLOUD_DB_NAME:
@@ -318,6 +327,8 @@ jobs:
     runs-on: ubuntu-latest
     # Highest-priority gate: never start QC unless Integration passed
     needs: [integration]
+    # Load environment-scoped secrets (must match caller environment + secrets: inherit)
+    environment: ${{ inputs.github_environment }}
     timeout-minutes: 30
     # PostgreSQL is started with Docker in a step (not jobs.services) so host port,
     # credentials, and JDBC URL can all come from GitHub Secrets. The services.*
@@ -325,8 +336,9 @@ jobs:
     steps:
       - name: Verify required database secrets are configured
         env:
+          GITHUB_ENVIRONMENT: ${{ inputs.github_environment }}
           # Bind secrets into env so emptiness can be checked without printing values.
-          # GitHub masks secret values in logs automatically.
+          # Values come from the selected GitHub Environment when environment: is set.
           REST_API_CLOUD_DB_NAME: ${{ secrets.REST_API_CLOUD_DB_NAME }}
           REST_API_CLOUD_DB_USER: ${{ secrets.REST_API_CLOUD_DB_USER }}
           REST_API_CLOUD_DB_PASSWORD: ${{ secrets.REST_API_CLOUD_DB_PASSWORD }}
@@ -334,6 +346,7 @@ jobs:
           REST_API_CLOUD_DB_URL: ${{ secrets.REST_API_CLOUD_DB_URL }}
         run: |
           set -euo pipefail
+          echo "Using GitHub Environment for cloud secrets: ${GITHUB_ENVIRONMENT}"
           missing=()
           [ -n "${REST_API_CLOUD_DB_NAME}" ] || missing+=(REST_API_CLOUD_DB_NAME)
           [ -n "${REST_API_CLOUD_DB_USER}" ] || missing+=(REST_API_CLOUD_DB_USER)
@@ -341,17 +354,17 @@ jobs:
           [ -n "${REST_API_CLOUD_DB_PORT}" ] || missing+=(REST_API_CLOUD_DB_PORT)
           [ -n "${REST_API_CLOUD_DB_URL}" ] || missing+=(REST_API_CLOUD_DB_URL)
           if [ "${#missing[@]}" -gt 0 ]; then
-            echo "::error::Missing required cloud deploy GitHub Actions secrets: ${missing[*]}"
-            echo "Configure them under Settings → Secrets and variables → Actions."
-            echo "Use REST_API_CLOUD_DB_* (not CI REST_API_DB_*). See release-pipeline.yml header."
+            echo "::error::Missing required secrets for environment '${GITHUB_ENVIRONMENT}': ${missing[*]}"
+            echo "Configure them under Settings → Environments → ${GITHUB_ENVIRONMENT} → Environment secrets."
+            echo "Caller must set environment: ${GITHUB_ENVIRONMENT} and secrets: inherit."
+            echo "Use REST_API_CLOUD_DB_* (not CI REST_API_DB_*)."
             exit 1
           fi
-          # Port must be numeric (do not echo the secret value)
           if ! [[ "${REST_API_CLOUD_DB_PORT}" =~ ^[0-9]+$ ]]; then
             echo "::error::REST_API_CLOUD_DB_PORT must be a numeric TCP port."
             exit 1
           fi
-          echo "All required cloud deploy database secrets are present (values not logged)."
+          echo "All required cloud secrets are present for environment '${GITHUB_ENVIRONMENT}' (values not logged)."
 
       - name: Checkout calling repository (release / push head)
         if: needs.integration.outputs.checkout_mode == 'caller'
