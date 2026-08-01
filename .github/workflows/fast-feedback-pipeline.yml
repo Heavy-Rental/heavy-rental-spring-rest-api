@@ -1,0 +1,232 @@
+# =============================================================================
+# Heavy Rental Spring REST API — Fast Feedback CI Pipeline (reusable)
+# =============================================================================
+# Purpose: quick Integration-only check (same steps as the Integration stage of
+# integration-pipeline.yml). No Quality Control, Security, CodeQL, or packaging.
+#
+# Stages:
+#   1. Integration only — checkout, Java 21 + Maven, resolve deps, layout
+#
+# Use this for early signal on PRs / pushes. Full gates remain in:
+#   integration-pipeline.yml  (rest-api-ci-caller.yml)
+#   release-pipeline.yml      (rest-api-release-caller.yml)
+#
+# How the REST API uses this
+# --------------------------
+# Install both files into the Spring REST API repository:
+#
+#   .github/workflows/fast-feedback-pipeline.yml          ← this file (reusable only)
+#   .github/workflows/rest-api-fast-feedback-caller.yml    ← sole allowed entry point
+#
+# This file exposes only workflow_call (no push / PR / workflow_dispatch).
+# A gate job rejects any caller other than rest-api-fast-feedback-caller.yml.
+#
+# The caller invokes this workflow with:
+#   uses: ./.github/workflows/fast-feedback-pipeline.yml
+#
+# Also mirrored in the pipeline-development repo for discovery/testing:
+#   .github/workflows/rest-api-fast-feedback.yml
+#
+# No database secrets required (Integration stage does not start Postgres).
+# =============================================================================
+
+name: REST API Fast Feedback CI
+
+# Reusable only — no push, pull_request, or workflow_dispatch.
+# Sole allowed caller: .github/workflows/rest-api-fast-feedback-caller.yml
+on:
+  workflow_call:
+    inputs:
+      app_repository:
+        description: >
+          Override application repository (owner/name). Leave empty to use the
+          calling repository (required for PR checks on the REST API).
+        required: false
+        type: string
+        default: ""
+      app_ref:
+        description: >
+          Override git ref (branch/tag/SHA). Leave empty to use the calling
+          workflow's commit (github.sha) — correct for pull_request events.
+        required: false
+        type: string
+        default: ""
+
+# Fast feedback: cancel superseded runs quickly
+concurrency:
+  group: rest-api-fast-feedback-${{ github.workflow }}-${{ github.repository }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+  actions: read
+
+env:
+  JAVA_VERSION: "21"
+  JAVA_DISTRIBUTION: temurin
+  APP_PATH: app
+  DEFAULT_APP_REPOSITORY: SA62-team1/heavy-rental-spring-rest-api
+  DEFAULT_APP_REF: develop
+  MAVEN_OPTS: "-Dhttps.protocols=TLSv1.2 -Dmaven.wagon.http.retryHandler.count=3"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 0. Caller gate — only rest-api-fast-feedback-caller.yml may invoke this
+  # ---------------------------------------------------------------------------
+  assert-caller:
+    name: Assert caller
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Allow only rest-api-fast-feedback-caller.yml
+        env:
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+        run: |
+          set -euo pipefail
+          echo "github.workflow_ref=${WORKFLOW_REF}"
+          echo "github.event_name=${{ github.event_name }}"
+          echo "github.workflow=${{ github.workflow }}"
+          case "${WORKFLOW_REF}" in
+            */.github/workflows/rest-api-fast-feedback-caller.yml@*)
+              echo "Allowed caller: rest-api-fast-feedback-caller.yml"
+              {
+                echo "### Caller gate"
+                echo ""
+                echo "Invoked by \`rest-api-fast-feedback-caller.yml\` — OK."
+              } >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            *)
+              echo "::error::fast-feedback-pipeline.yml may only be invoked by .github/workflows/rest-api-fast-feedback-caller.yml (got: ${WORKFLOW_REF})"
+              exit 1
+              ;;
+          esac
+
+  # ---------------------------------------------------------------------------
+  # 1. Integration — exact same checks as integration-pipeline.yml Integration
+  #    (checkout, Java, Maven deps, project layout / toolchain)
+  # ---------------------------------------------------------------------------
+  integration:
+    name: Integration
+    runs-on: ubuntu-latest
+    needs: [assert-caller]
+    timeout-minutes: 20
+    outputs:
+      app_repository: ${{ steps.meta.outputs.app_repository }}
+      app_ref: ${{ steps.meta.outputs.app_ref }}
+      checkout_mode: ${{ steps.meta.outputs.checkout_mode }}
+    steps:
+      - name: Resolve application source (same-repo caller vs remote override)
+        id: meta
+        run: |
+          set -euo pipefail
+          # This workflow is workflow_call-only; github.* reflects the caller event.
+          EVENT="${{ github.event_name }}"
+          INPUT_REPO="${{ inputs.app_repository }}"
+          INPUT_REF="${{ inputs.app_ref }}"
+
+          if [ -n "$INPUT_REPO" ] && [ "$INPUT_REPO" != "${{ github.repository }}" ]; then
+            APP_REPO="$INPUT_REPO"
+            APP_REF="${INPUT_REF:-${{ env.DEFAULT_APP_REF }}}"
+            MODE=remote
+          else
+            # rest-api-fast-feedback-caller.yml in the same repo: use this commit
+            APP_REPO="${{ github.repository }}"
+            APP_REF="${INPUT_REF:-${{ github.sha }}}"
+            MODE=caller
+          fi
+
+          echo "app_repository=$APP_REPO" >> "$GITHUB_OUTPUT"
+          echo "app_ref=$APP_REF" >> "$GITHUB_OUTPUT"
+          echo "checkout_mode=$MODE" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Source resolution (fast feedback)"
+            echo ""
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Event | \`$EVENT\` |"
+            echo "| Mode | \`$MODE\` |"
+            echo "| Repository | \`$APP_REPO\` |"
+            echo "| Ref | \`$APP_REF\` |"
+            echo "| Scope | Integration stage only |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "Fast feedback integrating: $APP_REPO @ $APP_REF (mode=$MODE)"
+
+      - name: Checkout calling repository (PR / push head)
+        if: steps.meta.outputs.checkout_mode == 'caller'
+        uses: actions/checkout@v4
+        with:
+          path: ${{ env.APP_PATH }}
+
+      - name: Checkout remote application repository
+        if: steps.meta.outputs.checkout_mode == 'remote'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.meta.outputs.app_repository }}
+          ref: ${{ steps.meta.outputs.app_ref }}
+          path: ${{ env.APP_PATH }}
+
+      - name: Setup Java ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: ${{ env.JAVA_DISTRIBUTION }}
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+          cache-dependency-path: ${{ env.APP_PATH }}/pom.xml
+
+      - name: Ensure Maven Wrapper is executable
+        working-directory: ${{ env.APP_PATH }}
+        run: |
+          set -euo pipefail
+          if [ -f ./mvnw ]; then
+            chmod +x ./mvnw
+            echo "Using Maven Wrapper (./mvnw)"
+          else
+            echo "::error::mvnw not found — this pipeline expects the Maven Wrapper in the REST API repo."
+            exit 1
+          fi
+
+      - name: Resolve Maven dependencies
+        working-directory: ${{ env.APP_PATH }}
+        run: |
+          set -euo pipefail
+          ./mvnw -B -ntp dependency:resolve dependency:resolve-plugins
+
+      - name: Verify project layout and toolchain
+        working-directory: ${{ env.APP_PATH }}
+        run: |
+          set -euo pipefail
+          echo "==> Java / Maven versions"
+          java -version
+          ./mvnw -v
+          echo "==> Required files"
+          test -f pom.xml
+          test -f mvnw
+          test -d src/main/java
+          test -d src/main/resources
+          echo "==> Packaging from pom.xml"
+          PACKAGING="$(./mvnw -B -q -DforceStdout help:evaluate -Dexpression=project.packaging)"
+          ARTIFACT="$(./mvnw -B -q -DforceStdout help:evaluate -Dexpression=project.artifactId)"
+          VERSION="$(./mvnw -B -q -DforceStdout help:evaluate -Dexpression=project.version)"
+          JAVA_PROP="$(./mvnw -B -q -DforceStdout help:evaluate -Dexpression=java.version || true)"
+          echo "artifactId=$ARTIFACT version=$VERSION packaging=$PACKAGING java.version=$JAVA_PROP"
+          {
+            echo "### Integration checks (fast feedback)"
+            echo ""
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Artifact | \`$ARTIFACT\` |"
+            echo "| Version | \`$VERSION\` |"
+            echo "| Packaging | \`$PACKAGING\` |"
+            echo "| Java (pom) | \`$JAVA_PROP\` |"
+            echo "| Runner Java | \`${{ env.JAVA_VERSION }}\` (${{ env.JAVA_DISTRIBUTION }}) |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "Fast feedback integration checks passed."
+
+      - name: Upload Maven project fingerprint
+        uses: actions/upload-artifact@v4
+        with:
+          name: fast-feedback-integration-metadata
+          path: |
+            ${{ env.APP_PATH }}/pom.xml
+          retention-days: 3
