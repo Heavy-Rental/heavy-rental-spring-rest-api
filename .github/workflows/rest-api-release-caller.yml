@@ -42,7 +42,8 @@
 #   1. Integration           ← HIGHEST PRIORITY
 #   2. Quality Control       (needs Integration)
 #   2. Security Testing      (needs Integration)
-#   3. Packaging             (needs Integration + QC + Security)
+#   2. CodeQL Analysis       (needs Integration; GitHub CodeQL Java scan)
+#   3. Packaging             (needs Integration + QC + Security + CodeQL)
 #      → WAR artifact + Docker image (tar + GHCR push outside PRs)
 #
 # Setup

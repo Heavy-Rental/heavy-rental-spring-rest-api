@@ -5,9 +5,15 @@
 #   1. Integration      (HIGHEST) checkout, Java 21 + Maven, resolve deps, layout
 #   2. Quality Control  needs Integration — compile, tests (Postgres), package WAR
 #   3. Security Testing needs Integration — SAST (Semgrep) + SCA/FS (Trivy)
-#      + github/codeql-action/upload-sarif@v2 → GitHub Code Scanning
-#   4. Packaging        needs Integration + QC + Security — versioned WAR +
+#   4. CodeQL Analysis  needs Integration — GitHub CodeQL (Java) security + quality
+#   5. Packaging        needs Integration + QC + Security + CodeQL — versioned WAR +
 #                       Docker image (tar artifact; push to GHCR when not a PR)
+#
+# Security report format (standard): SARIF 2.1.0
+#   - Semgrep → semgrep.sarif
+#   - Trivy FS → trivy-fs.sarif
+#   - CodeQL → GitHub Code Scanning (native SARIF via analyze)
+# Human-readable console output is for gates/logs only, not the report standard.
 #
 # GitHub Flow (https://docs.github.com/en/get-started/using-github/github-flow)
 # --------------------------------------------------------------------------
@@ -520,7 +526,7 @@ jobs:
       - name: Create security reports directory
         run: mkdir -p "${{ github.workspace }}/security-reports"
 
-      # --- SAST: static analysis of application source (Java / Spring) ---
+      # --- SAST: static analysis (standard report format: SARIF) ---
       - name: Setup Python (Semgrep)
         uses: actions/setup-python@v5
         with:
@@ -529,22 +535,12 @@ jobs:
       - name: Install Semgrep
         run: pip install --quiet semgrep
 
-      - name: SAST — Semgrep (Java / Spring / OWASP)
+      - name: SAST — Semgrep (Java / Spring / OWASP) → SARIF
         working-directory: ${{ env.APP_PATH }}
         run: |
           set -euo pipefail
           REPORT_DIR="${{ github.workspace }}/security-reports"
-          # Human-readable report (always written; does not gate the step alone)
-          semgrep scan \
-            --config=p/java \
-            --config=p/spring \
-            --config=p/owasp-top-ten \
-            --config=p/security-audit \
-            --metrics=off \
-            --text \
-            --output="${REPORT_DIR}/semgrep.txt" \
-            . || true
-          # SARIF for dashboards / code scanning consumers
+          # Standard security report format: SARIF 2.1.0
           semgrep scan \
             --config=p/java \
             --config=p/spring \
@@ -554,7 +550,7 @@ jobs:
             --sarif \
             --output="${REPORT_DIR}/semgrep.sarif" \
             . || true
-          # Gate CI: fail on ERROR findings (WARNING/INFO still reported above)
+          # Gate CI: fail on ERROR findings (console only; report remains SARIF)
           echo "==> SAST gate (ERROR severity)"
           semgrep scan \
             --config=p/java \
@@ -566,13 +562,9 @@ jobs:
             --error \
             --text \
             .
-          echo "SAST (Semgrep) passed — no ERROR-level findings."
-          if [ -f "${REPORT_DIR}/semgrep.txt" ]; then
-            echo "==> Semgrep report (excerpt)"
-            head -n 100 "${REPORT_DIR}/semgrep.txt" || true
-          fi
+          echo "SAST (Semgrep) passed — SARIF report: security-reports/semgrep.sarif"
 
-      # --- SCA + filesystem: dependency and secret/vuln scan via Trivy ---
+      # --- SCA + filesystem: dependency and secret/vuln scan via Trivy (SARIF) ---
       - name: Setup Java ${{ env.JAVA_VERSION }} (for dependency resolution before scan)
         uses: actions/setup-java@v4
         with:
@@ -591,18 +583,18 @@ jobs:
             -DoutputDirectory=target/dependency || \
           ./mvnw -B -ntp -DskipTests dependency:resolve
 
-      - name: Trivy filesystem vulnerability scan (SCA + FS)
+      - name: Trivy filesystem scan (SARIF)
         uses: aquasecurity/trivy-action@0.28.0
         with:
           scan-type: fs
           scan-ref: ${{ env.APP_PATH }}
           severity: HIGH,CRITICAL
           exit-code: "1"
-          format: table
-          output: security-reports/trivy-fs.txt
+          format: sarif
+          output: security-reports/trivy-fs.sarif
           ignore-unfixed: true
 
-      - name: Trivy filesystem scan (SARIF artifact)
+      - name: Trivy filesystem scan (console table)
         if: always()
         uses: aquasecurity/trivy-action@0.28.0
         with:
@@ -610,42 +602,111 @@ jobs:
           scan-ref: ${{ env.APP_PATH }}
           severity: HIGH,CRITICAL
           exit-code: "0"
-          format: sarif
-          output: security-reports/trivy-fs.sarif
+          format: table
           ignore-unfixed: true
 
-      # --- GitHub Code Scanning: publish SARIF (Semgrep + Trivy) ---
+      # --- Publish SARIF security reports to GitHub Code Scanning ---
       - name: Upload Semgrep SARIF to Code Scanning
         if: always() && hashFiles('security-reports/semgrep.sarif') != ''
-        uses: github/codeql-action/upload-sarif@v2
+        uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: security-reports/semgrep.sarif
-          # App is checked out under APP_PATH so path mapping matches the scan root
           checkout_path: ${{ env.APP_PATH }}
           category: rest-api-release-semgrep
-        # Do not fail the Security job if Code Scanning is unavailable (e.g. GHAS off)
         continue-on-error: true
 
       - name: Upload Trivy SARIF to Code Scanning
         if: always() && hashFiles('security-reports/trivy-fs.sarif') != ''
-        uses: github/codeql-action/upload-sarif@v2
+        uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: security-reports/trivy-fs.sarif
           checkout_path: ${{ env.APP_PATH }}
           category: rest-api-release-trivy-fs
         continue-on-error: true
 
-      - name: Upload security reports
+      - name: Upload security reports (SARIF)
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: release-security-reports
-          path: security-reports/
+          name: release-security-reports-sarif
+          path: |
+            security-reports/*.sarif
           retention-days: 30
           if-no-files-found: warn
 
   # ---------------------------------------------------------------------------
-  # 4. Packaging — production WAR + Docker image for deploy pipelines
+  # 4. CodeQL analysis — GitHub CodeQL for Java (security + quality queries)
+  #    Runs after Integration; parallel with QC and Semgrep/Trivy Security.
+  #    Results appear under the repository Security → Code scanning alerts.
+  # ---------------------------------------------------------------------------
+  codeql:
+    name: CodeQL Analysis
+    runs-on: ubuntu-latest
+    needs: [integration]
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    steps:
+      - name: Checkout calling repository (release / push head)
+        if: needs.integration.outputs.checkout_mode == 'caller'
+        uses: actions/checkout@v4
+        with:
+          path: ${{ env.APP_PATH }}
+
+      - name: Checkout remote application repository
+        if: needs.integration.outputs.checkout_mode == 'remote'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ needs.integration.outputs.app_repository }}
+          ref: ${{ needs.integration.outputs.app_ref }}
+          path: ${{ env.APP_PATH }}
+
+      - name: Initialize CodeQL (Java)
+        uses: github/codeql-action/init@v3
+        with:
+          languages: java-kotlin
+          source-root: ${{ env.APP_PATH }}
+          # security-and-quality: security rules + maintainability / reliability
+          queries: security-and-quality
+
+      - name: Setup Java ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: ${{ env.JAVA_DISTRIBUTION }}
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+          cache-dependency-path: ${{ env.APP_PATH }}/pom.xml
+
+      - name: Build for CodeQL (Maven; skip tests)
+        working-directory: ${{ env.APP_PATH }}
+        run: |
+          set -euo pipefail
+          chmod +x ./mvnw
+          # CodeQL instruments this compile/package build for analysis
+          ./mvnw -B -ntp -DskipTests package
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "rest-api-release-codeql-java"
+
+      - name: CodeQL summary
+        if: always()
+        run: |
+          {
+            echo "### CodeQL Analysis"
+            echo ""
+            echo "Language: Java/Kotlin"
+            echo "Query suite: security-and-quality"
+            echo "Category: rest-api-release-codeql-java"
+            echo ""
+            echo "View results: repository → Security → Code scanning alerts"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------------
+  # 5. Packaging — production WAR + Docker image for deploy pipelines
   # ---------------------------------------------------------------------------
   # Spring Boot WAR deploy model:
   #   - build: ./mvnw -B -ntp -DskipTests package
@@ -660,8 +721,8 @@ jobs:
   packaging:
     name: Packaging
     runs-on: ubuntu-latest
-    # Integration listed first: highest-priority dependency before QC/Security/package
-    needs: [integration, quality-control, security-testing]
+    # Integration first; packaging waits for QC, Security, and CodeQL
+    needs: [integration, quality-control, security-testing, codeql]
     timeout-minutes: 30
     steps:
       - name: Checkout calling repository (release / push head)
