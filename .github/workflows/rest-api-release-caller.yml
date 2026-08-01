@@ -6,34 +6,20 @@
 #   1. A GitHub Release is published, or
 #   2. A pull request is opened/updated from develop → master
 #
-# Place both files in the Spring REST API repository:
+# Secrets (in heavy-rental-spring-rest-api)
+# ----------------------------------------
+# Do NOT set `environment:` on this caller job (invalid with uses:).
+# QC inside the reusable workflow uses environment: production.
 #
-#   .github/workflows/rest-api-release-caller.yml  ← this file (triggers)
-#   .github/workflows/release-pipeline.yml         ← reusable pipeline (called)
-#
-# GitHub Environments + secrets
-# -----------------------------
-# Do NOT set `environment:` on this caller job (GitHub rejects environment + uses
-# together). The reusable workflow's Quality Control job sets:
-#   environment: production
-# so Environment secrets are loaded there (PR develop→master and published release).
-#
-# Create Environment "production" (Settings → Environments) and add:
+# Add secrets (Environment "production" and/or Repository secrets):
 #   REST_API_CLOUD_DB_NAME
 #   REST_API_CLOUD_DB_USER
 #   REST_API_CLOUD_DB_PASSWORD
 #   REST_API_CLOUD_DB_PORT
 #   REST_API_CLOUD_DB_URL
 #
-# CI (rest-api-ci-caller) uses github_environment: integration with REST_API_DB_*.
-#
-# Job priority
-# ------------
-#   1. Integration
-#   2. Quality Control (uses production Environment cloud secrets)
-#   2. Security Testing
-#   2. CodeQL Analysis
-#   3. Packaging (needs QC + Security + CodeQL)
+# secrets: inherit forwards repository secrets; Environment secrets load on QC
+# via environment: production (PR develop→master and published release).
 # =============================================================================
 
 name: Release
@@ -57,8 +43,6 @@ permissions:
   packages: write
 
 jobs:
-  # Reusable-workflow call jobs may only use: uses, with, secrets, needs, if, ...
-  # NOT environment or runs-on (those belong on jobs inside the reusable workflow).
   release-pipeline:
     name: Release pipeline
     if: >
@@ -68,6 +52,5 @@ jobs:
        github.base_ref == 'master')
     uses: ./.github/workflows/release-pipeline.yml
     with:
-      # QC job in the reusable workflow uses this as `environment:`
-      # production for both develop→master PR and published release
       github_environment: production
+    secrets: inherit

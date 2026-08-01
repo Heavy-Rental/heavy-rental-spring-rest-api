@@ -52,20 +52,26 @@
 #
 # Required GitHub Actions secrets (no credentials in this YAML)
 # -------------------------------------------------------------
-# Prefer GitHub Environments (Settings → Environments).
-# Quality Control sets environment: ${{ inputs.github_environment }} (default
-# integration) and reads secrets from that Environment. Do not put environment:
-# on the caller job that uses: this workflow (invalid with uses:).
+# Secrets (configure in the APPLICATION repo: heavy-rental-spring-rest-api)
+# -----------------------------------------------------------------------
+# Quality Control uses environment: integration (hardcoded) and also accepts
+# secrets passed from the caller via secrets: inherit.
 #
-# Environment: integration  (default for this CI pipeline)
-#   REST_API_DB_NAME      PostgreSQL database name (service POSTGRES_DB)
-#   REST_API_DB_USER      PostgreSQL username    (service POSTGRES_USER + Spring)
-#   REST_API_DB_PASSWORD  PostgreSQL password    (service POSTGRES_PASSWORD + Spring)
-#   REST_API_DB_PORT      Host port mapped to the Postgres service (e.g. 5432)
-#   REST_API_DB_URL       JDBC URL for tests; port must match REST_API_DB_PORT
-#                         e.g. jdbc:postgresql://localhost:<port>/<db>
+# Recommended (either works; Environment is preferred for isolation):
 #
-# Never commit real values. Secret values are never written to logs or step summaries.
+#   A) Settings → Environments → integration → Environment secrets
+#   B) Settings → Secrets and variables → Actions → Repository secrets
+#
+# Names (exact match, case-sensitive):
+#   REST_API_DB_NAME
+#   REST_API_DB_USER
+#   REST_API_DB_PASSWORD
+#   REST_API_DB_PORT
+#   REST_API_DB_URL
+#
+# Caller must use: secrets: inherit
+# Do not set environment: on the caller job that uses: this workflow.
+# Never commit real values.
 # =============================================================================
 
 name: REST API CI
@@ -91,16 +97,29 @@ on:
         default: ""
       github_environment:
         description: >
-          GitHub Environment name used on the Quality Control job for
-          environment-scoped secrets (e.g. integration). Secrets are read
-          via the job's `environment:` key — do not set environment on the
-          caller job that uses: this workflow.
+          GitHub Environment name for the Quality Control job (default integration).
+          Used for protection rules and Environment secrets.
         required: false
         type: string
         default: integration
-    # DB secrets are loaded from the GitHub Environment on the QC job
-    # (environment: ${{ inputs.github_environment }}). They are not required
-    # as workflow_call secrets (caller cannot use environment: + uses:).
+    secrets:
+      # Optional at call-time: pass via secrets: inherit from repo secrets, and/or
+      # load from Environment secrets on the QC job (environment: integration).
+      REST_API_DB_NAME:
+        description: PostgreSQL database name
+        required: false
+      REST_API_DB_USER:
+        description: PostgreSQL username
+        required: false
+      REST_API_DB_PASSWORD:
+        description: PostgreSQL password
+        required: false
+      REST_API_DB_PORT:
+        description: Host port for CI Postgres container
+        required: false
+      REST_API_DB_URL:
+        description: JDBC URL for Spring tests
+        required: false
 
 # GitHub Flow: one concurrent run per PR (or branch); newer pushes cancel stale runs
 concurrency:
@@ -295,21 +314,16 @@ jobs:
   quality-control:
     name: Quality Control
     runs-on: ubuntu-latest
-    # Highest-priority gate: never start QC unless Integration passed
     needs: [integration]
-    # Load environment-scoped secrets for this job (not on the caller uses: job)
-    environment: ${{ inputs.github_environment }}
+    # Hardcoded Environment name (more reliable than dynamic expressions for secrets).
+    # Loads Environment secrets + any secrets passed via secrets: inherit.
+    environment: integration
     timeout-minutes: 30
-    # PostgreSQL is started with Docker in a step (not jobs.services) so host port,
-    # credentials, and JDBC URL can all come from GitHub Secrets. The services.*
-    # ports field does not allow the secrets context.
     steps:
       - name: Verify required database secrets are configured
         env:
-          GITHUB_ENVIRONMENT: ${{ inputs.github_environment }}
-          # Bind secrets into env so emptiness can be checked without printing values.
-          # GitHub masks secret values in logs automatically.
-          # Values come from GitHub Environment secrets when environment: is set.
+          # Prefer Environment secrets (job environment: integration) and/or
+          # repository secrets passed with secrets: inherit from the caller.
           REST_API_DB_NAME: ${{ secrets.REST_API_DB_NAME }}
           REST_API_DB_USER: ${{ secrets.REST_API_DB_USER }}
           REST_API_DB_PASSWORD: ${{ secrets.REST_API_DB_PASSWORD }}
@@ -317,7 +331,7 @@ jobs:
           REST_API_DB_URL: ${{ secrets.REST_API_DB_URL }}
         run: |
           set -euo pipefail
-          echo "Using GitHub Environment for secrets: ${GITHUB_ENVIRONMENT}"
+          echo "Quality Control secrets source: GitHub Environment 'integration' and/or repository secrets (via secrets: inherit)."
           missing=()
           [ -n "${REST_API_DB_NAME}" ] || missing+=(REST_API_DB_NAME)
           [ -n "${REST_API_DB_USER}" ] || missing+=(REST_API_DB_USER)
@@ -325,17 +339,25 @@ jobs:
           [ -n "${REST_API_DB_PORT}" ] || missing+=(REST_API_DB_PORT)
           [ -n "${REST_API_DB_URL}" ] || missing+=(REST_API_DB_URL)
           if [ "${#missing[@]}" -gt 0 ]; then
-            echo "::error::Missing required secrets for environment '${GITHUB_ENVIRONMENT}': ${missing[*]}"
-            echo "Configure them under Settings → Environments → ${GITHUB_ENVIRONMENT} → Environment secrets."
-            echo "This job uses environment: ${GITHUB_ENVIRONMENT} (set via github_environment input)."
+            echo "::error::Missing required secrets: ${missing[*]}"
+            echo ""
+            echo "Configure in the APPLICATION repository (where this workflow runs), not pipeline-development:"
+            echo "  1) Settings → Environments → integration → Environment secrets"
+            echo "     OR"
+            echo "  2) Settings → Secrets and variables → Actions → Repository secrets"
+            echo ""
+            echo "Required names (exact, case-sensitive):"
+            echo "  REST_API_DB_NAME, REST_API_DB_USER, REST_API_DB_PASSWORD, REST_API_DB_PORT, REST_API_DB_URL"
+            echo ""
+            echo "Caller must include: secrets: inherit"
+            echo "This job uses: environment: integration"
             exit 1
           fi
-          # Port must be numeric (do not echo the secret value)
           if ! [[ "${REST_API_DB_PORT}" =~ ^[0-9]+$ ]]; then
             echo "::error::REST_API_DB_PORT must be a numeric TCP port."
             exit 1
           fi
-          echo "All required database secrets are present for environment '${GITHUB_ENVIRONMENT}' (values not logged)."
+          echo "All required database secrets are present (values not logged)."
 
       - name: Checkout calling repository (PR / push head)
         if: needs.integration.outputs.checkout_mode == 'caller'
