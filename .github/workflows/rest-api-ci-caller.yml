@@ -14,8 +14,10 @@
 #
 # GitHub Environment + secrets
 # ----------------------------
-# This job uses environment: integration so environment-scoped secrets are
-# available and forwarded with secrets: inherit.
+# Do NOT set `environment:` on this caller job (GitHub rejects environment + uses
+# together). The reusable workflow's Quality Control job sets:
+#   environment: integration
+# so Environment secrets are loaded there.
 #
 # Create Environment "integration" (Settings → Environments) and add secrets:
 #   REST_API_DB_NAME
@@ -54,12 +56,11 @@ permissions:
   actions: read
 
 jobs:
+  # Reusable-workflow call jobs may only use: uses, with, secrets, needs, if, ...
+  # NOT environment or runs-on (those belong on jobs inside the reusable workflow).
   integration-pipeline:
     name: Integration pipeline
-    # Required: load Environment secrets, then pass them into the reusable workflow
-    environment: integration
     uses: ./.github/workflows/integration-pipeline.yml
     with:
-      # Must match `environment:` above so QC can attach the same Environment
+      # QC job in the reusable workflow uses this as `environment:`
       github_environment: integration
-    secrets: inherit
