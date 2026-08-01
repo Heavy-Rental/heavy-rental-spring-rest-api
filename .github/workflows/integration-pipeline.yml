@@ -27,8 +27,11 @@
 # --------------------------
 # Install both files into the Spring REST API repository:
 #
-#   .github/workflows/integration-pipeline.yml   ← this file (reusable)
-#   .github/workflows/rest-api-ci-caller.yml      ← entry point (push/PR)
+#   .github/workflows/integration-pipeline.yml   ← this file (reusable only)
+#   .github/workflows/rest-api-ci-caller.yml      ← sole allowed entry point
+#
+# This file exposes only workflow_call (no push / PR / workflow_dispatch).
+# A gate job rejects any caller other than rest-api-ci-caller.yml.
 #
 # The caller invokes this workflow with:
 #   uses: ./.github/workflows/integration-pipeline.yml
@@ -40,13 +43,11 @@
 # Local validation (pipeline-development repo root, in the devcontainer):
 #   actionlint heavy-rental-rest-api/integration-pipeline/integration-pipeline.yml
 #   actionlint .github/workflows/rest-api-ci.yml
-#   act -W .github/workflows/rest-api-ci.yml -j integration
 #
 # Required GitHub Actions secrets (no credentials in this YAML)
 # -------------------------------------------------------------
 # Configure under Settings → Secrets and variables → Actions on:
-#   - heavy-rental-project-pipeline-development  (manual / path-triggered runs)
-#   - heavy-rental-spring-rest-api               (PR CI via caller + secrets: inherit)
+#   - heavy-rental-spring-rest-api  (via rest-api-ci-caller.yml + secrets: inherit)
 #
 #   REST_API_DB_NAME      PostgreSQL database name (service POSTGRES_DB)
 #   REST_API_DB_USER      PostgreSQL username    (service POSTGRES_USER + Spring)
@@ -61,8 +62,9 @@
 
 name: REST API CI
 
+# Reusable only — no push, pull_request, or workflow_dispatch.
+# Sole allowed caller: .github/workflows/rest-api-ci-caller.yml (enforced below).
 on:
-  # Called by rest-api-ci-caller.yml in the same repo (same-repo reusable workflow)
   workflow_call:
     inputs:
       app_repository:
@@ -100,26 +102,6 @@ on:
           jdbc:postgresql://localhost:<REST_API_DB_PORT>/<database>)
         required: true
 
-  # Manual run from this pipeline-development repository
-  workflow_dispatch:
-    inputs:
-      app_repository:
-        description: GitHub repository of the Spring REST API (owner/name)
-        required: false
-        default: SA62-team1/heavy-rental-spring-rest-api
-        type: string
-      app_ref:
-        description: Branch, tag, or commit SHA of the REST API
-        required: false
-        default: master
-        type: string
-
-  # When the CI workflow definitions themselves change, re-validate (master/develop only).
-  # Paths assume install layout in the Spring REST API repo:
-  #   .github/workflows/integration-pipeline.yml
-  #   .github/workflows/rest-api-ci-caller.yml
-
-
 # GitHub Flow: one concurrent run per PR (or branch); newer pushes cancel stale runs
 concurrency:
   group: rest-api-ci-${{ github.workflow }}-${{ github.repository }}-${{ github.event.pull_request.number || github.ref }}
@@ -138,7 +120,8 @@ env:
   JAVA_DISTRIBUTION: temurin
   APP_PATH: app
   DEFAULT_APP_REPOSITORY: SA62-team1/heavy-rental-spring-rest-api
-  DEFAULT_APP_REF: master
+  # Integration CI is develop-only (rest-api-ci-caller.yml push/PR → develop)
+  DEFAULT_APP_REF: develop
   # Non-sensitive Spring/JPA settings only — credentials come from GitHub Secrets
   SPRING_DATASOURCE_DRIVER_CLASS_NAME: org.postgresql.Driver
   SPRING_JPA_DATABASE_PLATFORM: org.hibernate.dialect.PostgreSQLDialect
@@ -146,12 +129,45 @@ env:
 
 jobs:
   # ---------------------------------------------------------------------------
+  # 0. Caller gate — only rest-api-ci-caller.yml may invoke this workflow
+  # ---------------------------------------------------------------------------
+  assert-caller:
+    name: Assert caller
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Allow only rest-api-ci-caller.yml
+        env:
+          # github context is that of the caller workflow for reusable workflows
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+        run: |
+          set -euo pipefail
+          echo "github.workflow_ref=${WORKFLOW_REF}"
+          echo "github.event_name=${{ github.event_name }}"
+          echo "github.workflow=${{ github.workflow }}"
+          case "${WORKFLOW_REF}" in
+            */.github/workflows/rest-api-ci-caller.yml@*)
+              echo "Allowed caller: rest-api-ci-caller.yml"
+              {
+                echo "### Caller gate"
+                echo ""
+                echo "Invoked by \`rest-api-ci-caller.yml\` — OK."
+              } >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            *)
+              echo "::error::integration-pipeline.yml may only be invoked by .github/workflows/rest-api-ci-caller.yml (got: ${WORKFLOW_REF})"
+              exit 1
+              ;;
+          esac
+
+  # ---------------------------------------------------------------------------
   # 1. Integration — HIGHEST PRIORITY (GitHub Flow PR gate starts here)
   #    All other jobs declare needs: integration so they never run if this fails.
   # ---------------------------------------------------------------------------
   integration:
     name: Integration
     runs-on: ubuntu-latest
+    needs: [assert-caller]
     timeout-minutes: 20
     # Fail-fast entry point for the entire workflow
     outputs:
@@ -159,35 +175,24 @@ jobs:
       app_ref: ${{ steps.meta.outputs.app_ref }}
       checkout_mode: ${{ steps.meta.outputs.checkout_mode }}
     steps:
-      - name: Resolve application source (caller PR vs remote REST API)
+      - name: Resolve application source (same-repo caller vs remote override)
         id: meta
         run: |
           set -euo pipefail
+          # This workflow is workflow_call-only; github.* reflects the caller event.
           EVENT="${{ github.event_name }}"
           INPUT_REPO="${{ inputs.app_repository }}"
           INPUT_REF="${{ inputs.app_ref }}"
 
-          # workflow_call from the REST API: default to the caller's PR/push commit
-          if [ "$EVENT" = "workflow_call" ]; then
-            if [ -n "$INPUT_REPO" ] && [ "$INPUT_REPO" != "${{ github.repository }}" ]; then
-              APP_REPO="$INPUT_REPO"
-              APP_REF="${INPUT_REF:-${{ env.DEFAULT_APP_REF }}}"
-              MODE=remote
-            else
-              APP_REPO="${{ github.repository }}"
-              APP_REF="${INPUT_REF:-${{ github.sha }}}"
-              MODE=caller
-            fi
-          # Manual run from pipeline-development: check out the API by input/default
-          elif [ "$EVENT" = "workflow_dispatch" ]; then
-            APP_REPO="${INPUT_REPO:-${{ env.DEFAULT_APP_REPOSITORY }}}"
+          if [ -n "$INPUT_REPO" ] && [ "$INPUT_REPO" != "${{ github.repository }}" ]; then
+            APP_REPO="$INPUT_REPO"
             APP_REF="${INPUT_REF:-${{ env.DEFAULT_APP_REF }}}"
             MODE=remote
-          # push/PR on pipeline-development (pipeline definition changed)
           else
-            APP_REPO="${{ env.DEFAULT_APP_REPOSITORY }}"
-            APP_REF="${{ env.DEFAULT_APP_REF }}"
-            MODE=remote
+            # rest-api-ci-caller.yml in the same repo: use this commit
+            APP_REPO="${{ github.repository }}"
+            APP_REF="${INPUT_REF:-${{ github.sha }}}"
+            MODE=caller
           fi
 
           echo "app_repository=$APP_REPO" >> "$GITHUB_OUTPUT"

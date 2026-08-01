@@ -11,12 +11,13 @@
 #
 # GitHub Flow (https://docs.github.com/en/get-started/using-github/github-flow)
 # --------------------------------------------------------------------------
-# Runs after a PR is merged into master/develop (or on version tags). Packaging
-# is post-merge; PR validation is handled by rest-api-ci-caller.yml
-# (Integration first).
+# Invoked via rest-api-release-caller.yml when:
+#   - a GitHub Release is published, or
+#   - a pull request is opened/updated from develop → master
+# Feature-branch PR validation remains rest-api-ci-caller.yml (Integration first).
 #
-#   feature branch → PR (CI) → merge to master/develop → this Release pipeline
-#   optional: git tag v* → Release pipeline (versioned package)
+#   feature → develop (CI) → PR develop→master and/or publish GitHub Release
+#     → this pipeline
 #
 # Same gates as integration-pipeline.yml (secrets, Java 21, Maven, Postgres,
 # Semgrep, Trivy), plus Packaging for deploy consumers.
@@ -35,8 +36,11 @@
 # -------------------------------------
 # Install both files into the Spring REST API repository:
 #
-#   .github/workflows/release-pipeline.yml         ← this file (reusable)
-#   .github/workflows/rest-api-release-caller.yml  ← entry point (push/tag)
+#   .github/workflows/release-pipeline.yml         ← this file (reusable only)
+#   .github/workflows/rest-api-release-caller.yml  ← sole allowed entry point
+#
+# This file exposes only workflow_call (no push / PR / workflow_dispatch).
+# A gate job rejects any caller other than rest-api-release-caller.yml.
 #
 # The caller invokes this workflow with:
 #   uses: ./.github/workflows/release-pipeline.yml
@@ -48,13 +52,11 @@
 # Local validation (pipeline-development repo root, in the devcontainer):
 #   actionlint heavy-rental-rest-api/release-pipeline/release-pipeline.yml
 #   actionlint .github/workflows/rest-api-release.yml
-#   act -W .github/workflows/rest-api-release.yml -j packaging
 #
 # Required GitHub Actions secrets (no credentials in this YAML)
 # -------------------------------------------------------------
 # Configure under Settings → Secrets and variables → Actions on:
-#   - heavy-rental-project-pipeline-development  (manual / path-triggered runs)
-#   - heavy-rental-spring-rest-api               (release via caller + secrets: inherit)
+#   - heavy-rental-spring-rest-api  (via rest-api-release-caller.yml + secrets: inherit)
 #
 #   REST_API_DB_NAME      PostgreSQL database name (service POSTGRES_DB)
 #   REST_API_DB_USER      PostgreSQL username    (service POSTGRES_USER + Spring)
@@ -69,8 +71,9 @@
 
 name: REST API Release CI
 
+# Reusable only — no push, pull_request, or workflow_dispatch.
+# Sole allowed caller: .github/workflows/rest-api-release-caller.yml (enforced below).
 on:
-  # Called by rest-api-release-caller.yml in the same repo (same-repo reusable workflow)
   workflow_call:
     inputs:
       app_repository:
@@ -83,7 +86,7 @@ on:
       app_ref:
         description: >
           Override git ref (branch/tag/SHA). Leave empty to use the calling
-          workflow's commit (github.sha) — correct for release/tag/push events.
+          workflow's commit (github.sha) — correct for release / develop→master PR.
         required: false
         type: string
         default: ""
@@ -108,23 +111,7 @@ on:
           jdbc:postgresql://localhost:<REST_API_DB_PORT>/<database>)
         required: true
 
-  # Manual run from this pipeline-development repository
-  workflow_dispatch:
-    inputs:
-      app_repository:
-        description: GitHub repository of the Spring REST API (owner/name)
-        required: false
-        default: SA62-team1/heavy-rental-spring-rest-api
-        type: string
-      app_ref:
-        description: Branch, tag, or commit SHA of the REST API
-        required: false
-        default: master
-        type: string
-
-
-
-# GitHub Flow post-merge: one run per branch/tag; do not cancel in-flight packaging mid-upload
+# One run per release tag or develop→master PR; do not cancel in-flight packaging
 concurrency:
   group: rest-api-release-${{ github.workflow }}-${{ github.repository }}-${{ github.ref }}
   cancel-in-progress: false
@@ -153,47 +140,69 @@ env:
 
 jobs:
   # ---------------------------------------------------------------------------
+  # 0. Caller gate — only rest-api-release-caller.yml may invoke this workflow
+  # ---------------------------------------------------------------------------
+  assert-caller:
+    name: Assert caller
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Allow only rest-api-release-caller.yml
+        env:
+          # github context is that of the caller workflow for reusable workflows
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+        run: |
+          set -euo pipefail
+          echo "github.workflow_ref=${WORKFLOW_REF}"
+          echo "github.event_name=${{ github.event_name }}"
+          echo "github.workflow=${{ github.workflow }}"
+          case "${WORKFLOW_REF}" in
+            */.github/workflows/rest-api-release-caller.yml@*)
+              echo "Allowed caller: rest-api-release-caller.yml"
+              {
+                echo "### Caller gate"
+                echo ""
+                echo "Invoked by \`rest-api-release-caller.yml\` — OK."
+              } >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            *)
+              echo "::error::release-pipeline.yml may only be invoked by .github/workflows/rest-api-release-caller.yml (got: ${WORKFLOW_REF})"
+              exit 1
+              ;;
+          esac
+
+  # ---------------------------------------------------------------------------
   # 1. Integration — HIGHEST PRIORITY (release never packages without this)
   #    Quality, Security, and Packaging all depend on Integration succeeding.
   # ---------------------------------------------------------------------------
   integration:
     name: Integration
     runs-on: ubuntu-latest
+    needs: [assert-caller]
     timeout-minutes: 20
     outputs:
       app_repository: ${{ steps.meta.outputs.app_repository }}
       app_ref: ${{ steps.meta.outputs.app_ref }}
       checkout_mode: ${{ steps.meta.outputs.checkout_mode }}
     steps:
-      - name: Resolve application source (caller PR vs remote REST API)
+      - name: Resolve application source (same-repo caller vs remote override)
         id: meta
         run: |
           set -euo pipefail
+          # This workflow is workflow_call-only; github.* reflects the caller event.
           EVENT="${{ github.event_name }}"
           INPUT_REPO="${{ inputs.app_repository }}"
           INPUT_REF="${{ inputs.app_ref }}"
 
-          # workflow_call from the REST API: default to the caller's PR/push commit
-          if [ "$EVENT" = "workflow_call" ]; then
-            if [ -n "$INPUT_REPO" ] && [ "$INPUT_REPO" != "${{ github.repository }}" ]; then
-              APP_REPO="$INPUT_REPO"
-              APP_REF="${INPUT_REF:-${{ env.DEFAULT_APP_REF }}}"
-              MODE=remote
-            else
-              APP_REPO="${{ github.repository }}"
-              APP_REF="${INPUT_REF:-${{ github.sha }}}"
-              MODE=caller
-            fi
-          # Manual run from pipeline-development: check out the API by input/default
-          elif [ "$EVENT" = "workflow_dispatch" ]; then
-            APP_REPO="${INPUT_REPO:-${{ env.DEFAULT_APP_REPOSITORY }}}"
+          if [ -n "$INPUT_REPO" ] && [ "$INPUT_REPO" != "${{ github.repository }}" ]; then
+            APP_REPO="$INPUT_REPO"
             APP_REF="${INPUT_REF:-${{ env.DEFAULT_APP_REF }}}"
             MODE=remote
-          # push/PR on pipeline-development (pipeline definition changed)
           else
-            APP_REPO="${{ env.DEFAULT_APP_REPOSITORY }}"
-            APP_REF="${{ env.DEFAULT_APP_REF }}"
-            MODE=remote
+            # rest-api-release-caller.yml in the same repo: use this commit
+            APP_REPO="${{ github.repository }}"
+            APP_REF="${INPUT_REF:-${{ github.sha }}}"
+            MODE=caller
           fi
 
           echo "app_repository=$APP_REPO" >> "$GITHUB_OUTPUT"

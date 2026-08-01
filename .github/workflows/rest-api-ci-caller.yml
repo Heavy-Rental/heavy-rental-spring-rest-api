@@ -14,7 +14,8 @@
 #   1. Branch from master/develop
 #   2. Open a pull request  → this workflow runs (Integration first)
 #   3. Review + green checks → merge into master/develop
-#   4. Release packaging    → rest-api-release-caller.yml on master / tags
+#   4. Release packaging    → rest-api-release-caller.yml on GitHub Release
+#                             publish, or on PR develop → master
 #
 # Reusable workflow (same repository):
 #   ./.github/workflows/integration-pipeline.yml
@@ -56,11 +57,11 @@ name: CI
 on:
   # GitHub Flow: every PR targeting the allowed branches
   pull_request:
-    branches: [master, develop]
+    branches: [develop]
     types: [opened, synchronize, reopened, ready_for_review]
   # Re-validate after merge (and direct pushes to the allowed branches)
   push:
-    branches: [master, develop]
+    branches: [develop]
   workflow_dispatch:
 
 # One run per PR (or branch); cancel superseded commits on the same PR
