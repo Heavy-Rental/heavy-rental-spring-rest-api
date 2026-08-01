@@ -1,0 +1,75 @@
+# =============================================================================
+# Install into: heavy-rental-spring-rest-api
+# Path:         .github/workflows/rest-api-release-caller.yml
+# =============================================================================
+# GitHub Flow release caller — runs after merge to master/develop (or on tags).
+# PR validation is CI (rest-api-ci-caller.yml), not this workflow.
+#
+# Place both files in the Spring REST API repository:
+#
+#   .github/workflows/rest-api-release-caller.yml  ← this file (triggers)
+#   .github/workflows/release-pipeline.yml         ← reusable pipeline (called)
+#
+# GitHub Flow
+# -----------
+#   feature branch → PR (CI, Integration first) → merge → this Release pipeline
+#   optional: tag v* → versioned package
+#
+# Reusable workflow (same repository):
+#   ./.github/workflows/release-pipeline.yml
+#
+# Job priority inside the reusable workflow
+# -----------------------------------------
+#   1. Integration           ← HIGHEST PRIORITY
+#   2. Quality Control       (needs Integration)
+#   2. Security Testing      (needs Integration)
+#   3. Packaging             (needs Integration + QC + Security)
+#      → WAR artifact + Docker image (tar + GHCR push)
+#
+# Setup
+# -----
+# 1. Copy into the REST API repo:
+#      .github/workflows/rest-api-release-caller.yml
+#      .github/workflows/release-pipeline.yml
+# 2. Configure repository secrets (Settings → Secrets and variables → Actions):
+#
+#      REST_API_DB_NAME
+#      REST_API_DB_USER
+#      REST_API_DB_PASSWORD
+#      REST_API_DB_PORT
+#      REST_API_DB_URL
+#
+#    Forwarded via secrets: inherit. Do not put secret values in this file.
+# =============================================================================
+
+name: Release
+
+on:
+  # GitHub Flow: package only after merge to allowed branches (not on PRs)
+  push:
+    branches: [master, develop]
+    tags: ["v*"]
+  workflow_dispatch:
+
+# Do not cancel an in-flight release mid-packaging
+concurrency:
+  group: rest-api-release-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  # Forwarded to reusable workflow for github/codeql-action/upload-sarif@v2
+  security-events: write
+  actions: read
+  # Required so packaging can push the Docker image to GHCR
+  packages: write
+
+jobs:
+  release-pipeline:
+    name: Release pipeline
+    # Same-repo reusable workflow — both files live under .github/workflows/
+    uses: ./.github/workflows/release-pipeline.yml
+    # Forward repository secrets (REST_API_DB_*) into the reusable workflow.
+    # Required: REST_API_DB_NAME, REST_API_DB_USER, REST_API_DB_PASSWORD,
+    #           REST_API_DB_PORT, REST_API_DB_URL
+    secrets: inherit

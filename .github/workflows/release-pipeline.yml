@@ -1,0 +1,930 @@
+# =============================================================================
+# Heavy Rental Spring REST API — Release CI Pipeline (reusable)
+# =============================================================================
+# Stages (priority order — Integration is highest priority):
+#   1. Integration      (HIGHEST) checkout, Java 21 + Maven, resolve deps, layout
+#   2. Quality Control  needs Integration — compile, tests (Postgres), package WAR
+#   3. Security Testing needs Integration — SAST (Semgrep) + SCA/FS (Trivy)
+#      + github/codeql-action/upload-sarif@v2 → GitHub Code Scanning
+#   4. Packaging        needs Integration + QC + Security — versioned WAR +
+#                       Docker image (tar artifact; push to GHCR when not a PR)
+#
+# GitHub Flow (https://docs.github.com/en/get-started/using-github/github-flow)
+# --------------------------------------------------------------------------
+# Runs after a PR is merged into master/develop (or on version tags). Packaging
+# is post-merge; PR validation is handled by rest-api-ci-caller.yml
+# (Integration first).
+#
+#   feature branch → PR (CI) → merge to master/develop → this Release pipeline
+#   optional: git tag v* → Release pipeline (versioned package)
+#
+# Same gates as integration-pipeline.yml (secrets, Java 21, Maven, Postgres,
+# Semgrep, Trivy), plus Packaging for deploy consumers.
+#
+# Packaging output (Spring Boot WAR + container image for deploy):
+#   ./mvnw -DskipTests package → target/*.war (preferred; jar fallback)
+#   Versioned + stable WAR copies for overall-project-deploy
+#   Docker image (Tomcat 10.1 + JDK 21) with WAR as ROOT.war
+#   Image saved as gzipped tar artifact; also pushed to GHCR outside PRs
+#
+# Application:
+#   https://github.com/SA62-team1/heavy-rental-spring-rest-api
+#   Spring Boot 4.x · Java 21 · Maven (mvnw) · PostgreSQL · WAR packaging
+#
+# How the REST API uses this on release
+# -------------------------------------
+# Install both files into the Spring REST API repository:
+#
+#   .github/workflows/release-pipeline.yml         ← this file (reusable)
+#   .github/workflows/rest-api-release-caller.yml  ← entry point (push/tag)
+#
+# The caller invokes this workflow with:
+#   uses: ./.github/workflows/release-pipeline.yml
+#
+# Also mirrored in the pipeline-development repo for discovery/testing:
+#   .github/workflows/rest-api-release.yml
+# Keep this file and that mirror in sync when developing here.
+#
+# Local validation (pipeline-development repo root, in the devcontainer):
+#   actionlint heavy-rental-rest-api/release-pipeline/release-pipeline.yml
+#   actionlint .github/workflows/rest-api-release.yml
+#   act -W .github/workflows/rest-api-release.yml -j packaging
+#
+# Required GitHub Actions secrets (no credentials in this YAML)
+# -------------------------------------------------------------
+# Configure under Settings → Secrets and variables → Actions on:
+#   - heavy-rental-project-pipeline-development  (manual / path-triggered runs)
+#   - heavy-rental-spring-rest-api               (release via caller + secrets: inherit)
+#
+#   REST_API_DB_NAME      PostgreSQL database name (service POSTGRES_DB)
+#   REST_API_DB_USER      PostgreSQL username    (service POSTGRES_USER + Spring)
+#   REST_API_DB_PASSWORD  PostgreSQL password    (service POSTGRES_PASSWORD + Spring)
+#   REST_API_DB_PORT      Host port mapped to the Postgres service (e.g. 5432)
+#   REST_API_DB_URL       JDBC URL for tests; port must match REST_API_DB_PORT
+#                         e.g. jdbc:postgresql://localhost:<port>/<db>
+#
+# Never commit real values. Callers must use secrets: inherit (or map these secrets).
+# Secret values are never written to logs or step summaries.
+# =============================================================================
+
+name: REST API Release CI
+
+on:
+  # Called by rest-api-release-caller.yml in the same repo (same-repo reusable workflow)
+  workflow_call:
+    inputs:
+      app_repository:
+        description: >
+          Override application repository (owner/name). Leave empty to use the
+          calling repository (required when the REST API invokes this workflow).
+        required: false
+        type: string
+        default: ""
+      app_ref:
+        description: >
+          Override git ref (branch/tag/SHA). Leave empty to use the calling
+          workflow's commit (github.sha) — correct for release/tag/push events.
+        required: false
+        type: string
+        default: ""
+    secrets:
+      REST_API_DB_NAME:
+        description: PostgreSQL database name for the CI service container
+        required: true
+      REST_API_DB_USER:
+        description: PostgreSQL username for the CI service container and Spring tests
+        required: true
+      REST_API_DB_PASSWORD:
+        description: PostgreSQL password for the CI service container and Spring tests
+        required: true
+      REST_API_DB_PORT:
+        description: >
+          Host port published for the CI PostgreSQL service container
+          (must match the port in REST_API_DB_URL)
+        required: true
+      REST_API_DB_URL:
+        description: >
+          Full JDBC URL for Spring tests (typically
+          jdbc:postgresql://localhost:<REST_API_DB_PORT>/<database>)
+        required: true
+
+  # Manual run from this pipeline-development repository
+  workflow_dispatch:
+    inputs:
+      app_repository:
+        description: GitHub repository of the Spring REST API (owner/name)
+        required: false
+        default: SA62-team1/heavy-rental-spring-rest-api
+        type: string
+      app_ref:
+        description: Branch, tag, or commit SHA of the REST API
+        required: false
+        default: master
+        type: string
+
+  # When the release workflow definitions themselves change, re-validate (master/develop only).
+  # Paths assume install layout in the Spring REST API repo:
+  #   .github/workflows/release-pipeline.yml
+  #   .github/workflows/rest-api-release-caller.yml
+  push:
+    branches: [master, develop]
+    paths:
+      - ".github/workflows/release-pipeline.yml"
+      - ".github/workflows/rest-api-release-caller.yml"
+  pull_request:
+    branches: [master, develop]
+    paths:
+      - ".github/workflows/release-pipeline.yml"
+      - ".github/workflows/rest-api-release-caller.yml"
+
+# GitHub Flow post-merge: one run per branch/tag; do not cancel in-flight packaging mid-upload
+concurrency:
+  group: rest-api-release-${{ github.workflow }}-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  # Required for github/codeql-action/upload-sarif (Security stage → Code Scanning)
+  security-events: write
+  actions: read
+  # Required to push the packaging Docker image to GHCR (non-PR runs)
+  packages: write
+
+env:
+  JAVA_VERSION: "21"
+  JAVA_DISTRIBUTION: temurin
+  APP_PATH: app
+  DEFAULT_APP_REPOSITORY: SA62-team1/heavy-rental-spring-rest-api
+  DEFAULT_APP_REF: master
+  # Docker image naming (Tomcat hosts the Spring Boot WAR)
+  IMAGE_NAME: heavy-rental-rest-api
+  TOMCAT_BASE_IMAGE: tomcat:10.1-jdk21-temurin
+  # Non-sensitive Spring/JPA settings only — credentials come from GitHub Secrets
+  SPRING_DATASOURCE_DRIVER_CLASS_NAME: org.postgresql.Driver
+  SPRING_JPA_DATABASE_PLATFORM: org.hibernate.dialect.PostgreSQLDialect
+  MAVEN_OPTS: "-Dhttps.protocols=TLSv1.2 -Dmaven.wagon.http.retryHandler.count=3"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 1. Integration — HIGHEST PRIORITY (release never packages without this)
+  #    Quality, Security, and Packaging all depend on Integration succeeding.
+  # ---------------------------------------------------------------------------
+  integration:
+    name: Integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      app_repository: ${{ steps.meta.outputs.app_repository }}
+      app_ref: ${{ steps.meta.outputs.app_ref }}
+      checkout_mode: ${{ steps.meta.outputs.checkout_mode }}
+    steps:
+      - name: Resolve application source (caller PR vs remote REST API)
+        id: meta
+        run: |
+          set -euo pipefail
+          EVENT="${{ github.event_name }}"
+          INPUT_REPO="${{ inputs.app_repository }}"
+          INPUT_REF="${{ inputs.app_ref }}"
+
+          # workflow_call from the REST API: default to the caller's PR/push commit
+          if [ "$EVENT" = "workflow_call" ]; then
+            if [ -n "$INPUT_REPO" ] && [ "$INPUT_REPO" != "${{ github.repository }}" ]; then
+              APP_REPO="$INPUT_REPO"
+              APP_REF="${INPUT_REF:-${{ env.DEFAULT_APP_REF }}}"
+              MODE=remote
+            else
+              APP_REPO="${{ github.repository }}"
+              APP_REF="${INPUT_REF:-${{ github.sha }}}"
+              MODE=caller
+            fi
+          # Manual run from pipeline-development: check out the API by input/default
+          elif [ "$EVENT" = "workflow_dispatch" ]; then
+            APP_REPO="${INPUT_REPO:-${{ env.DEFAULT_APP_REPOSITORY }}}"
+            APP_REF="${INPUT_REF:-${{ env.DEFAULT_APP_REF }}}"
+            MODE=remote
+          # push/PR on pipeline-development (pipeline definition changed)
+          else
+            APP_REPO="${{ env.DEFAULT_APP_REPOSITORY }}"
+            APP_REF="${{ env.DEFAULT_APP_REF }}"
+            MODE=remote
+          fi
+
+          echo "app_repository=$APP_REPO" >> "$GITHUB_OUTPUT"
+          echo "app_ref=$APP_REF" >> "$GITHUB_OUTPUT"
+          echo "checkout_mode=$MODE" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Source resolution"
+            echo ""
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Event | \`$EVENT\` |"
+            echo "| Mode | \`$MODE\` |"
+            echo "| Repository | \`$APP_REPO\` |"
+            echo "| Ref | \`$APP_REF\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "Integrating application: $APP_REPO @ $APP_REF (mode=$MODE)"
+
+      - name: Checkout calling repository (release / push head)
+        if: steps.meta.outputs.checkout_mode == 'caller'
+        uses: actions/checkout@v4
+        with:
+          path: ${{ env.APP_PATH }}
+
+      - name: Checkout remote application repository
+        if: steps.meta.outputs.checkout_mode == 'remote'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.meta.outputs.app_repository }}
+          ref: ${{ steps.meta.outputs.app_ref }}
+          path: ${{ env.APP_PATH }}
+
+      - name: Setup Java ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: ${{ env.JAVA_DISTRIBUTION }}
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+          cache-dependency-path: ${{ env.APP_PATH }}/pom.xml
+
+      - name: Ensure Maven Wrapper is executable
+        working-directory: ${{ env.APP_PATH }}
+        run: |
+          set -euo pipefail
+          if [ -f ./mvnw ]; then
+            chmod +x ./mvnw
+            echo "Using Maven Wrapper (./mvnw)"
+          else
+            echo "::error::mvnw not found — this pipeline expects the Maven Wrapper in the REST API repo."
+            exit 1
+          fi
+
+      - name: Resolve Maven dependencies
+        working-directory: ${{ env.APP_PATH }}
+        run: |
+          set -euo pipefail
+          ./mvnw -B -ntp dependency:resolve dependency:resolve-plugins
+
+      - name: Verify project layout and toolchain
+        working-directory: ${{ env.APP_PATH }}
+        run: |
+          set -euo pipefail
+          echo "==> Java / Maven versions"
+          java -version
+          ./mvnw -v
+          echo "==> Required files"
+          test -f pom.xml
+          test -f mvnw
+          test -d src/main/java
+          test -d src/main/resources
+          echo "==> Packaging from pom.xml"
+          PACKAGING="$(./mvnw -B -q -DforceStdout help:evaluate -Dexpression=project.packaging)"
+          ARTIFACT="$(./mvnw -B -q -DforceStdout help:evaluate -Dexpression=project.artifactId)"
+          VERSION="$(./mvnw -B -q -DforceStdout help:evaluate -Dexpression=project.version)"
+          JAVA_PROP="$(./mvnw -B -q -DforceStdout help:evaluate -Dexpression=java.version || true)"
+          echo "artifactId=$ARTIFACT version=$VERSION packaging=$PACKAGING java.version=$JAVA_PROP"
+          {
+            echo "### Integration checks"
+            echo ""
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Artifact | \`$ARTIFACT\` |"
+            echo "| Version | \`$VERSION\` |"
+            echo "| Packaging | \`$PACKAGING\` |"
+            echo "| Java (pom) | \`$JAVA_PROP\` |"
+            echo "| Runner Java | \`${{ env.JAVA_VERSION }}\` (${{ env.JAVA_DISTRIBUTION }}) |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "Integration checks passed."
+
+      - name: Upload Maven project fingerprint
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-integration-metadata
+          path: |
+            ${{ env.APP_PATH }}/pom.xml
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # 2. Quality control — compile, test (with PostgreSQL), package WAR
+  # ---------------------------------------------------------------------------
+  quality-control:
+    name: Quality Control
+    runs-on: ubuntu-latest
+    # Highest-priority gate: never start QC unless Integration passed
+    needs: [integration]
+    timeout-minutes: 30
+    # PostgreSQL is started with Docker in a step (not jobs.services) so host port,
+    # credentials, and JDBC URL can all come from GitHub Secrets. The services.*
+    # ports field does not allow the secrets context.
+    steps:
+      - name: Verify required database secrets are configured
+        env:
+          # Bind secrets into env so emptiness can be checked without printing values.
+          # GitHub masks secret values in logs automatically.
+          REST_API_DB_NAME: ${{ secrets.REST_API_DB_NAME }}
+          REST_API_DB_USER: ${{ secrets.REST_API_DB_USER }}
+          REST_API_DB_PASSWORD: ${{ secrets.REST_API_DB_PASSWORD }}
+          REST_API_DB_PORT: ${{ secrets.REST_API_DB_PORT }}
+          REST_API_DB_URL: ${{ secrets.REST_API_DB_URL }}
+        run: |
+          set -euo pipefail
+          missing=()
+          [ -n "${REST_API_DB_NAME}" ] || missing+=(REST_API_DB_NAME)
+          [ -n "${REST_API_DB_USER}" ] || missing+=(REST_API_DB_USER)
+          [ -n "${REST_API_DB_PASSWORD}" ] || missing+=(REST_API_DB_PASSWORD)
+          [ -n "${REST_API_DB_PORT}" ] || missing+=(REST_API_DB_PORT)
+          [ -n "${REST_API_DB_URL}" ] || missing+=(REST_API_DB_URL)
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::Missing required GitHub Actions secrets: ${missing[*]}"
+            echo "Configure them under Settings → Secrets and variables → Actions."
+            echo "See header comments in rest-api-release.yml for secret names."
+            exit 1
+          fi
+          # Port must be numeric (do not echo the secret value)
+          if ! [[ "${REST_API_DB_PORT}" =~ ^[0-9]+$ ]]; then
+            echo "::error::REST_API_DB_PORT must be a numeric TCP port."
+            exit 1
+          fi
+          echo "All required database secrets are present (values not logged)."
+
+      - name: Checkout calling repository (release / push head)
+        if: needs.integration.outputs.checkout_mode == 'caller'
+        uses: actions/checkout@v4
+        with:
+          path: ${{ env.APP_PATH }}
+
+      - name: Checkout remote application repository
+        if: needs.integration.outputs.checkout_mode == 'remote'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ needs.integration.outputs.app_repository }}
+          ref: ${{ needs.integration.outputs.app_ref }}
+          path: ${{ env.APP_PATH }}
+
+      - name: Setup Java ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: ${{ env.JAVA_DISTRIBUTION }}
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+          cache-dependency-path: ${{ env.APP_PATH }}/pom.xml
+
+      - name: Ensure Maven Wrapper is executable
+        working-directory: ${{ env.APP_PATH }}
+        run: chmod +x ./mvnw
+
+      - name: Start PostgreSQL (Docker; credentials and port from secrets)
+        env:
+          REST_API_DB_NAME: ${{ secrets.REST_API_DB_NAME }}
+          REST_API_DB_USER: ${{ secrets.REST_API_DB_USER }}
+          REST_API_DB_PASSWORD: ${{ secrets.REST_API_DB_PASSWORD }}
+          REST_API_DB_PORT: ${{ secrets.REST_API_DB_PORT }}
+        run: |
+          set -euo pipefail
+          docker rm -f rest-api-release-postgres >/dev/null 2>&1 || true
+          # Host port from secret → container listens on Postgres image default 5432
+          docker run -d --name rest-api-release-postgres \
+            -e POSTGRES_DB="${REST_API_DB_NAME}" \
+            -e POSTGRES_USER="${REST_API_DB_USER}" \
+            -e POSTGRES_PASSWORD="${REST_API_DB_PASSWORD}" \
+            -p "${REST_API_DB_PORT}:5432" \
+            postgres:16-alpine
+          echo "PostgreSQL container started (port from REST_API_DB_PORT secret)."
+
+      - name: Wait for PostgreSQL
+        env:
+          REST_API_DB_PORT: ${{ secrets.REST_API_DB_PORT }}
+          REST_API_DB_USER: ${{ secrets.REST_API_DB_USER }}
+        run: |
+          set -euo pipefail
+          PORT="${REST_API_DB_PORT}"
+          for i in $(seq 1 30); do
+            if docker exec rest-api-release-postgres pg_isready -U "${REST_API_DB_USER}" >/dev/null 2>&1; then
+              echo "PostgreSQL is accepting connections (port from REST_API_DB_PORT secret)"
+              exit 0
+            fi
+            if timeout 1 bash -c "cat < /dev/null > /dev/tcp/127.0.0.1/${PORT}" 2>/dev/null; then
+              # TCP open; give pg_isready one more chance next loop
+              :
+            fi
+            echo "Waiting for PostgreSQL... ($i)"
+            sleep 2
+          done
+          echo "::error::PostgreSQL did not become ready in time on the configured port"
+          docker logs rest-api-release-postgres 2>&1 | tail -n 50 || true
+          exit 1
+
+      - name: Compile (main + test sources)
+        working-directory: ${{ env.APP_PATH }}
+        run: ./mvnw -B -ntp -DskipTests compile test-compile
+
+      - name: Unit and Spring Boot tests
+        working-directory: ${{ env.APP_PATH }}
+        env:
+          # Spring Boot binds these env vars automatically — do not pass passwords
+          # on the Maven CLI (would appear in process listings).
+          SPRING_DATASOURCE_URL: ${{ secrets.REST_API_DB_URL }}
+          SPRING_DATASOURCE_USERNAME: ${{ secrets.REST_API_DB_USER }}
+          SPRING_DATASOURCE_PASSWORD: ${{ secrets.REST_API_DB_PASSWORD }}
+          SPRING_DATASOURCE_DRIVER_CLASS_NAME: ${{ env.SPRING_DATASOURCE_DRIVER_CLASS_NAME }}
+          SPRING_JPA_DATABASE_PLATFORM: ${{ env.SPRING_JPA_DATABASE_PLATFORM }}
+        run: |
+          set -euo pipefail
+          mkdir -p "${{ github.workspace }}/test-reports"
+          ./mvnw -B -ntp test
+          # Collect surefire / failsafe reports when present
+          if [ -d target/surefire-reports ]; then
+            cp -a target/surefire-reports "${{ github.workspace }}/test-reports/" || true
+          fi
+          if [ -d target/failsafe-reports ]; then
+            cp -a target/failsafe-reports "${{ github.workspace }}/test-reports/" || true
+          fi
+
+      - name: Package WAR (skip re-running tests)
+        working-directory: ${{ env.APP_PATH }}
+        run: |
+          set -euo pipefail
+          ./mvnw -B -ntp -DskipTests package
+          echo "==> Build artifacts"
+          ls -lah target/ || true
+          WAR_COUNT="$(find target -maxdepth 1 -type f \( -name '*.war' -o -name '*.jar' \) | wc -l | tr -d ' ')"
+          if [ "${WAR_COUNT}" -lt 1 ]; then
+            echo "::error::No .war/.jar produced under target/ after package"
+            exit 1
+          fi
+          find target -maxdepth 1 -type f \( -name '*.war' -o -name '*.jar' \) -ls
+          {
+            echo "### Quality control"
+            echo ""
+            echo "Compile, tests, and package completed successfully."
+            echo ""
+            echo "Artifacts:"
+            echo '```'
+            find target -maxdepth 1 -type f \( -name '*.war' -o -name '*.jar' \) -printf '%f (%s bytes)\n' || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Stop PostgreSQL
+        if: always()
+        run: |
+          set -euo pipefail
+          docker rm -f rest-api-release-postgres >/dev/null 2>&1 || true
+          echo "PostgreSQL container stopped."
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-quality-test-reports
+          path: |
+            test-reports/
+            ${{ env.APP_PATH }}/target/surefire-reports/
+            ${{ env.APP_PATH }}/target/failsafe-reports/
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Upload packaged artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rest-api-release-build
+          path: |
+            ${{ env.APP_PATH }}/target/*.war
+            ${{ env.APP_PATH }}/target/*.jar
+          retention-days: 7
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------------------
+  # 3. Security testing — SAST (Semgrep) + SCA / filesystem (Trivy)
+  # ---------------------------------------------------------------------------
+  security-testing:
+    name: Security Testing
+    runs-on: ubuntu-latest
+    # Highest-priority gate: never start Security unless Integration passed
+    needs: [integration]
+    timeout-minutes: 25
+    steps:
+      - name: Checkout calling repository (release / push head)
+        if: needs.integration.outputs.checkout_mode == 'caller'
+        uses: actions/checkout@v4
+        with:
+          path: ${{ env.APP_PATH }}
+
+      - name: Checkout remote application repository
+        if: needs.integration.outputs.checkout_mode == 'remote'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ needs.integration.outputs.app_repository }}
+          ref: ${{ needs.integration.outputs.app_ref }}
+          path: ${{ env.APP_PATH }}
+
+      - name: Create security reports directory
+        run: mkdir -p "${{ github.workspace }}/security-reports"
+
+      # --- SAST: static analysis of application source (Java / Spring) ---
+      - name: Setup Python (Semgrep)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Semgrep
+        run: pip install --quiet semgrep
+
+      - name: SAST — Semgrep (Java / Spring / OWASP)
+        working-directory: ${{ env.APP_PATH }}
+        run: |
+          set -euo pipefail
+          REPORT_DIR="${{ github.workspace }}/security-reports"
+          # Human-readable report (always written; does not gate the step alone)
+          semgrep scan \
+            --config=p/java \
+            --config=p/spring \
+            --config=p/owasp-top-ten \
+            --config=p/security-audit \
+            --metrics=off \
+            --text \
+            --output="${REPORT_DIR}/semgrep.txt" \
+            . || true
+          # SARIF for dashboards / code scanning consumers
+          semgrep scan \
+            --config=p/java \
+            --config=p/spring \
+            --config=p/owasp-top-ten \
+            --config=p/security-audit \
+            --metrics=off \
+            --sarif \
+            --output="${REPORT_DIR}/semgrep.sarif" \
+            . || true
+          # Gate CI: fail on ERROR findings (WARNING/INFO still reported above)
+          echo "==> SAST gate (ERROR severity)"
+          semgrep scan \
+            --config=p/java \
+            --config=p/spring \
+            --config=p/owasp-top-ten \
+            --config=p/security-audit \
+            --metrics=off \
+            --severity=ERROR \
+            --error \
+            --text \
+            .
+          echo "SAST (Semgrep) passed — no ERROR-level findings."
+          if [ -f "${REPORT_DIR}/semgrep.txt" ]; then
+            echo "==> Semgrep report (excerpt)"
+            head -n 100 "${REPORT_DIR}/semgrep.txt" || true
+          fi
+
+      # --- SCA + filesystem: dependency and secret/vuln scan via Trivy ---
+      - name: Setup Java ${{ env.JAVA_VERSION }} (for dependency resolution before scan)
+        uses: actions/setup-java@v4
+        with:
+          distribution: ${{ env.JAVA_DISTRIBUTION }}
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+          cache-dependency-path: ${{ env.APP_PATH }}/pom.xml
+
+      - name: Resolve dependencies for SCA coverage
+        working-directory: ${{ env.APP_PATH }}
+        run: |
+          set -euo pipefail
+          chmod +x ./mvnw
+          # Materialize the local .m2 / target dependency graph Trivy can inspect
+          ./mvnw -B -ntp -DskipTests dependency:resolve dependency:copy-dependencies \
+            -DoutputDirectory=target/dependency || \
+          ./mvnw -B -ntp -DskipTests dependency:resolve
+
+      - name: Trivy filesystem vulnerability scan (SCA + FS)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: ${{ env.APP_PATH }}
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          format: table
+          output: security-reports/trivy-fs.txt
+          ignore-unfixed: true
+
+      - name: Trivy filesystem scan (SARIF artifact)
+        if: always()
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: ${{ env.APP_PATH }}
+          severity: HIGH,CRITICAL
+          exit-code: "0"
+          format: sarif
+          output: security-reports/trivy-fs.sarif
+          ignore-unfixed: true
+
+      # --- GitHub Code Scanning: publish SARIF (Semgrep + Trivy) ---
+      - name: Upload Semgrep SARIF to Code Scanning
+        if: always() && hashFiles('security-reports/semgrep.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: security-reports/semgrep.sarif
+          # App is checked out under APP_PATH so path mapping matches the scan root
+          checkout_path: ${{ env.APP_PATH }}
+          category: rest-api-release-semgrep
+        # Do not fail the Security job if Code Scanning is unavailable (e.g. GHAS off)
+        continue-on-error: true
+
+      - name: Upload Trivy SARIF to Code Scanning
+        if: always() && hashFiles('security-reports/trivy-fs.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: security-reports/trivy-fs.sarif
+          checkout_path: ${{ env.APP_PATH }}
+          category: rest-api-release-trivy-fs
+        continue-on-error: true
+
+      - name: Upload security reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-security-reports
+          path: security-reports/
+          retention-days: 30
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------------------
+  # 4. Packaging — production WAR + Docker image for deploy pipelines
+  # ---------------------------------------------------------------------------
+  # Spring Boot WAR deploy model:
+  #   - build: ./mvnw -B -ntp -DskipTests package
+  #   - artifact under target/: *.war (packaging=war) or executable *.jar
+  #   - deploy unit: versioned binary + stable name for overall-project-deploy
+  # Docker image deploy model:
+  #   - base: tomcat:10.1-jdk21-temurin (matches Spring Boot 4 / Jakarta EE)
+  #   - WAR copied to /usr/local/tomcat/webapps/ROOT.war
+  #   - image saved as .tar.gz artifact; pushed to GHCR outside pull requests
+  # Do not ship source trees or the local .m2 cache.
+  # ---------------------------------------------------------------------------
+  packaging:
+    name: Packaging
+    runs-on: ubuntu-latest
+    # Integration listed first: highest-priority dependency before QC/Security/package
+    needs: [integration, quality-control, security-testing]
+    timeout-minutes: 30
+    steps:
+      - name: Checkout calling repository (release / push head)
+        if: needs.integration.outputs.checkout_mode == 'caller'
+        uses: actions/checkout@v4
+        with:
+          path: ${{ env.APP_PATH }}
+
+      - name: Checkout remote application repository
+        if: needs.integration.outputs.checkout_mode == 'remote'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ needs.integration.outputs.app_repository }}
+          ref: ${{ needs.integration.outputs.app_ref }}
+          path: ${{ env.APP_PATH }}
+
+      - name: Setup Java ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: ${{ env.JAVA_DISTRIBUTION }}
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+          cache-dependency-path: ${{ env.APP_PATH }}/pom.xml
+
+      - name: Ensure Maven Wrapper is executable
+        working-directory: ${{ env.APP_PATH }}
+        run: chmod +x ./mvnw
+
+      - name: Production package (WAR, skip re-running tests)
+        working-directory: ${{ env.APP_PATH }}
+        run: |
+          set -euo pipefail
+          ./mvnw -B -ntp -DskipTests package
+          echo "==> target/ after package"
+          ls -lah target/ || true
+
+      - name: Verify and stage release package (WAR)
+        id: package
+        working-directory: ${{ env.APP_PATH }}
+        run: |
+          set -euo pipefail
+          VERSION="$(./mvnw -B -q -DforceStdout help:evaluate -Dexpression=project.version)"
+          ARTIFACT_ID="$(./mvnw -B -q -DforceStdout help:evaluate -Dexpression=project.artifactId)"
+          PACKAGING="$(./mvnw -B -q -DforceStdout help:evaluate -Dexpression=project.packaging)"
+          SHORT_SHA="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+          RUN_ID="${{ github.run_number }}"
+
+          # Prefer primary packaging type from pom (war); fall back to jar.
+          BUILD_FILE=""
+          if [ "${PACKAGING}" = "war" ]; then
+            BUILD_FILE="$(find target -maxdepth 1 -type f -name '*.war' ! -name '*-sources.war' ! -name '*-javadoc.war' | head -n 1 || true)"
+            if [ -z "${BUILD_FILE}" ]; then
+              echo "::error::pom packaging is war but no deployable .war found under target/"
+              ls -lah target/ || true
+              exit 1
+            fi
+          fi
+          if [ -z "${BUILD_FILE}" ]; then
+            BUILD_FILE="$(find target -maxdepth 1 -type f \( -name '*.war' -o -name '*.jar' \) \
+              ! -name '*-sources.*' ! -name '*-javadoc.*' ! -name '*-plain.jar' | head -n 1 || true)"
+          fi
+          if [ -z "${BUILD_FILE}" ] || [ ! -f "${BUILD_FILE}" ]; then
+            echo "::error::No deployable .war/.jar found under target/ after package"
+            ls -lah target/ || true
+            exit 1
+          fi
+
+          EXT="${BUILD_FILE##*.}"
+          # Relative path for Docker COPY (build context = APP_PATH)
+          BUILD_FILE_REL="${BUILD_FILE#./}"
+          VERSIONED_NAME="heavy-rental-rest-api-v${VERSION}-build${RUN_ID}-${SHORT_SHA}.${EXT}"
+          STABLE_NAME="heavy-rental-rest-api.${EXT}"
+          VERSIONED_PATH="${{ github.workspace }}/${VERSIONED_NAME}"
+          STABLE_PATH="${{ github.workspace }}/${STABLE_NAME}"
+
+          cp "${BUILD_FILE}" "${VERSIONED_PATH}"
+          cp "${BUILD_FILE}" "${STABLE_PATH}"
+
+          # Fail packaging if staged WAR is empty or missing
+          if [ ! -s "${VERSIONED_PATH}" ] || [ ! -s "${STABLE_PATH}" ]; then
+            echo "::error::Staged release package is missing or empty"
+            exit 1
+          fi
+
+          file "${VERSIONED_PATH}" || true
+          ls -lh "${VERSIONED_PATH}" "${STABLE_PATH}" "${BUILD_FILE}"
+
+          IMAGE_TAG="v${VERSION}-build${RUN_ID}-${SHORT_SHA}"
+          IMAGE_LOCAL="${{ env.IMAGE_NAME }}:${IMAGE_TAG}"
+          IMAGE_LOCAL_LATEST="${{ env.IMAGE_NAME }}:latest"
+          IMAGE_REMOTE="ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${IMAGE_TAG}"
+          IMAGE_REMOTE_LATEST="ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:latest"
+          IMAGE_TAR="heavy-rental-rest-api-v${VERSION}-build${RUN_ID}-${SHORT_SHA}.tar.gz"
+
+          {
+            echo "version=${VERSION}"
+            echo "artifact_id=${ARTIFACT_ID}"
+            echo "packaging=${PACKAGING}"
+            echo "ext=${EXT}"
+            echo "short_sha=${SHORT_SHA}"
+            echo "versioned_name=${VERSIONED_NAME}"
+            echo "stable_name=${STABLE_NAME}"
+            echo "build_file=${BUILD_FILE}"
+            echo "build_file_rel=${BUILD_FILE_REL}"
+            echo "image_tag=${IMAGE_TAG}"
+            echo "image_local=${IMAGE_LOCAL}"
+            echo "image_local_latest=${IMAGE_LOCAL_LATEST}"
+            echo "image_remote=${IMAGE_REMOTE}"
+            echo "image_remote_latest=${IMAGE_REMOTE_LATEST}"
+            echo "image_tar=${IMAGE_TAR}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upload target WAR/JAR build outputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: rest-api-release-target
+          path: |
+            ${{ env.APP_PATH }}/target/*.war
+            ${{ env.APP_PATH }}/target/*.jar
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Upload versioned release package (WAR)
+        uses: actions/upload-artifact@v4
+        with:
+          name: rest-api-release-package
+          path: |
+            ${{ github.workspace }}/${{ steps.package.outputs.versioned_name }}
+            ${{ github.workspace }}/${{ steps.package.outputs.stable_name }}
+          retention-days: 14
+          if-no-files-found: error
+
+      # -------------------------------------------------------------------
+      # Docker image: Tomcat + packaged WAR for deployment
+      # Uses app Dockerfile when present; otherwise generates a WAR-based one.
+      # -------------------------------------------------------------------
+      - name: Prepare Dockerfile for WAR image
+        working-directory: ${{ env.APP_PATH }}
+        run: |
+          set -euo pipefail
+          WAR_REL="${{ steps.package.outputs.build_file_rel }}"
+          if [ ! -f "${WAR_REL}" ]; then
+            echo "::error::WAR for Docker build not found: ${WAR_REL}"
+            exit 1
+          fi
+
+          if [ -f Dockerfile ]; then
+            echo "Using Dockerfile from application repository"
+          else
+            echo "No app Dockerfile found — generating Tomcat WAR Dockerfile"
+            # App is packaging=war with tomcat provided → external Tomcat image
+            {
+              echo "# Generated by rest-api release packaging (Spring Boot WAR → Tomcat)"
+              echo "FROM ${{ env.TOMCAT_BASE_IMAGE }}"
+              echo "LABEL org.opencontainers.image.title=\"${{ env.IMAGE_NAME }}\""
+              echo "LABEL org.opencontainers.image.description=\"Heavy Rental Spring REST API (WAR on Tomcat)\""
+              echo "LABEL org.opencontainers.image.source=\"https://github.com/${{ needs.integration.outputs.app_repository }}\""
+              echo "LABEL org.opencontainers.image.revision=\"${{ steps.package.outputs.short_sha }}\""
+              echo "LABEL org.opencontainers.image.version=\"${{ steps.package.outputs.version }}\""
+              echo ""
+              echo "# Clear default Tomcat apps; deploy API as root context"
+              echo "RUN rm -rf /usr/local/tomcat/webapps/*"
+              echo ""
+              echo "COPY ${WAR_REL} /usr/local/tomcat/webapps/ROOT.war"
+              echo ""
+              echo "EXPOSE 8080"
+              echo 'CMD ["catalina.sh", "run"]'
+            } > Dockerfile
+          fi
+
+          echo "==> Dockerfile"
+          cat Dockerfile
+          echo "==> WAR for image: ${WAR_REL} ($(wc -c < "${WAR_REL}") bytes)"
+
+      - name: Build Docker image
+        id: docker
+        working-directory: ${{ env.APP_PATH }}
+        run: |
+          set -euo pipefail
+          IMAGE_LOCAL="${{ steps.package.outputs.image_local }}"
+          IMAGE_LOCAL_LATEST="${{ steps.package.outputs.image_local_latest }}"
+          IMAGE_REMOTE="${{ steps.package.outputs.image_remote }}"
+          IMAGE_REMOTE_LATEST="${{ steps.package.outputs.image_remote_latest }}"
+
+          docker build \
+            --pull \
+            -t "${IMAGE_LOCAL}" \
+            -t "${IMAGE_LOCAL_LATEST}" \
+            -t "${IMAGE_REMOTE}" \
+            -t "${IMAGE_REMOTE_LATEST}" \
+            .
+
+          echo "==> Images built"
+          docker images "${{ env.IMAGE_NAME }}" --format 'table {{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.Size}}'
+          docker images "ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}" --format 'table {{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.Size}}' || true
+
+          # Export image for deploy pipelines that load from artifact (no registry required)
+          TAR_PATH="${{ github.workspace }}/${{ steps.package.outputs.image_tar }}"
+          docker save "${IMAGE_LOCAL}" | gzip -c > "${TAR_PATH}"
+          ls -lh "${TAR_PATH}"
+          if [ ! -s "${TAR_PATH}" ]; then
+            echo "::error::Docker image tar is missing or empty: ${TAR_PATH}"
+            exit 1
+          fi
+
+          {
+            echo "image_id=$(docker image inspect -f '{{.Id}}' "${IMAGE_LOCAL}")"
+            echo "tar_path=${TAR_PATH}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upload Docker image archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: rest-api-release-docker-image
+          path: ${{ github.workspace }}/${{ steps.package.outputs.image_tar }}
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Login to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push Docker image to GHCR
+        if: github.event_name != 'pull_request'
+        run: |
+          set -euo pipefail
+          docker push "${{ steps.package.outputs.image_remote }}"
+          docker push "${{ steps.package.outputs.image_remote_latest }}"
+          echo "Pushed:"
+          echo "  ${{ steps.package.outputs.image_remote }}"
+          echo "  ${{ steps.package.outputs.image_remote_latest }}"
+
+      - name: Packaging summary
+        run: |
+          {
+            echo "### Packaging complete (Spring Boot REST API)"
+            echo ""
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Application | \`${{ needs.integration.outputs.app_repository }}\` |"
+            echo "| Ref | \`${{ needs.integration.outputs.app_ref }}\` |"
+            echo "| ArtifactId | \`${{ steps.package.outputs.artifact_id }}\` |"
+            echo "| Version | \`${{ steps.package.outputs.version }}\` |"
+            echo "| Packaging | \`${{ steps.package.outputs.packaging }}\` |"
+            echo "| Commit | \`${{ steps.package.outputs.short_sha }}\` |"
+            echo "| Versioned WAR | \`${{ steps.package.outputs.versioned_name }}\` |"
+            echo "| Stable WAR | \`${{ steps.package.outputs.stable_name }}\` |"
+            echo "| Docker image (local) | \`${{ steps.package.outputs.image_local }}\` |"
+            echo "| Docker image (GHCR) | \`${{ steps.package.outputs.image_remote }}\` |"
+            echo "| Image archive | \`${{ steps.package.outputs.image_tar }}\` |"
+            echo "| Image ID | \`${{ steps.docker.outputs.image_id }}\` |"
+            echo "| Artifacts | \`rest-api-release-target\`, \`rest-api-release-package\`, \`rest-api-release-docker-image\` |"
+            echo ""
+            echo "### Deploy options"
+            echo ""
+            echo "1. **WAR** — download \`rest-api-release-package\` and deploy \`.${{ steps.package.outputs.ext }}\` to a servlet container."
+            echo "2. **Image archive** — \`docker load < ${{ steps.package.outputs.image_tar }}\` then run \`${{ steps.package.outputs.image_local }}\`."
+            if [ "${{ github.event_name }}" != "pull_request" ]; then
+              echo "3. **GHCR** — \`docker pull ${{ steps.package.outputs.image_remote }}\` (also tagged \`:latest\`)."
+            else
+              echo "3. **GHCR** — push skipped on pull_request; image is available as the tar artifact only."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

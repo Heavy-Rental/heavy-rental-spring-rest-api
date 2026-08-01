@@ -1,0 +1,684 @@
+# =============================================================================
+# Heavy Rental Spring REST API — Integration CI Pipeline (reusable)
+# =============================================================================
+# Stages (priority order — Integration is highest priority):
+#   1. Integration      (HIGHEST) checkout, Java 21 + Maven, resolve deps, layout
+#   2. Quality Control  needs Integration — compile, tests (Postgres), package WAR
+#   3. Security Testing needs Integration — SAST (Semgrep) + SCA/FS (Trivy)
+#      + github/codeql-action/upload-sarif@v2 → GitHub Code Scanning
+#   4. GitHub Flow CI Gate — single status check: Integration must pass first
+#
+# GitHub Flow (https://docs.github.com/en/get-started/using-github/github-flow)
+# --------------------------------------------------------------------------
+# Designed for short-lived feature branches → pull request → review → merge
+# into master/main. This workflow is the PR / merge validation gate.
+#
+#   1. Create a branch from master/main
+#   2. Open a pull request → this CI runs on the PR head (Integration first)
+#   3. Require status checks on master/main (branch protection):
+#        - "Integration"              ← highest priority / must pass first
+#        - "Quality Control"
+#        - "Security Testing"
+#        - "GitHub Flow CI Gate"       ← optional single aggregate check
+#   4. Merge PR when green → master/main stays deployable
+#   5. Release packaging runs separately (rest-api-release.yml) on main / tags
+#
+# How the REST API uses this
+# --------------------------
+# Install both files into the Spring REST API repository:
+#
+#   .github/workflows/integration-pipeline.yml   ← this file (reusable)
+#   .github/workflows/rest-api-ci-caller.yml      ← entry point (push/PR)
+#
+# The caller invokes this workflow with:
+#   uses: ./.github/workflows/integration-pipeline.yml
+#
+# Also mirrored in the pipeline-development repo for discovery/testing:
+#   .github/workflows/rest-api-ci.yml
+# Keep this file and that mirror in sync when developing here.
+#
+# Local validation (pipeline-development repo root, in the devcontainer):
+#   actionlint heavy-rental-rest-api/integration-pipeline/integration-pipeline.yml
+#   actionlint .github/workflows/rest-api-ci.yml
+#   act -W .github/workflows/rest-api-ci.yml -j integration
+#
+# Required GitHub Actions secrets (no credentials in this YAML)
+# -------------------------------------------------------------
+# Configure under Settings → Secrets and variables → Actions on:
+#   - heavy-rental-project-pipeline-development  (manual / path-triggered runs)
+#   - heavy-rental-spring-rest-api               (PR CI via caller + secrets: inherit)
+#
+#   REST_API_DB_NAME      PostgreSQL database name (service POSTGRES_DB)
+#   REST_API_DB_USER      PostgreSQL username    (service POSTGRES_USER + Spring)
+#   REST_API_DB_PASSWORD  PostgreSQL password    (service POSTGRES_PASSWORD + Spring)
+#   REST_API_DB_PORT      Host port mapped to the Postgres service (e.g. 5432)
+#   REST_API_DB_URL       JDBC URL for tests; port must match REST_API_DB_PORT
+#                         e.g. jdbc:postgresql://localhost:<port>/<db>
+#
+# Never commit real values. Callers must use secrets: inherit (or map these secrets).
+# Secret values are never written to logs or step summaries.
+# =============================================================================
+
+name: REST API CI
+
+on:
+  # Called by rest-api-ci-caller.yml in the same repo (same-repo reusable workflow)
+  workflow_call:
+    inputs:
+      app_repository:
+        description: >
+          Override application repository (owner/name). Leave empty to use the
+          calling repository (required for PR checks on the REST API).
+        required: false
+        type: string
+        default: ""
+      app_ref:
+        description: >
+          Override git ref (branch/tag/SHA). Leave empty to use the calling
+          workflow's commit (github.sha) — correct for pull_request events.
+        required: false
+        type: string
+        default: ""
+    secrets:
+      REST_API_DB_NAME:
+        description: PostgreSQL database name for the CI service container
+        required: true
+      REST_API_DB_USER:
+        description: PostgreSQL username for the CI service container and Spring tests
+        required: true
+      REST_API_DB_PASSWORD:
+        description: PostgreSQL password for the CI service container and Spring tests
+        required: true
+      REST_API_DB_PORT:
+        description: >
+          Host port published for the CI PostgreSQL service container
+          (must match the port in REST_API_DB_URL)
+        required: true
+      REST_API_DB_URL:
+        description: >
+          Full JDBC URL for Spring tests (typically
+          jdbc:postgresql://localhost:<REST_API_DB_PORT>/<database>)
+        required: true
+
+  # Manual run from this pipeline-development repository
+  workflow_dispatch:
+    inputs:
+      app_repository:
+        description: GitHub repository of the Spring REST API (owner/name)
+        required: false
+        default: SA62-team1/heavy-rental-spring-rest-api
+        type: string
+      app_ref:
+        description: Branch, tag, or commit SHA of the REST API
+        required: false
+        default: master
+        type: string
+
+  # When the CI workflow definitions themselves change, re-validate (master/develop only).
+  # Paths assume install layout in the Spring REST API repo:
+  #   .github/workflows/integration-pipeline.yml
+  #   .github/workflows/rest-api-ci-caller.yml
+  push:
+    branches: [master, develop]
+    paths:
+      - ".github/workflows/integration-pipeline.yml"
+      - ".github/workflows/rest-api-ci-caller.yml"
+  pull_request:
+    branches: [master, develop]
+    paths:
+      - ".github/workflows/integration-pipeline.yml"
+      - ".github/workflows/rest-api-ci-caller.yml"
+
+# GitHub Flow: one concurrent run per PR (or branch); newer pushes cancel stale runs
+concurrency:
+  group: rest-api-ci-${{ github.workflow }}-${{ github.repository }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  # pull_request events need read to resolve PR head metadata when called from the API repo
+  pull-requests: read
+  # Required for github/codeql-action/upload-sarif (Security stage → Code Scanning)
+  security-events: write
+  actions: read
+
+env:
+  JAVA_VERSION: "21"
+  JAVA_DISTRIBUTION: temurin
+  APP_PATH: app
+  DEFAULT_APP_REPOSITORY: SA62-team1/heavy-rental-spring-rest-api
+  DEFAULT_APP_REF: master
+  # Non-sensitive Spring/JPA settings only — credentials come from GitHub Secrets
+  SPRING_DATASOURCE_DRIVER_CLASS_NAME: org.postgresql.Driver
+  SPRING_JPA_DATABASE_PLATFORM: org.hibernate.dialect.PostgreSQLDialect
+  MAVEN_OPTS: "-Dhttps.protocols=TLSv1.2 -Dmaven.wagon.http.retryHandler.count=3"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 1. Integration — HIGHEST PRIORITY (GitHub Flow PR gate starts here)
+  #    All other jobs declare needs: integration so they never run if this fails.
+  # ---------------------------------------------------------------------------
+  integration:
+    name: Integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Fail-fast entry point for the entire workflow
+    outputs:
+      app_repository: ${{ steps.meta.outputs.app_repository }}
+      app_ref: ${{ steps.meta.outputs.app_ref }}
+      checkout_mode: ${{ steps.meta.outputs.checkout_mode }}
+    steps:
+      - name: Resolve application source (caller PR vs remote REST API)
+        id: meta
+        run: |
+          set -euo pipefail
+          EVENT="${{ github.event_name }}"
+          INPUT_REPO="${{ inputs.app_repository }}"
+          INPUT_REF="${{ inputs.app_ref }}"
+
+          # workflow_call from the REST API: default to the caller's PR/push commit
+          if [ "$EVENT" = "workflow_call" ]; then
+            if [ -n "$INPUT_REPO" ] && [ "$INPUT_REPO" != "${{ github.repository }}" ]; then
+              APP_REPO="$INPUT_REPO"
+              APP_REF="${INPUT_REF:-${{ env.DEFAULT_APP_REF }}}"
+              MODE=remote
+            else
+              APP_REPO="${{ github.repository }}"
+              APP_REF="${INPUT_REF:-${{ github.sha }}}"
+              MODE=caller
+            fi
+          # Manual run from pipeline-development: check out the API by input/default
+          elif [ "$EVENT" = "workflow_dispatch" ]; then
+            APP_REPO="${INPUT_REPO:-${{ env.DEFAULT_APP_REPOSITORY }}}"
+            APP_REF="${INPUT_REF:-${{ env.DEFAULT_APP_REF }}}"
+            MODE=remote
+          # push/PR on pipeline-development (pipeline definition changed)
+          else
+            APP_REPO="${{ env.DEFAULT_APP_REPOSITORY }}"
+            APP_REF="${{ env.DEFAULT_APP_REF }}"
+            MODE=remote
+          fi
+
+          echo "app_repository=$APP_REPO" >> "$GITHUB_OUTPUT"
+          echo "app_ref=$APP_REF" >> "$GITHUB_OUTPUT"
+          echo "checkout_mode=$MODE" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Source resolution"
+            echo ""
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Event | \`$EVENT\` |"
+            echo "| Mode | \`$MODE\` |"
+            echo "| Repository | \`$APP_REPO\` |"
+            echo "| Ref | \`$APP_REF\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "Integrating application: $APP_REPO @ $APP_REF (mode=$MODE)"
+
+      - name: Checkout calling repository (PR / push head)
+        if: steps.meta.outputs.checkout_mode == 'caller'
+        uses: actions/checkout@v4
+        with:
+          path: ${{ env.APP_PATH }}
+
+      - name: Checkout remote application repository
+        if: steps.meta.outputs.checkout_mode == 'remote'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.meta.outputs.app_repository }}
+          ref: ${{ steps.meta.outputs.app_ref }}
+          path: ${{ env.APP_PATH }}
+
+      - name: Setup Java ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: ${{ env.JAVA_DISTRIBUTION }}
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+          cache-dependency-path: ${{ env.APP_PATH }}/pom.xml
+
+      - name: Ensure Maven Wrapper is executable
+        working-directory: ${{ env.APP_PATH }}
+        run: |
+          set -euo pipefail
+          if [ -f ./mvnw ]; then
+            chmod +x ./mvnw
+            echo "Using Maven Wrapper (./mvnw)"
+          else
+            echo "::error::mvnw not found — this pipeline expects the Maven Wrapper in the REST API repo."
+            exit 1
+          fi
+
+      - name: Resolve Maven dependencies
+        working-directory: ${{ env.APP_PATH }}
+        run: |
+          set -euo pipefail
+          ./mvnw -B -ntp dependency:resolve dependency:resolve-plugins
+
+      - name: Verify project layout and toolchain
+        working-directory: ${{ env.APP_PATH }}
+        run: |
+          set -euo pipefail
+          echo "==> Java / Maven versions"
+          java -version
+          ./mvnw -v
+          echo "==> Required files"
+          test -f pom.xml
+          test -f mvnw
+          test -d src/main/java
+          test -d src/main/resources
+          echo "==> Packaging from pom.xml"
+          PACKAGING="$(./mvnw -B -q -DforceStdout help:evaluate -Dexpression=project.packaging)"
+          ARTIFACT="$(./mvnw -B -q -DforceStdout help:evaluate -Dexpression=project.artifactId)"
+          VERSION="$(./mvnw -B -q -DforceStdout help:evaluate -Dexpression=project.version)"
+          JAVA_PROP="$(./mvnw -B -q -DforceStdout help:evaluate -Dexpression=java.version || true)"
+          echo "artifactId=$ARTIFACT version=$VERSION packaging=$PACKAGING java.version=$JAVA_PROP"
+          {
+            echo "### Integration checks"
+            echo ""
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Artifact | \`$ARTIFACT\` |"
+            echo "| Version | \`$VERSION\` |"
+            echo "| Packaging | \`$PACKAGING\` |"
+            echo "| Java (pom) | \`$JAVA_PROP\` |"
+            echo "| Runner Java | \`${{ env.JAVA_VERSION }}\` (${{ env.JAVA_DISTRIBUTION }}) |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "Integration checks passed."
+
+      - name: Upload Maven project fingerprint
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-metadata
+          path: |
+            ${{ env.APP_PATH }}/pom.xml
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # 2. Quality control — runs only after Integration succeeds (priority 2)
+  # ---------------------------------------------------------------------------
+  quality-control:
+    name: Quality Control
+    runs-on: ubuntu-latest
+    # Highest-priority gate: never start QC unless Integration passed
+    needs: [integration]
+    timeout-minutes: 30
+    # PostgreSQL is started with Docker in a step (not jobs.services) so host port,
+    # credentials, and JDBC URL can all come from GitHub Secrets. The services.*
+    # ports field does not allow the secrets context.
+    steps:
+      - name: Verify required database secrets are configured
+        env:
+          # Bind secrets into env so emptiness can be checked without printing values.
+          # GitHub masks secret values in logs automatically.
+          REST_API_DB_NAME: ${{ secrets.REST_API_DB_NAME }}
+          REST_API_DB_USER: ${{ secrets.REST_API_DB_USER }}
+          REST_API_DB_PASSWORD: ${{ secrets.REST_API_DB_PASSWORD }}
+          REST_API_DB_PORT: ${{ secrets.REST_API_DB_PORT }}
+          REST_API_DB_URL: ${{ secrets.REST_API_DB_URL }}
+        run: |
+          set -euo pipefail
+          missing=()
+          [ -n "${REST_API_DB_NAME}" ] || missing+=(REST_API_DB_NAME)
+          [ -n "${REST_API_DB_USER}" ] || missing+=(REST_API_DB_USER)
+          [ -n "${REST_API_DB_PASSWORD}" ] || missing+=(REST_API_DB_PASSWORD)
+          [ -n "${REST_API_DB_PORT}" ] || missing+=(REST_API_DB_PORT)
+          [ -n "${REST_API_DB_URL}" ] || missing+=(REST_API_DB_URL)
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::Missing required GitHub Actions secrets: ${missing[*]}"
+            echo "Configure them under Settings → Secrets and variables → Actions."
+            echo "See header comments in rest-api-ci.yml for secret names."
+            exit 1
+          fi
+          # Port must be numeric (do not echo the secret value)
+          if ! [[ "${REST_API_DB_PORT}" =~ ^[0-9]+$ ]]; then
+            echo "::error::REST_API_DB_PORT must be a numeric TCP port."
+            exit 1
+          fi
+          echo "All required database secrets are present (values not logged)."
+
+      - name: Checkout calling repository (PR / push head)
+        if: needs.integration.outputs.checkout_mode == 'caller'
+        uses: actions/checkout@v4
+        with:
+          path: ${{ env.APP_PATH }}
+
+      - name: Checkout remote application repository
+        if: needs.integration.outputs.checkout_mode == 'remote'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ needs.integration.outputs.app_repository }}
+          ref: ${{ needs.integration.outputs.app_ref }}
+          path: ${{ env.APP_PATH }}
+
+      - name: Setup Java ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: ${{ env.JAVA_DISTRIBUTION }}
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+          cache-dependency-path: ${{ env.APP_PATH }}/pom.xml
+
+      - name: Ensure Maven Wrapper is executable
+        working-directory: ${{ env.APP_PATH }}
+        run: chmod +x ./mvnw
+
+      - name: Start PostgreSQL (Docker; credentials and port from secrets)
+        env:
+          REST_API_DB_NAME: ${{ secrets.REST_API_DB_NAME }}
+          REST_API_DB_USER: ${{ secrets.REST_API_DB_USER }}
+          REST_API_DB_PASSWORD: ${{ secrets.REST_API_DB_PASSWORD }}
+          REST_API_DB_PORT: ${{ secrets.REST_API_DB_PORT }}
+        run: |
+          set -euo pipefail
+          docker rm -f rest-api-ci-postgres >/dev/null 2>&1 || true
+          # Host port from secret → container listens on Postgres image default 5432
+          docker run -d --name rest-api-ci-postgres \
+            -e POSTGRES_DB="${REST_API_DB_NAME}" \
+            -e POSTGRES_USER="${REST_API_DB_USER}" \
+            -e POSTGRES_PASSWORD="${REST_API_DB_PASSWORD}" \
+            -p "${REST_API_DB_PORT}:5432" \
+            postgres:16-alpine
+          echo "PostgreSQL container started (port from REST_API_DB_PORT secret)."
+
+      - name: Wait for PostgreSQL
+        env:
+          REST_API_DB_PORT: ${{ secrets.REST_API_DB_PORT }}
+          REST_API_DB_USER: ${{ secrets.REST_API_DB_USER }}
+        run: |
+          set -euo pipefail
+          PORT="${REST_API_DB_PORT}"
+          for i in $(seq 1 30); do
+            if docker exec rest-api-ci-postgres pg_isready -U "${REST_API_DB_USER}" >/dev/null 2>&1; then
+              echo "PostgreSQL is accepting connections (port from REST_API_DB_PORT secret)"
+              exit 0
+            fi
+            if timeout 1 bash -c "cat < /dev/null > /dev/tcp/127.0.0.1/${PORT}" 2>/dev/null; then
+              # TCP open; give pg_isready one more chance next loop
+              :
+            fi
+            echo "Waiting for PostgreSQL... ($i)"
+            sleep 2
+          done
+          echo "::error::PostgreSQL did not become ready in time on the configured port"
+          docker logs rest-api-ci-postgres 2>&1 | tail -n 50 || true
+          exit 1
+
+      - name: Compile (main + test sources)
+        working-directory: ${{ env.APP_PATH }}
+        run: ./mvnw -B -ntp -DskipTests compile test-compile
+
+      - name: Unit and Spring Boot tests
+        working-directory: ${{ env.APP_PATH }}
+        env:
+          # Spring Boot binds these env vars automatically — do not pass passwords
+          # on the Maven CLI (would appear in process listings).
+          SPRING_DATASOURCE_URL: ${{ secrets.REST_API_DB_URL }}
+          SPRING_DATASOURCE_USERNAME: ${{ secrets.REST_API_DB_USER }}
+          SPRING_DATASOURCE_PASSWORD: ${{ secrets.REST_API_DB_PASSWORD }}
+          SPRING_DATASOURCE_DRIVER_CLASS_NAME: ${{ env.SPRING_DATASOURCE_DRIVER_CLASS_NAME }}
+          SPRING_JPA_DATABASE_PLATFORM: ${{ env.SPRING_JPA_DATABASE_PLATFORM }}
+        run: |
+          set -euo pipefail
+          mkdir -p "${{ github.workspace }}/test-reports"
+          ./mvnw -B -ntp test
+          # Collect surefire / failsafe reports when present
+          if [ -d target/surefire-reports ]; then
+            cp -a target/surefire-reports "${{ github.workspace }}/test-reports/" || true
+          fi
+          if [ -d target/failsafe-reports ]; then
+            cp -a target/failsafe-reports "${{ github.workspace }}/test-reports/" || true
+          fi
+
+      - name: Package WAR (skip re-running tests)
+        working-directory: ${{ env.APP_PATH }}
+        run: |
+          set -euo pipefail
+          ./mvnw -B -ntp -DskipTests package
+          echo "==> Build artifacts"
+          ls -lah target/ || true
+          WAR_COUNT="$(find target -maxdepth 1 -type f \( -name '*.war' -o -name '*.jar' \) | wc -l | tr -d ' ')"
+          if [ "${WAR_COUNT}" -lt 1 ]; then
+            echo "::error::No .war/.jar produced under target/ after package"
+            exit 1
+          fi
+          find target -maxdepth 1 -type f \( -name '*.war' -o -name '*.jar' \) -ls
+          {
+            echo "### Quality control"
+            echo ""
+            echo "Compile, tests, and package completed successfully."
+            echo ""
+            echo "Artifacts:"
+            echo '```'
+            find target -maxdepth 1 -type f \( -name '*.war' -o -name '*.jar' \) -printf '%f (%s bytes)\n' || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Stop PostgreSQL
+        if: always()
+        run: |
+          set -euo pipefail
+          docker rm -f rest-api-ci-postgres >/dev/null 2>&1 || true
+          echo "PostgreSQL container stopped."
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: quality-test-reports
+          path: |
+            test-reports/
+            ${{ env.APP_PATH }}/target/surefire-reports/
+            ${{ env.APP_PATH }}/target/failsafe-reports/
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Upload packaged artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rest-api-package
+          path: |
+            ${{ env.APP_PATH }}/target/*.war
+            ${{ env.APP_PATH }}/target/*.jar
+          retention-days: 7
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------------------
+  # 3. Security testing — runs only after Integration succeeds (priority 2,
+  #    parallel with Quality Control so Integration remains the critical path)
+  # ---------------------------------------------------------------------------
+  security-testing:
+    name: Security Testing
+    runs-on: ubuntu-latest
+    # Highest-priority gate: never start Security unless Integration passed
+    needs: [integration]
+    timeout-minutes: 25
+    steps:
+      - name: Checkout calling repository (PR / push head)
+        if: needs.integration.outputs.checkout_mode == 'caller'
+        uses: actions/checkout@v4
+        with:
+          path: ${{ env.APP_PATH }}
+
+      - name: Checkout remote application repository
+        if: needs.integration.outputs.checkout_mode == 'remote'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ needs.integration.outputs.app_repository }}
+          ref: ${{ needs.integration.outputs.app_ref }}
+          path: ${{ env.APP_PATH }}
+
+      - name: Create security reports directory
+        run: mkdir -p "${{ github.workspace }}/security-reports"
+
+      # --- SAST: static analysis of application source (Java / Spring) ---
+      - name: Setup Python (Semgrep)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Semgrep
+        run: pip install --quiet semgrep
+
+      - name: SAST — Semgrep (Java / Spring / OWASP)
+        working-directory: ${{ env.APP_PATH }}
+        run: |
+          set -euo pipefail
+          REPORT_DIR="${{ github.workspace }}/security-reports"
+          # Human-readable report (always written; does not gate the step alone)
+          semgrep scan \
+            --config=p/java \
+            --config=p/spring \
+            --config=p/owasp-top-ten \
+            --config=p/security-audit \
+            --metrics=off \
+            --text \
+            --output="${REPORT_DIR}/semgrep.txt" \
+            . || true
+          # SARIF for dashboards / code scanning consumers
+          semgrep scan \
+            --config=p/java \
+            --config=p/spring \
+            --config=p/owasp-top-ten \
+            --config=p/security-audit \
+            --metrics=off \
+            --sarif \
+            --output="${REPORT_DIR}/semgrep.sarif" \
+            . || true
+          # Gate CI: fail on ERROR findings (WARNING/INFO still reported above)
+          echo "==> SAST gate (ERROR severity)"
+          semgrep scan \
+            --config=p/java \
+            --config=p/spring \
+            --config=p/owasp-top-ten \
+            --config=p/security-audit \
+            --metrics=off \
+            --severity=ERROR \
+            --error \
+            --text \
+            .
+          echo "SAST (Semgrep) passed — no ERROR-level findings."
+          if [ -f "${REPORT_DIR}/semgrep.txt" ]; then
+            echo "==> Semgrep report (excerpt)"
+            head -n 100 "${REPORT_DIR}/semgrep.txt" || true
+          fi
+
+      # --- SCA + filesystem: dependency and secret/vuln scan via Trivy ---
+      - name: Setup Java ${{ env.JAVA_VERSION }} (for dependency resolution before scan)
+        uses: actions/setup-java@v4
+        with:
+          distribution: ${{ env.JAVA_DISTRIBUTION }}
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+          cache-dependency-path: ${{ env.APP_PATH }}/pom.xml
+
+      - name: Resolve dependencies for SCA coverage
+        working-directory: ${{ env.APP_PATH }}
+        run: |
+          set -euo pipefail
+          chmod +x ./mvnw
+          # Materialize the local .m2 / target dependency graph Trivy can inspect
+          ./mvnw -B -ntp -DskipTests dependency:resolve dependency:copy-dependencies \
+            -DoutputDirectory=target/dependency || \
+          ./mvnw -B -ntp -DskipTests dependency:resolve
+
+      - name: Trivy filesystem vulnerability scan (SCA + FS)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: ${{ env.APP_PATH }}
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          format: table
+          output: security-reports/trivy-fs.txt
+          ignore-unfixed: true
+
+      - name: Trivy filesystem scan (SARIF artifact)
+        if: always()
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: ${{ env.APP_PATH }}
+          severity: HIGH,CRITICAL
+          exit-code: "0"
+          format: sarif
+          output: security-reports/trivy-fs.sarif
+          ignore-unfixed: true
+
+      # --- GitHub Code Scanning: publish SARIF (Semgrep + Trivy) ---
+      - name: Upload Semgrep SARIF to Code Scanning
+        if: always() && hashFiles('security-reports/semgrep.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: security-reports/semgrep.sarif
+          # App is checked out under APP_PATH so path mapping matches the scan root
+          checkout_path: ${{ env.APP_PATH }}
+          category: rest-api-semgrep
+        # Do not fail the Security job if Code Scanning is unavailable (e.g. GHAS off)
+        continue-on-error: true
+
+      - name: Upload Trivy SARIF to Code Scanning
+        if: always() && hashFiles('security-reports/trivy-fs.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: security-reports/trivy-fs.sarif
+          checkout_path: ${{ env.APP_PATH }}
+          category: rest-api-trivy-fs
+        continue-on-error: true
+
+      - name: Upload security reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-reports
+          path: security-reports/
+          retention-days: 30
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------------------
+  # 4. GitHub Flow CI gate — aggregate status for branch protection
+  #    Integration is evaluated first (highest priority); then QC and Security.
+  # ---------------------------------------------------------------------------
+  github-flow-gate:
+    name: GitHub Flow CI Gate
+    runs-on: ubuntu-latest
+    # Always run so a failed Integration still produces a red gate check
+    if: always()
+    needs: [integration, quality-control, security-testing]
+    timeout-minutes: 5
+    steps:
+      - name: Enforce Integration priority and full CI green
+        run: |
+          set -euo pipefail
+          INTEGRATION="${{ needs.integration.result }}"
+          QUALITY="${{ needs.quality-control.result }}"
+          SECURITY="${{ needs.security-testing.result }}"
+
+          {
+            echo "### GitHub Flow CI gate"
+            echo ""
+            echo "| Job | Result | Priority |"
+            echo "| --- | --- | --- |"
+            echo "| Integration | \`${INTEGRATION}\` | **1 (highest)** |"
+            echo "| Quality Control | \`${QUALITY}\` | 2 |"
+            echo "| Security Testing | \`${SECURITY}\` | 2 |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          echo "Integration (priority 1): ${INTEGRATION}"
+          echo "Quality Control (priority 2): ${QUALITY}"
+          echo "Security Testing (priority 2): ${SECURITY}"
+
+          if [ "${INTEGRATION}" != "success" ]; then
+            echo "::error::Integration is the highest-priority gate and did not succeed (result=${INTEGRATION})."
+            echo "Fix Integration before Quality Control / Security Testing can proceed."
+            exit 1
+          fi
+          if [ "${QUALITY}" != "success" ]; then
+            echo "::error::Quality Control did not succeed (result=${QUALITY})."
+            exit 1
+          fi
+          if [ "${SECURITY}" != "success" ]; then
+            echo "::error::Security Testing did not succeed (result=${SECURITY})."
+            exit 1
+          fi
+
+          echo "GitHub Flow CI gate passed: Integration first, then Quality Control + Security Testing."
