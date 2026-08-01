@@ -23,7 +23,7 @@
 # REST_API_DB_URL is optional — after Docker Postgres starts, QC builds:
 #   jdbc:postgresql://localhost:<PORT>/<NAME>
 #
-# secrets: inherit forwards repository secrets into the reusable workflow;
+# explicit secrets: map forwards repository secrets into the reusable workflow;
 # Environment secrets are available on the QC job via environment: integration.
 # =============================================================================
 
@@ -54,5 +54,9 @@ jobs:
     uses: ./.github/workflows/integration-pipeline.yml
     with:
       github_environment: integration
-    # Forwards repository secrets; Environment secrets load on QC via environment:
-    secrets: inherit
+    # Explicit secrets only (Semgrep: avoid secrets: inherit)
+    secrets:
+      REST_API_DB_NAME: ${{ secrets.REST_API_DB_NAME }}
+      REST_API_DB_USER: ${{ secrets.REST_API_DB_USER }}
+      REST_API_DB_PASSWORD: ${{ secrets.REST_API_DB_PASSWORD }}
+      REST_API_DB_PORT: ${{ secrets.REST_API_DB_PORT }}

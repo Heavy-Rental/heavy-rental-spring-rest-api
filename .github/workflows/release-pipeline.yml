@@ -62,12 +62,12 @@
 # Required GitHub Actions secrets (no credentials in this YAML)
 # -------------------------------------------------------------
 # Configure under Settings → Secrets and variables → Actions on:
-#   - heavy-rental-spring-rest-api  (via rest-api-release-caller.yml + secrets: inherit)
+#   - heavy-rental-spring-rest-api  (via rest-api-release-caller.yml + explicit secrets map)
 #
 # Cloud deployment secrets (distinct from CI REST_API_DB_* used by integration-pipeline).
 # Secrets (configure in the APPLICATION repo: heavy-rental-spring-rest-api)
 # -----------------------------------------------------------------------
-# Quality Control uses environment: production (hardcoded) and secrets: inherit.
+# Quality Control uses environment: production (hardcoded) and explicit secrets map.
 #
 # Recommended (either works):
 #   A) Settings → Environments → production → Environment secrets
@@ -88,7 +88,7 @@
 #   Password is never embedded in either URL.
 #
 # Do not reuse REST_API_DB_* here — those are for integration CI.
-# Caller must use secrets: inherit. Do not set environment: on the caller uses: job.
+# Caller must use explicit secrets map. Do not set environment: on the caller uses: job.
 # Never commit real values.
 # =============================================================================
 
@@ -177,11 +177,13 @@ jobs:
         env:
           # github context is that of the caller workflow for reusable workflows
           WORKFLOW_REF: ${{ github.workflow_ref }}
+          EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_NAME: ${{ github.workflow }}
         run: |
           set -euo pipefail
           echo "github.workflow_ref=${WORKFLOW_REF}"
-          echo "github.event_name=${{ github.event_name }}"
-          echo "github.workflow=${{ github.workflow }}"
+          echo "github.event_name=${EVENT_NAME}"
+          echo "github.workflow=${WORKFLOW_NAME}"
           case "${WORKFLOW_REF}" in
             */.github/workflows/rest-api-release-caller.yml@*)
               echo "Allowed caller: rest-api-release-caller.yml"
@@ -213,21 +215,29 @@ jobs:
     steps:
       - name: Resolve application source (same-repo caller vs remote override)
         id: meta
+        env:
+          # Bind contexts here — never interpolate github/inputs directly in run: scripts
+          # (avoids Semgrep run-shell-injection).
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_REPO: ${{ inputs.app_repository }}
+          INPUT_REF: ${{ inputs.app_ref }}
+          GH_REPOSITORY: ${{ github.repository }}
+          GH_SHA: ${{ github.sha }}
+          DEFAULT_APP_REF_VALUE: ${{ env.DEFAULT_APP_REF }}
         run: |
           set -euo pipefail
-          # This workflow is workflow_call-only; github.* reflects the caller event.
-          EVENT="${{ github.event_name }}"
-          INPUT_REPO="${{ inputs.app_repository }}"
-          INPUT_REF="${{ inputs.app_ref }}"
+          EVENT="${EVENT_NAME}"
+          INPUT_REPO="${INPUT_REPO}"
+          INPUT_REF="${INPUT_REF}"
 
-          if [ -n "$INPUT_REPO" ] && [ "$INPUT_REPO" != "${{ github.repository }}" ]; then
-            APP_REPO="$INPUT_REPO"
-            APP_REF="${INPUT_REF:-${{ env.DEFAULT_APP_REF }}}"
+          if [ -n "${INPUT_REPO}" ] && [ "${INPUT_REPO}" != "${GH_REPOSITORY}" ]; then
+            APP_REPO="${INPUT_REPO}"
+            APP_REF="${INPUT_REF:-${DEFAULT_APP_REF_VALUE}}"
             MODE=remote
           else
-            # rest-api-release-caller.yml in the same repo: use this commit
-            APP_REPO="${{ github.repository }}"
-            APP_REF="${INPUT_REF:-${{ github.sha }}}"
+            # Same-repo caller: use this commit
+            APP_REPO="${GH_REPOSITORY}"
+            APP_REF="${INPUT_REF:-${GH_SHA}}"
             MODE=caller
           fi
 
@@ -333,7 +343,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [integration]
     # Hardcoded Environment name (reliable for Environment secrets).
-    # Also receives repository secrets via secrets: inherit from the caller.
+    # Also receives repository secrets via explicit secrets map from the caller.
     environment: production
     timeout-minutes: 30
     outputs:
@@ -352,7 +362,7 @@ jobs:
           REST_API_CLOUD_DB_PORT: ${{ secrets.REST_API_CLOUD_DB_PORT }}
         run: |
           set -euo pipefail
-          echo "Quality Control secrets source: GitHub Environment 'production' and/or repository secrets (via secrets: inherit)."
+          echo "Quality Control secrets source: GitHub Environment 'production' and/or repository secrets (via explicit secrets map)."
           missing=()
           [ -n "${REST_API_CLOUD_DB_HOST}" ] || missing+=(REST_API_CLOUD_DB_HOST)
           [ -n "${REST_API_CLOUD_DB_NAME}" ] || missing+=(REST_API_CLOUD_DB_NAME)
@@ -372,7 +382,7 @@ jobs:
             echo "  REST_API_CLOUD_DB_PASSWORD, REST_API_CLOUD_DB_PORT"
             echo "  (JDBC URLs are derived — localhost for tests, HOST for cloud deploy)"
             echo ""
-            echo "Caller must include: secrets: inherit"
+            echo "Caller must include: explicit secrets map"
             echo "This job uses: environment: production"
             echo "Do not use REST_API_DB_* here (those are for CI / Environment integration)."
             exit 1
@@ -500,14 +510,15 @@ jobs:
             exit 1
           fi
           echo "Running tests with SPRING_DATASOURCE_URL derived from Docker Postgres (password not logged)."
-          mkdir -p "${{ github.workspace }}/test-reports"
+          # Use runner-native $GITHUB_WORKSPACE (never ${{ github.* }} inside run: scripts)
+          mkdir -p "${GITHUB_WORKSPACE}/test-reports"
           ./mvnw -B -ntp test
           # Collect surefire / failsafe reports when present
           if [ -d target/surefire-reports ]; then
-            cp -a target/surefire-reports "${{ github.workspace }}/test-reports/" || true
+            cp -a target/surefire-reports "${GITHUB_WORKSPACE}/test-reports/" || true
           fi
           if [ -d target/failsafe-reports ]; then
-            cp -a target/failsafe-reports "${{ github.workspace }}/test-reports/" || true
+            cp -a target/failsafe-reports "${GITHUB_WORKSPACE}/test-reports/" || true
           fi
 
       - name: Package WAR (skip re-running tests)
@@ -588,7 +599,7 @@ jobs:
           path: ${{ env.APP_PATH }}
 
       - name: Create security reports directory
-        run: mkdir -p "${{ github.workspace }}/security-reports"
+        run: mkdir -p "${GITHUB_WORKSPACE}/security-reports"
 
       # --- SAST: static analysis (standard report format: SARIF) ---
       - name: Setup Python (Semgrep)
@@ -599,36 +610,54 @@ jobs:
       - name: Install Semgrep
         run: pip install --quiet semgrep
 
-      - name: SAST — Semgrep (Java / Spring / OWASP) → SARIF
+      - name: SAST — Semgrep (Java / OWASP) → SARIF
         working-directory: ${{ env.APP_PATH }}
         run: |
           set -euo pipefail
-          REPORT_DIR="${{ github.workspace }}/security-reports"
-          # Standard security report format: SARIF 2.1.0
+          REPORT_DIR="${GITHUB_WORKSPACE}/security-reports"
           # Note: p/spring was removed from the Semgrep registry (HTTP 404).
-          # Use p/java + OWASP + security-audit + secrets for Java/Spring apps.
-          semgrep scan \
-            --config=p/java \
-            --config=p/owasp-top-ten \
-            --config=p/security-audit \
-            --config=p/secrets \
-            --metrics=off \
+          SEMGREP_COMMON=(
+            --config=p/java
+            --config=p/owasp-top-ten
+            --config=p/security-audit
+            --config=p/secrets
+            --metrics=off
+          )
+
+          # --- Pass 1: always write SARIF (standard report). Does not fail the step. ---
+          echo "==> Semgrep report (SARIF 2.1.0)"
+          set +e
+          semgrep scan "${SEMGREP_COMMON[@]}" \
             --sarif \
             --output="${REPORT_DIR}/semgrep.sarif" \
-            . || true
-          # Gate CI: fail on ERROR findings (console only; report remains SARIF)
-          echo "==> SAST gate (ERROR severity)"
-          semgrep scan \
-            --config=p/java \
-            --config=p/owasp-top-ten \
-            --config=p/security-audit \
-            --config=p/secrets \
-            --metrics=off \
+            .
+          SARIF_RC=$?
+          set -e
+          if [ -f "${REPORT_DIR}/semgrep.sarif" ]; then
+            echo "SARIF written: ${REPORT_DIR}/semgrep.sarif (semgrep exit=${SARIF_RC}; non-zero is OK for report pass)"
+          else
+            echo "::warning::semgrep.sarif was not produced (exit=${SARIF_RC})"
+          fi
+
+          # --- Pass 2: CI gate — fail only if ERROR-severity findings exist. ---
+          echo "==> SAST gate (ERROR severity only; exit 1 if findings)"
+          set +e
+          semgrep scan "${SEMGREP_COMMON[@]}" \
             --severity=ERROR \
             --error \
             --text \
             .
-          echo "SAST (Semgrep) passed — SARIF report: security-reports/semgrep.sarif"
+          GATE_RC=$?
+          set -e
+          if [ "${GATE_RC}" -ne 0 ]; then
+            echo "::error::Semgrep SAST gate failed (exit=${GATE_RC})."
+            echo "The SARIF report may still have been written successfully."
+            echo "This step fails because --severity=ERROR --error found ERROR-level issues"
+            echo "(or Semgrep could not complete the gate scan)."
+            echo "Open security-reports/semgrep.sarif or the text findings above."
+            exit "${GATE_RC}"
+          fi
+          echo "SAST (Semgrep) gate passed — no ERROR-level findings. SARIF: security-reports/semgrep.sarif"
 
       # --- SCA + filesystem: dependency and secret/vuln scan via Trivy (SARIF) ---
       - name: Setup Java ${{ env.JAVA_VERSION }} (for dependency resolution before scan)
@@ -823,7 +852,7 @@ jobs:
             echo "REST_API_CLOUD_DB_URL_CLOUD=${CLOUD_JDBC}"
           } >> "$GITHUB_ENV"
           # Deploy env file for overall-project-deploy (no password)
-          mkdir -p "${{ github.workspace }}/release-deploy-config"
+          mkdir -p "${GITHUB_WORKSPACE}/release-deploy-config"
           {
             echo "# Generated by rest-api release packaging — cloud datasource (no password)"
             echo "SPRING_DATASOURCE_URL=${CLOUD_JDBC}"
@@ -831,7 +860,7 @@ jobs:
             echo "SPRING_DATASOURCE_DRIVER_CLASS_NAME=org.postgresql.Driver"
             echo "SPRING_JPA_DATABASE_PLATFORM=org.hibernate.dialect.PostgreSQLDialect"
             echo "# Set SPRING_DATASOURCE_PASSWORD from production secret at deploy time"
-          } > "${{ github.workspace }}/release-deploy-config/spring-datasource.env"
+          } > "${GITHUB_WORKSPACE}/release-deploy-config/spring-datasource.env"
           {
             echo "### Cloud JDBC (for deploy)"
             echo ""
@@ -885,13 +914,18 @@ jobs:
       - name: Verify and stage release package (WAR)
         id: package
         working-directory: ${{ env.APP_PATH }}
+        env:
+          # Bind github context for use in shell (Semgrep: no ${{ github.* }} in run:)
+          GH_RUN_NUMBER: ${{ github.run_number }}
+          GH_REPOSITORY_OWNER: ${{ github.repository_owner }}
+          IMAGE_NAME: ${{ env.IMAGE_NAME }}
         run: |
           set -euo pipefail
           VERSION="$(./mvnw -B -q -DforceStdout help:evaluate -Dexpression=project.version)"
           ARTIFACT_ID="$(./mvnw -B -q -DforceStdout help:evaluate -Dexpression=project.artifactId)"
           PACKAGING="$(./mvnw -B -q -DforceStdout help:evaluate -Dexpression=project.packaging)"
           SHORT_SHA="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
-          RUN_ID="${{ github.run_number }}"
+          RUN_ID="${GH_RUN_NUMBER}"
 
           # Prefer primary packaging type from pom (war); fall back to jar.
           BUILD_FILE=""
@@ -918,8 +952,8 @@ jobs:
           BUILD_FILE_REL="${BUILD_FILE#./}"
           VERSIONED_NAME="heavy-rental-rest-api-v${VERSION}-build${RUN_ID}-${SHORT_SHA}.${EXT}"
           STABLE_NAME="heavy-rental-rest-api.${EXT}"
-          VERSIONED_PATH="${{ github.workspace }}/${VERSIONED_NAME}"
-          STABLE_PATH="${{ github.workspace }}/${STABLE_NAME}"
+          VERSIONED_PATH="${GITHUB_WORKSPACE}/${VERSIONED_NAME}"
+          STABLE_PATH="${GITHUB_WORKSPACE}/${STABLE_NAME}"
 
           cp "${BUILD_FILE}" "${VERSIONED_PATH}"
           cp "${BUILD_FILE}" "${STABLE_PATH}"
@@ -934,10 +968,10 @@ jobs:
           ls -lh "${VERSIONED_PATH}" "${STABLE_PATH}" "${BUILD_FILE}"
 
           IMAGE_TAG="v${VERSION}-build${RUN_ID}-${SHORT_SHA}"
-          IMAGE_LOCAL="${{ env.IMAGE_NAME }}:${IMAGE_TAG}"
-          IMAGE_LOCAL_LATEST="${{ env.IMAGE_NAME }}:latest"
-          IMAGE_REMOTE="ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${IMAGE_TAG}"
-          IMAGE_REMOTE_LATEST="ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:latest"
+          IMAGE_LOCAL="${IMAGE_NAME}:${IMAGE_TAG}"
+          IMAGE_LOCAL_LATEST="${IMAGE_NAME}:latest"
+          IMAGE_REMOTE="ghcr.io/${GH_REPOSITORY_OWNER}/${IMAGE_NAME}:${IMAGE_TAG}"
+          IMAGE_REMOTE_LATEST="ghcr.io/${GH_REPOSITORY_OWNER}/${IMAGE_NAME}:latest"
           IMAGE_TAR="heavy-rental-rest-api-v${VERSION}-build${RUN_ID}-${SHORT_SHA}.tar.gz"
 
           {
@@ -1023,12 +1057,16 @@ jobs:
       - name: Build Docker image
         id: docker
         working-directory: ${{ env.APP_PATH }}
+        env:
+          IMAGE_NAME: ${{ env.IMAGE_NAME }}
+          GH_REPOSITORY_OWNER: ${{ github.repository_owner }}
+          IMAGE_LOCAL: ${{ steps.package.outputs.image_local }}
+          IMAGE_LOCAL_LATEST: ${{ steps.package.outputs.image_local_latest }}
+          IMAGE_REMOTE: ${{ steps.package.outputs.image_remote }}
+          IMAGE_REMOTE_LATEST: ${{ steps.package.outputs.image_remote_latest }}
+          IMAGE_TAR: ${{ steps.package.outputs.image_tar }}
         run: |
           set -euo pipefail
-          IMAGE_LOCAL="${{ steps.package.outputs.image_local }}"
-          IMAGE_LOCAL_LATEST="${{ steps.package.outputs.image_local_latest }}"
-          IMAGE_REMOTE="${{ steps.package.outputs.image_remote }}"
-          IMAGE_REMOTE_LATEST="${{ steps.package.outputs.image_remote_latest }}"
 
           docker build \
             --pull \
@@ -1039,11 +1077,11 @@ jobs:
             .
 
           echo "==> Images built"
-          docker images "${{ env.IMAGE_NAME }}" --format 'table {{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.Size}}'
-          docker images "ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}" --format 'table {{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.Size}}' || true
+          docker images "${IMAGE_NAME}" --format 'table {{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.Size}}'
+          docker images "ghcr.io/${GH_REPOSITORY_OWNER}/${IMAGE_NAME}" --format 'table {{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.Size}}' || true
 
           # Export image for deploy pipelines that load from artifact (no registry required)
-          TAR_PATH="${{ github.workspace }}/${{ steps.package.outputs.image_tar }}"
+          TAR_PATH="${GITHUB_WORKSPACE}/${IMAGE_TAR}"
           docker save "${IMAGE_LOCAL}" | gzip -c > "${TAR_PATH}"
           ls -lh "${TAR_PATH}"
           if [ ! -s "${TAR_PATH}" ]; then
@@ -1083,32 +1121,47 @@ jobs:
           echo "  ${{ steps.package.outputs.image_remote_latest }}"
 
       - name: Packaging summary
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          APP_REPOSITORY: ${{ needs.integration.outputs.app_repository }}
+          APP_REF: ${{ needs.integration.outputs.app_ref }}
+          ARTIFACT_ID: ${{ steps.package.outputs.artifact_id }}
+          VERSION: ${{ steps.package.outputs.version }}
+          PACKAGING: ${{ steps.package.outputs.packaging }}
+          SHORT_SHA: ${{ steps.package.outputs.short_sha }}
+          VERSIONED_NAME: ${{ steps.package.outputs.versioned_name }}
+          STABLE_NAME: ${{ steps.package.outputs.stable_name }}
+          IMAGE_LOCAL: ${{ steps.package.outputs.image_local }}
+          IMAGE_REMOTE: ${{ steps.package.outputs.image_remote }}
+          IMAGE_TAR: ${{ steps.package.outputs.image_tar }}
+          IMAGE_ID: ${{ steps.docker.outputs.image_id }}
+          EXT: ${{ steps.package.outputs.ext }}
         run: |
           {
             echo "### Packaging complete (Spring Boot REST API)"
             echo ""
             echo "| Field | Value |"
             echo "| --- | --- |"
-            echo "| Application | \`${{ needs.integration.outputs.app_repository }}\` |"
-            echo "| Ref | \`${{ needs.integration.outputs.app_ref }}\` |"
-            echo "| ArtifactId | \`${{ steps.package.outputs.artifact_id }}\` |"
-            echo "| Version | \`${{ steps.package.outputs.version }}\` |"
-            echo "| Packaging | \`${{ steps.package.outputs.packaging }}\` |"
-            echo "| Commit | \`${{ steps.package.outputs.short_sha }}\` |"
-            echo "| Versioned WAR | \`${{ steps.package.outputs.versioned_name }}\` |"
-            echo "| Stable WAR | \`${{ steps.package.outputs.stable_name }}\` |"
-            echo "| Docker image (local) | \`${{ steps.package.outputs.image_local }}\` |"
-            echo "| Docker image (GHCR) | \`${{ steps.package.outputs.image_remote }}\` |"
-            echo "| Image archive | \`${{ steps.package.outputs.image_tar }}\` |"
-            echo "| Image ID | \`${{ steps.docker.outputs.image_id }}\` |"
+            echo "| Application | \`${APP_REPOSITORY}\` |"
+            echo "| Ref | \`${APP_REF}\` |"
+            echo "| ArtifactId | \`${ARTIFACT_ID}\` |"
+            echo "| Version | \`${VERSION}\` |"
+            echo "| Packaging | \`${PACKAGING}\` |"
+            echo "| Commit | \`${SHORT_SHA}\` |"
+            echo "| Versioned WAR | \`${VERSIONED_NAME}\` |"
+            echo "| Stable WAR | \`${STABLE_NAME}\` |"
+            echo "| Docker image (local) | \`${IMAGE_LOCAL}\` |"
+            echo "| Docker image (GHCR) | \`${IMAGE_REMOTE}\` |"
+            echo "| Image archive | \`${IMAGE_TAR}\` |"
+            echo "| Image ID | \`${IMAGE_ID}\` |"
             echo "| Artifacts | \`rest-api-release-target\`, \`rest-api-release-package\`, \`rest-api-release-docker-image\` |"
             echo ""
             echo "### Deploy options"
             echo ""
-            echo "1. **WAR** — download \`rest-api-release-package\` and deploy \`.${{ steps.package.outputs.ext }}\` to a servlet container."
-            echo "2. **Image archive** — \`docker load < ${{ steps.package.outputs.image_tar }}\` then run \`${{ steps.package.outputs.image_local }}\`."
-            if [ "${{ github.event_name }}" != "pull_request" ]; then
-              echo "3. **GHCR** — \`docker pull ${{ steps.package.outputs.image_remote }}\` (also tagged \`:latest\`)."
+            echo "1. **WAR** — download \`rest-api-release-package\` and deploy \`.${EXT}\` to a servlet container."
+            echo "2. **Image archive** — \`docker load < ${IMAGE_TAR}\` then run \`${IMAGE_LOCAL}\`."
+            if [ "${EVENT_NAME}" != "pull_request" ]; then
+              echo "3. **GHCR** — \`docker pull ${IMAGE_REMOTE}\` (also tagged \`:latest\`)."
             else
               echo "3. **GHCR** — push skipped on pull_request; image is available as the tar artifact only."
             fi
