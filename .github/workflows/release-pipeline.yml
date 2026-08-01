@@ -62,20 +62,33 @@
 # Required GitHub Actions secrets (no credentials in this YAML)
 # -------------------------------------------------------------
 # Configure under Settings → Secrets and variables → Actions on:
-#   - heavy-rental-spring-rest-api  (via rest-api-release-caller.yml + secrets: inherit)
+#   - heavy-rental-spring-rest-api  (via rest-api-release-caller.yml + explicit secrets map)
 #
 # Cloud deployment secrets (distinct from CI REST_API_DB_* used by integration-pipeline).
-# Prefer GitHub Environments (Settings → Environments). Caller sets `environment:`
-# and secrets: inherit so environment-scoped secrets are visible.
+# Secrets (configure in the APPLICATION repo: heavy-rental-spring-rest-api)
+# -----------------------------------------------------------------------
+# Quality Control uses environment: production (hardcoded) and explicit secrets map.
 #
-# Environment: production  (develop → master PR and published GitHub Release)
+# Recommended (either works):
+#   A) Settings → Environments → production → Environment secrets
+#   B) Settings → Secrets and variables → Actions → Repository secrets
+#
+# Names (exact match):
+#   REST_API_CLOUD_DB_HOST     Cloud Postgres hostname (e.g. db.example.com)
 #   REST_API_CLOUD_DB_NAME
 #   REST_API_CLOUD_DB_USER
 #   REST_API_CLOUD_DB_PASSWORD
 #   REST_API_CLOUD_DB_PORT
-#   REST_API_CLOUD_DB_URL
 #
-# Do not reuse REST_API_DB_* here — those are for integration CI (env: integration).
+# JDBC URLs are derived (not stored as secrets):
+#   After Start PostgreSQL (for Spring tests on the runner):
+#     jdbc:postgresql://localhost:<PORT>/<NAME>
+#   Cloud JDBC (for packaging / deploy after QC):
+#     jdbc:postgresql://<HOST>:<PORT>/<NAME>
+#   Password is never embedded in either URL.
+#
+# Do not reuse REST_API_DB_* here — those are for integration CI.
+# Caller must use explicit secrets map. Do not set environment: on the caller uses: job.
 # Never commit real values.
 # =============================================================================
 
@@ -102,34 +115,27 @@ on:
         default: ""
       github_environment:
         description: >
-          GitHub Environment name for environment-scoped cloud secrets.
-          Release uses production (develop→master PR and published release).
-          Must match the caller's `environment:`.
+          GitHub Environment name for the Quality Control job (default production).
         required: false
         type: string
         default: production
     secrets:
-      # Cloud deployment DB credentials (not the same as CI REST_API_DB_*)
+      REST_API_CLOUD_DB_HOST:
+        description: Cloud deploy — PostgreSQL hostname (not localhost)
+        required: false
       REST_API_CLOUD_DB_NAME:
         description: Cloud deploy — PostgreSQL database name
-        required: true
+        required: false
       REST_API_CLOUD_DB_USER:
         description: Cloud deploy — PostgreSQL username
-        required: true
+        required: false
       REST_API_CLOUD_DB_PASSWORD:
         description: Cloud deploy — PostgreSQL password
-        required: true
+        required: false
       REST_API_CLOUD_DB_PORT:
-        description: >
-          Cloud deploy — host port for the release PostgreSQL service container
-          (must match the port in REST_API_CLOUD_DB_URL when testing locally)
-        required: true
-      REST_API_CLOUD_DB_URL:
-        description: >
-          Cloud deploy — full JDBC URL for Spring tests / deploy
-          (e.g. jdbc:postgresql://localhost:<REST_API_CLOUD_DB_PORT>/<database>
-          or a cloud-hosted JDBC URL)
-        required: true
+        description: Cloud deploy — PostgreSQL port (also mapped for local Docker tests)
+        required: false
+      # JDBC URLs are derived: localhost for QC tests, HOST for cloud deploy
 
 # One run per release tag or develop→master PR; do not cancel in-flight packaging
 concurrency:
@@ -171,11 +177,13 @@ jobs:
         env:
           # github context is that of the caller workflow for reusable workflows
           WORKFLOW_REF: ${{ github.workflow_ref }}
+          EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_NAME: ${{ github.workflow }}
         run: |
           set -euo pipefail
           echo "github.workflow_ref=${WORKFLOW_REF}"
-          echo "github.event_name=${{ github.event_name }}"
-          echo "github.workflow=${{ github.workflow }}"
+          echo "github.event_name=${EVENT_NAME}"
+          echo "github.workflow=${WORKFLOW_NAME}"
           case "${WORKFLOW_REF}" in
             */.github/workflows/rest-api-release-caller.yml@*)
               echo "Allowed caller: rest-api-release-caller.yml"
@@ -207,21 +215,29 @@ jobs:
     steps:
       - name: Resolve application source (same-repo caller vs remote override)
         id: meta
+        env:
+          # Bind contexts here — never interpolate github/inputs directly in run: scripts
+          # (avoids Semgrep run-shell-injection).
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_REPO: ${{ inputs.app_repository }}
+          INPUT_REF: ${{ inputs.app_ref }}
+          GH_REPOSITORY: ${{ github.repository }}
+          GH_SHA: ${{ github.sha }}
+          DEFAULT_APP_REF_VALUE: ${{ env.DEFAULT_APP_REF }}
         run: |
           set -euo pipefail
-          # This workflow is workflow_call-only; github.* reflects the caller event.
-          EVENT="${{ github.event_name }}"
-          INPUT_REPO="${{ inputs.app_repository }}"
-          INPUT_REF="${{ inputs.app_ref }}"
+          EVENT="${EVENT_NAME}"
+          INPUT_REPO="${INPUT_REPO}"
+          INPUT_REF="${INPUT_REF}"
 
-          if [ -n "$INPUT_REPO" ] && [ "$INPUT_REPO" != "${{ github.repository }}" ]; then
-            APP_REPO="$INPUT_REPO"
-            APP_REF="${INPUT_REF:-${{ env.DEFAULT_APP_REF }}}"
+          if [ -n "${INPUT_REPO}" ] && [ "${INPUT_REPO}" != "${GH_REPOSITORY}" ]; then
+            APP_REPO="${INPUT_REPO}"
+            APP_REF="${INPUT_REF:-${DEFAULT_APP_REF_VALUE}}"
             MODE=remote
           else
-            # rest-api-release-caller.yml in the same repo: use this commit
-            APP_REPO="${{ github.repository }}"
-            APP_REF="${INPUT_REF:-${{ github.sha }}}"
+            # Same-repo caller: use this commit
+            APP_REPO="${GH_REPOSITORY}"
+            APP_REF="${INPUT_REF:-${GH_SHA}}"
             MODE=caller
           fi
 
@@ -325,46 +341,57 @@ jobs:
   quality-control:
     name: Quality Control
     runs-on: ubuntu-latest
-    # Highest-priority gate: never start QC unless Integration passed
     needs: [integration]
-    # Load environment-scoped secrets (must match caller environment + secrets: inherit)
-    environment: ${{ inputs.github_environment }}
+    # Hardcoded Environment name (reliable for Environment secrets).
+    # Also receives repository secrets via explicit secrets map from the caller.
+    environment: production
     timeout-minutes: 30
-    # PostgreSQL is started with Docker in a step (not jobs.services) so host port,
-    # credentials, and JDBC URL can all come from GitHub Secrets. The services.*
-    # ports field does not allow the secrets context.
+    outputs:
+      # Cloud JDBC for packaging/deploy (host:port/db — no password)
+      cloud_jdbc_url: ${{ steps.dburl.outputs.cloud_jdbc_url }}
+      cloud_db_host: ${{ steps.dburl.outputs.cloud_db_host }}
+      cloud_db_port: ${{ steps.dburl.outputs.cloud_db_port }}
+      cloud_db_name: ${{ steps.dburl.outputs.cloud_db_name }}
     steps:
       - name: Verify required database secrets are configured
         env:
-          GITHUB_ENVIRONMENT: ${{ inputs.github_environment }}
-          # Bind secrets into env so emptiness can be checked without printing values.
-          # Values come from the selected GitHub Environment when environment: is set.
+          REST_API_CLOUD_DB_HOST: ${{ secrets.REST_API_CLOUD_DB_HOST }}
           REST_API_CLOUD_DB_NAME: ${{ secrets.REST_API_CLOUD_DB_NAME }}
           REST_API_CLOUD_DB_USER: ${{ secrets.REST_API_CLOUD_DB_USER }}
           REST_API_CLOUD_DB_PASSWORD: ${{ secrets.REST_API_CLOUD_DB_PASSWORD }}
           REST_API_CLOUD_DB_PORT: ${{ secrets.REST_API_CLOUD_DB_PORT }}
-          REST_API_CLOUD_DB_URL: ${{ secrets.REST_API_CLOUD_DB_URL }}
         run: |
           set -euo pipefail
-          echo "Using GitHub Environment for cloud secrets: ${GITHUB_ENVIRONMENT}"
+          echo "Quality Control secrets source: GitHub Environment 'production' and/or repository secrets (via explicit secrets map)."
           missing=()
+          [ -n "${REST_API_CLOUD_DB_HOST}" ] || missing+=(REST_API_CLOUD_DB_HOST)
           [ -n "${REST_API_CLOUD_DB_NAME}" ] || missing+=(REST_API_CLOUD_DB_NAME)
           [ -n "${REST_API_CLOUD_DB_USER}" ] || missing+=(REST_API_CLOUD_DB_USER)
           [ -n "${REST_API_CLOUD_DB_PASSWORD}" ] || missing+=(REST_API_CLOUD_DB_PASSWORD)
           [ -n "${REST_API_CLOUD_DB_PORT}" ] || missing+=(REST_API_CLOUD_DB_PORT)
-          [ -n "${REST_API_CLOUD_DB_URL}" ] || missing+=(REST_API_CLOUD_DB_URL)
           if [ "${#missing[@]}" -gt 0 ]; then
-            echo "::error::Missing required secrets for environment '${GITHUB_ENVIRONMENT}': ${missing[*]}"
-            echo "Configure them under Settings → Environments → ${GITHUB_ENVIRONMENT} → Environment secrets."
-            echo "Caller must set environment: ${GITHUB_ENVIRONMENT} and secrets: inherit."
-            echo "Use REST_API_CLOUD_DB_* (not CI REST_API_DB_*)."
+            echo "::error::Missing required secrets: ${missing[*]}"
+            echo ""
+            echo "Configure in the APPLICATION repository (where this workflow runs):"
+            echo "  1) Settings → Environments → production → Environment secrets"
+            echo "     OR"
+            echo "  2) Settings → Secrets and variables → Actions → Repository secrets"
+            echo ""
+            echo "Required names (exact, case-sensitive):"
+            echo "  REST_API_CLOUD_DB_HOST, REST_API_CLOUD_DB_NAME, REST_API_CLOUD_DB_USER,"
+            echo "  REST_API_CLOUD_DB_PASSWORD, REST_API_CLOUD_DB_PORT"
+            echo "  (JDBC URLs are derived — localhost for tests, HOST for cloud deploy)"
+            echo ""
+            echo "Caller must include: explicit secrets map"
+            echo "This job uses: environment: production"
+            echo "Do not use REST_API_DB_* here (those are for CI / Environment integration)."
             exit 1
           fi
           if ! [[ "${REST_API_CLOUD_DB_PORT}" =~ ^[0-9]+$ ]]; then
             echo "::error::REST_API_CLOUD_DB_PORT must be a numeric TCP port."
             exit 1
           fi
-          echo "All required cloud secrets are present for environment '${GITHUB_ENVIRONMENT}' (values not logged)."
+          echo "All required cloud secrets are present (values not logged)."
 
       - name: Checkout calling repository (release / push head)
         if: needs.integration.outputs.checkout_mode == 'caller'
@@ -393,7 +420,9 @@ jobs:
         run: chmod +x ./mvnw
 
       - name: Start PostgreSQL (Docker; cloud deploy secrets)
+        id: dburl
         env:
+          REST_API_CLOUD_DB_HOST: ${{ secrets.REST_API_CLOUD_DB_HOST }}
           REST_API_CLOUD_DB_NAME: ${{ secrets.REST_API_CLOUD_DB_NAME }}
           REST_API_CLOUD_DB_USER: ${{ secrets.REST_API_CLOUD_DB_USER }}
           REST_API_CLOUD_DB_PASSWORD: ${{ secrets.REST_API_CLOUD_DB_PASSWORD }}
@@ -401,14 +430,40 @@ jobs:
         run: |
           set -euo pipefail
           docker rm -f rest-api-release-postgres >/dev/null 2>&1 || true
-          # Host port from cloud deploy secret → container listens on Postgres default 5432
+          # Host port from secret → container listens on Postgres image default 5432
           docker run -d --name rest-api-release-postgres \
             -e POSTGRES_DB="${REST_API_CLOUD_DB_NAME}" \
             -e POSTGRES_USER="${REST_API_CLOUD_DB_USER}" \
             -e POSTGRES_PASSWORD="${REST_API_CLOUD_DB_PASSWORD}" \
             -p "${REST_API_CLOUD_DB_PORT}:5432" \
             postgres:16-alpine
-          echo "PostgreSQL container started (port from REST_API_CLOUD_DB_PORT secret)."
+
+          # 1) Local JDBC for Spring tests on this runner (Docker Postgres)
+          LOCAL_JDBC="jdbc:postgresql://localhost:${REST_API_CLOUD_DB_PORT}/${REST_API_CLOUD_DB_NAME}"
+          # 2) Cloud JDBC for packaging/deploy after QC (uses cloud host secret)
+          CLOUD_JDBC="jdbc:postgresql://${REST_API_CLOUD_DB_HOST}:${REST_API_CLOUD_DB_PORT}/${REST_API_CLOUD_DB_NAME}"
+
+          # GITHUB_ENV: available to later steps in this QC job
+          {
+            echo "REST_API_CLOUD_DB_URL=${LOCAL_JDBC}"
+            echo "REST_API_CLOUD_DB_URL_CLOUD=${CLOUD_JDBC}"
+            echo "REST_API_CLOUD_DB_HOST=${REST_API_CLOUD_DB_HOST}"
+            echo "REST_API_CLOUD_DB_NAME=${REST_API_CLOUD_DB_NAME}"
+            echo "REST_API_CLOUD_DB_USER=${REST_API_CLOUD_DB_USER}"
+            echo "REST_API_CLOUD_DB_PORT=${REST_API_CLOUD_DB_PORT}"
+          } >> "$GITHUB_ENV"
+
+          # Job outputs: packaging (and other jobs after QC) use cloud JDBC with HOST
+          {
+            echo "cloud_jdbc_url=${CLOUD_JDBC}"
+            echo "cloud_db_host=${REST_API_CLOUD_DB_HOST}"
+            echo "cloud_db_port=${REST_API_CLOUD_DB_PORT}"
+            echo "cloud_db_name=${REST_API_CLOUD_DB_NAME}"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "PostgreSQL container started."
+          echo "Local test URL: jdbc:postgresql://localhost:${REST_API_CLOUD_DB_PORT}/<db>"
+          echo "Cloud deploy URL: jdbc:postgresql://<host>:${REST_API_CLOUD_DB_PORT}/<db> (host from REST_API_CLOUD_DB_HOST)."
 
       - name: Wait for PostgreSQL
         env:
@@ -419,7 +474,7 @@ jobs:
           PORT="${REST_API_CLOUD_DB_PORT}"
           for i in $(seq 1 30); do
             if docker exec rest-api-release-postgres pg_isready -U "${REST_API_CLOUD_DB_USER}" >/dev/null 2>&1; then
-              echo "PostgreSQL is accepting connections (port from REST_API_CLOUD_DB_PORT secret)"
+              echo "PostgreSQL is accepting connections on localhost:${PORT}"
               exit 0
             fi
             if timeout 1 bash -c "cat < /dev/null > /dev/tcp/127.0.0.1/${PORT}" 2>/dev/null; then
@@ -442,21 +497,28 @@ jobs:
         env:
           # Spring Boot binds these env vars automatically — do not pass passwords
           # on the Maven CLI (would appear in process listings).
-          SPRING_DATASOURCE_URL: ${{ secrets.REST_API_CLOUD_DB_URL }}
+          # REST_API_CLOUD_DB_URL was built after Start PostgreSQL and written to GITHUB_ENV.
+          SPRING_DATASOURCE_URL: ${{ env.REST_API_CLOUD_DB_URL }}
           SPRING_DATASOURCE_USERNAME: ${{ secrets.REST_API_CLOUD_DB_USER }}
           SPRING_DATASOURCE_PASSWORD: ${{ secrets.REST_API_CLOUD_DB_PASSWORD }}
           SPRING_DATASOURCE_DRIVER_CLASS_NAME: ${{ env.SPRING_DATASOURCE_DRIVER_CLASS_NAME }}
           SPRING_JPA_DATABASE_PLATFORM: ${{ env.SPRING_JPA_DATABASE_PLATFORM }}
         run: |
           set -euo pipefail
-          mkdir -p "${{ github.workspace }}/test-reports"
+          if [ -z "${REST_API_CLOUD_DB_URL:-}" ]; then
+            echo "::error::REST_API_CLOUD_DB_URL is empty — Start PostgreSQL must export it via GITHUB_ENV."
+            exit 1
+          fi
+          echo "Running tests with SPRING_DATASOURCE_URL derived from Docker Postgres (password not logged)."
+          # Use runner-native $GITHUB_WORKSPACE (never ${{ github.* }} inside run: scripts)
+          mkdir -p "${GITHUB_WORKSPACE}/test-reports"
           ./mvnw -B -ntp test
           # Collect surefire / failsafe reports when present
           if [ -d target/surefire-reports ]; then
-            cp -a target/surefire-reports "${{ github.workspace }}/test-reports/" || true
+            cp -a target/surefire-reports "${GITHUB_WORKSPACE}/test-reports/" || true
           fi
           if [ -d target/failsafe-reports ]; then
-            cp -a target/failsafe-reports "${{ github.workspace }}/test-reports/" || true
+            cp -a target/failsafe-reports "${GITHUB_WORKSPACE}/test-reports/" || true
           fi
 
       - name: Package WAR (skip re-running tests)
@@ -537,7 +599,7 @@ jobs:
           path: ${{ env.APP_PATH }}
 
       - name: Create security reports directory
-        run: mkdir -p "${{ github.workspace }}/security-reports"
+        run: mkdir -p "${GITHUB_WORKSPACE}/security-reports"
 
       # --- SAST: static analysis (standard report format: SARIF) ---
       - name: Setup Python (Semgrep)
@@ -548,34 +610,54 @@ jobs:
       - name: Install Semgrep
         run: pip install --quiet semgrep
 
-      - name: SAST — Semgrep (Java / Spring / OWASP) → SARIF
+      - name: SAST — Semgrep (Java / OWASP) → SARIF
         working-directory: ${{ env.APP_PATH }}
         run: |
           set -euo pipefail
-          REPORT_DIR="${{ github.workspace }}/security-reports"
-          # Standard security report format: SARIF 2.1.0
-          semgrep scan \
-            --config=p/java \
-            --config=p/spring \
-            --config=p/owasp-top-ten \
-            --config=p/security-audit \
-            --metrics=off \
+          REPORT_DIR="${GITHUB_WORKSPACE}/security-reports"
+          # Note: p/spring was removed from the Semgrep registry (HTTP 404).
+          SEMGREP_COMMON=(
+            --config=p/java
+            --config=p/owasp-top-ten
+            --config=p/security-audit
+            --config=p/secrets
+            --metrics=off
+          )
+
+          # --- Pass 1: always write SARIF (standard report). Does not fail the step. ---
+          echo "==> Semgrep report (SARIF 2.1.0)"
+          set +e
+          semgrep scan "${SEMGREP_COMMON[@]}" \
             --sarif \
             --output="${REPORT_DIR}/semgrep.sarif" \
-            . || true
-          # Gate CI: fail on ERROR findings (console only; report remains SARIF)
-          echo "==> SAST gate (ERROR severity)"
-          semgrep scan \
-            --config=p/java \
-            --config=p/spring \
-            --config=p/owasp-top-ten \
-            --config=p/security-audit \
-            --metrics=off \
+            .
+          SARIF_RC=$?
+          set -e
+          if [ -f "${REPORT_DIR}/semgrep.sarif" ]; then
+            echo "SARIF written: ${REPORT_DIR}/semgrep.sarif (semgrep exit=${SARIF_RC}; non-zero is OK for report pass)"
+          else
+            echo "::warning::semgrep.sarif was not produced (exit=${SARIF_RC})"
+          fi
+
+          # --- Pass 2: CI gate — fail only if ERROR-severity findings exist. ---
+          echo "==> SAST gate (ERROR severity only; exit 1 if findings)"
+          set +e
+          semgrep scan "${SEMGREP_COMMON[@]}" \
             --severity=ERROR \
             --error \
             --text \
             .
-          echo "SAST (Semgrep) passed — SARIF report: security-reports/semgrep.sarif"
+          GATE_RC=$?
+          set -e
+          if [ "${GATE_RC}" -ne 0 ]; then
+            echo "::error::Semgrep SAST gate failed (exit=${GATE_RC})."
+            echo "The SARIF report may still have been written successfully."
+            echo "This step fails because --severity=ERROR --error found ERROR-level issues"
+            echo "(or Semgrep could not complete the gate scan)."
+            echo "Open security-reports/semgrep.sarif or the text findings above."
+            exit "${GATE_RC}"
+          fi
+          echo "SAST (Semgrep) gate passed — no ERROR-level findings. SARIF: security-reports/semgrep.sarif"
 
       # --- SCA + filesystem: dependency and secret/vuln scan via Trivy (SARIF) ---
       - name: Setup Java ${{ env.JAVA_VERSION }} (for dependency resolution before scan)
@@ -596,20 +678,41 @@ jobs:
             -DoutputDirectory=target/dependency || \
           ./mvnw -B -ntp -DskipTests dependency:resolve
 
-      - name: Trivy filesystem scan (SARIF)
-        uses: aquasecurity/trivy-action@0.28.0
+      # One shared Actions cache for vuln DB + Java DB (avoids ~100MB re-download per step).
+      # Weekly key; restore-keys fall back to any prior OS cache. Per-step trivy cache is off.
+      - name: Trivy cache key
+        id: trivy-cache-meta
+        run: echo "week=$(date -u +%Y-W%V)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Trivy DBs
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.cache/trivy
+          key: trivy-db-${{ runner.os }}-${{ steps.trivy-cache-meta.outputs.week }}
+          restore-keys: |
+            trivy-db-${{ runner.os }}-
+
+      # Pass 1: always write SARIF (standard report). Do not fail the step on findings —
+      # otherwise SARIF mode hides the vulns in the log and only shows exit code 1.
+      - name: Trivy filesystem scan (SARIF report)
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
           scan-ref: ${{ env.APP_PATH }}
           severity: HIGH,CRITICAL
-          exit-code: "1"
+          exit-code: "0"
           format: sarif
           output: security-reports/trivy-fs.sarif
           ignore-unfixed: true
+          scanners: vuln
+          # Shared job-level cache above; disable nested restore/save per scan
+          cache: "false"
+          cache-dir: ${{ github.workspace }}/.cache/trivy
 
+      # Pass 2: human-readable findings in the job log (never blocks).
       - name: Trivy filesystem scan (console table)
         if: always()
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
           scan-ref: ${{ env.APP_PATH }}
@@ -617,6 +720,23 @@ jobs:
           exit-code: "0"
           format: table
           ignore-unfixed: true
+          scanners: vuln
+          cache: "false"
+          cache-dir: ${{ github.workspace }}/.cache/trivy
+
+      # Pass 3: CI gate — fail only on CRITICAL, unfixed vulns (mirrors Semgrep ERROR gate).
+      - name: Trivy SCA gate (CRITICAL)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: ${{ env.APP_PATH }}
+          severity: CRITICAL
+          exit-code: "1"
+          format: table
+          ignore-unfixed: true
+          scanners: vuln
+          cache: "false"
+          cache-dir: ${{ github.workspace }}/.cache/trivy
 
       # --- Publish SARIF security reports to GitHub Code Scanning ---
       - name: Upload Semgrep SARIF to Code Scanning
@@ -736,8 +856,65 @@ jobs:
     runs-on: ubuntu-latest
     # Integration first; packaging waits for QC, Security, and CodeQL
     needs: [integration, quality-control, security-testing, codeql]
+    # Same Environment as QC so cloud secrets are available if rebuild is needed
+    environment: production
     timeout-minutes: 30
     steps:
+      - name: Resolve cloud JDBC URL (from QC outputs / secrets)
+        id: cloud-jdbc
+        env:
+          # Prefer URL built in QC (includes REST_API_CLOUD_DB_HOST)
+          QC_CLOUD_JDBC: ${{ needs.quality-control.outputs.cloud_jdbc_url }}
+          REST_API_CLOUD_DB_HOST: ${{ secrets.REST_API_CLOUD_DB_HOST }}
+          REST_API_CLOUD_DB_NAME: ${{ secrets.REST_API_CLOUD_DB_NAME }}
+          REST_API_CLOUD_DB_PORT: ${{ secrets.REST_API_CLOUD_DB_PORT }}
+          REST_API_CLOUD_DB_USER: ${{ secrets.REST_API_CLOUD_DB_USER }}
+        run: |
+          set -euo pipefail
+          if [ -n "${QC_CLOUD_JDBC}" ]; then
+            CLOUD_JDBC="${QC_CLOUD_JDBC}"
+            echo "Using cloud JDBC URL from Quality Control job outputs."
+          else
+            # Rebuild if outputs missing (same formula as QC)
+            if [ -z "${REST_API_CLOUD_DB_HOST}" ] || [ -z "${REST_API_CLOUD_DB_NAME}" ] || [ -z "${REST_API_CLOUD_DB_PORT}" ]; then
+              echo "::error::Cannot build cloud JDBC URL: need QC outputs or REST_API_CLOUD_DB_HOST/NAME/PORT secrets."
+              exit 1
+            fi
+            CLOUD_JDBC="jdbc:postgresql://${REST_API_CLOUD_DB_HOST}:${REST_API_CLOUD_DB_PORT}/${REST_API_CLOUD_DB_NAME}"
+            echo "Rebuilt cloud JDBC URL from production secrets."
+          fi
+          {
+            echo "cloud_jdbc_url=${CLOUD_JDBC}"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "REST_API_CLOUD_DB_URL_CLOUD=${CLOUD_JDBC}"
+          } >> "$GITHUB_ENV"
+          # Deploy env file for overall-project-deploy (no password)
+          mkdir -p "${GITHUB_WORKSPACE}/release-deploy-config"
+          {
+            echo "# Generated by rest-api release packaging — cloud datasource (no password)"
+            echo "SPRING_DATASOURCE_URL=${CLOUD_JDBC}"
+            echo "SPRING_DATASOURCE_USERNAME=${REST_API_CLOUD_DB_USER}"
+            echo "SPRING_DATASOURCE_DRIVER_CLASS_NAME=org.postgresql.Driver"
+            echo "SPRING_JPA_DATABASE_PLATFORM=org.hibernate.dialect.PostgreSQLDialect"
+            echo "# Set SPRING_DATASOURCE_PASSWORD from production secret at deploy time"
+          } > "${GITHUB_WORKSPACE}/release-deploy-config/spring-datasource.env"
+          {
+            echo "### Cloud JDBC (for deploy)"
+            echo ""
+            echo "Built after Quality Control using \`REST_API_CLOUD_DB_HOST\`."
+            echo ""
+            echo "\`SPRING_DATASOURCE_URL\` = \`jdbc:postgresql://<host>:<port>/<db>\` (password not stored in artifact)."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload cloud deploy datasource config
+        uses: actions/upload-artifact@v4
+        with:
+          name: rest-api-release-cloud-datasource
+          path: release-deploy-config/
+          retention-days: 14
+          if-no-files-found: error
+
       - name: Checkout calling repository (release / push head)
         if: needs.integration.outputs.checkout_mode == 'caller'
         uses: actions/checkout@v4
@@ -775,13 +952,18 @@ jobs:
       - name: Verify and stage release package (WAR)
         id: package
         working-directory: ${{ env.APP_PATH }}
+        env:
+          # Bind github context for use in shell (Semgrep: no ${{ github.* }} in run:)
+          GH_RUN_NUMBER: ${{ github.run_number }}
+          GH_REPOSITORY_OWNER: ${{ github.repository_owner }}
+          IMAGE_NAME: ${{ env.IMAGE_NAME }}
         run: |
           set -euo pipefail
           VERSION="$(./mvnw -B -q -DforceStdout help:evaluate -Dexpression=project.version)"
           ARTIFACT_ID="$(./mvnw -B -q -DforceStdout help:evaluate -Dexpression=project.artifactId)"
           PACKAGING="$(./mvnw -B -q -DforceStdout help:evaluate -Dexpression=project.packaging)"
           SHORT_SHA="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
-          RUN_ID="${{ github.run_number }}"
+          RUN_ID="${GH_RUN_NUMBER}"
 
           # Prefer primary packaging type from pom (war); fall back to jar.
           BUILD_FILE=""
@@ -808,8 +990,8 @@ jobs:
           BUILD_FILE_REL="${BUILD_FILE#./}"
           VERSIONED_NAME="heavy-rental-rest-api-v${VERSION}-build${RUN_ID}-${SHORT_SHA}.${EXT}"
           STABLE_NAME="heavy-rental-rest-api.${EXT}"
-          VERSIONED_PATH="${{ github.workspace }}/${VERSIONED_NAME}"
-          STABLE_PATH="${{ github.workspace }}/${STABLE_NAME}"
+          VERSIONED_PATH="${GITHUB_WORKSPACE}/${VERSIONED_NAME}"
+          STABLE_PATH="${GITHUB_WORKSPACE}/${STABLE_NAME}"
 
           cp "${BUILD_FILE}" "${VERSIONED_PATH}"
           cp "${BUILD_FILE}" "${STABLE_PATH}"
@@ -824,10 +1006,13 @@ jobs:
           ls -lh "${VERSIONED_PATH}" "${STABLE_PATH}" "${BUILD_FILE}"
 
           IMAGE_TAG="v${VERSION}-build${RUN_ID}-${SHORT_SHA}"
-          IMAGE_LOCAL="${{ env.IMAGE_NAME }}:${IMAGE_TAG}"
-          IMAGE_LOCAL_LATEST="${{ env.IMAGE_NAME }}:latest"
-          IMAGE_REMOTE="ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${IMAGE_TAG}"
-          IMAGE_REMOTE_LATEST="ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:latest"
+          # GHCR (and Docker Hub) require image repository path segments to be lowercase
+          IMAGE_NAME_LC="${IMAGE_NAME,,}"
+          OWNER_LC="${GH_REPOSITORY_OWNER,,}"
+          IMAGE_LOCAL="${IMAGE_NAME_LC}:${IMAGE_TAG}"
+          IMAGE_LOCAL_LATEST="${IMAGE_NAME_LC}:latest"
+          IMAGE_REMOTE="ghcr.io/${OWNER_LC}/${IMAGE_NAME_LC}:${IMAGE_TAG}"
+          IMAGE_REMOTE_LATEST="ghcr.io/${OWNER_LC}/${IMAGE_NAME_LC}:latest"
           IMAGE_TAR="heavy-rental-rest-api-v${VERSION}-build${RUN_ID}-${SHORT_SHA}.tar.gz"
 
           {
@@ -913,12 +1098,23 @@ jobs:
       - name: Build Docker image
         id: docker
         working-directory: ${{ env.APP_PATH }}
+        env:
+          IMAGE_NAME: ${{ env.IMAGE_NAME }}
+          GH_REPOSITORY_OWNER: ${{ github.repository_owner }}
+          IMAGE_LOCAL: ${{ steps.package.outputs.image_local }}
+          IMAGE_LOCAL_LATEST: ${{ steps.package.outputs.image_local_latest }}
+          IMAGE_REMOTE: ${{ steps.package.outputs.image_remote }}
+          IMAGE_REMOTE_LATEST: ${{ steps.package.outputs.image_remote_latest }}
+          IMAGE_TAR: ${{ steps.package.outputs.image_tar }}
         run: |
           set -euo pipefail
-          IMAGE_LOCAL="${{ steps.package.outputs.image_local }}"
-          IMAGE_LOCAL_LATEST="${{ steps.package.outputs.image_local_latest }}"
-          IMAGE_REMOTE="${{ steps.package.outputs.image_remote }}"
-          IMAGE_REMOTE_LATEST="${{ steps.package.outputs.image_remote_latest }}"
+          # Enforce lowercase repository path (GHCR rejects mixed-case names)
+          IMAGE_NAME_LC="${IMAGE_NAME,,}"
+          OWNER_LC="${GH_REPOSITORY_OWNER,,}"
+          IMAGE_LOCAL="${IMAGE_LOCAL,,}"
+          IMAGE_LOCAL_LATEST="${IMAGE_LOCAL_LATEST,,}"
+          IMAGE_REMOTE="${IMAGE_REMOTE,,}"
+          IMAGE_REMOTE_LATEST="${IMAGE_REMOTE_LATEST,,}"
 
           docker build \
             --pull \
@@ -929,11 +1125,13 @@ jobs:
             .
 
           echo "==> Images built"
-          docker images "${{ env.IMAGE_NAME }}" --format 'table {{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.Size}}'
-          docker images "ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}" --format 'table {{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.Size}}' || true
+          echo "Local:  ${IMAGE_LOCAL}"
+          echo "GHCR:   ${IMAGE_REMOTE}"
+          docker images "${IMAGE_NAME_LC}" --format 'table {{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.Size}}'
+          docker images "ghcr.io/${OWNER_LC}/${IMAGE_NAME_LC}" --format 'table {{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.Size}}' || true
 
           # Export image for deploy pipelines that load from artifact (no registry required)
-          TAR_PATH="${{ github.workspace }}/${{ steps.package.outputs.image_tar }}"
+          TAR_PATH="${GITHUB_WORKSPACE}/${IMAGE_TAR}"
           docker save "${IMAGE_LOCAL}" | gzip -c > "${TAR_PATH}"
           ls -lh "${TAR_PATH}"
           if [ ! -s "${TAR_PATH}" ]; then
@@ -964,41 +1162,62 @@ jobs:
 
       - name: Push Docker image to GHCR
         if: github.event_name != 'pull_request'
+        env:
+          IMAGE_REMOTE: ${{ steps.package.outputs.image_remote }}
+          IMAGE_REMOTE_LATEST: ${{ steps.package.outputs.image_remote_latest }}
         run: |
           set -euo pipefail
-          docker push "${{ steps.package.outputs.image_remote }}"
-          docker push "${{ steps.package.outputs.image_remote_latest }}"
+          # Repository path already lowercased at package time; re-enforce for GHCR
+          IMAGE_REMOTE="${IMAGE_REMOTE,,}"
+          IMAGE_REMOTE_LATEST="${IMAGE_REMOTE_LATEST,,}"
+          docker push "${IMAGE_REMOTE}"
+          docker push "${IMAGE_REMOTE_LATEST}"
           echo "Pushed:"
-          echo "  ${{ steps.package.outputs.image_remote }}"
-          echo "  ${{ steps.package.outputs.image_remote_latest }}"
+          echo "  ${IMAGE_REMOTE}"
+          echo "  ${IMAGE_REMOTE_LATEST}"
 
       - name: Packaging summary
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          APP_REPOSITORY: ${{ needs.integration.outputs.app_repository }}
+          APP_REF: ${{ needs.integration.outputs.app_ref }}
+          ARTIFACT_ID: ${{ steps.package.outputs.artifact_id }}
+          VERSION: ${{ steps.package.outputs.version }}
+          PACKAGING: ${{ steps.package.outputs.packaging }}
+          SHORT_SHA: ${{ steps.package.outputs.short_sha }}
+          VERSIONED_NAME: ${{ steps.package.outputs.versioned_name }}
+          STABLE_NAME: ${{ steps.package.outputs.stable_name }}
+          IMAGE_LOCAL: ${{ steps.package.outputs.image_local }}
+          IMAGE_REMOTE: ${{ steps.package.outputs.image_remote }}
+          IMAGE_TAR: ${{ steps.package.outputs.image_tar }}
+          IMAGE_ID: ${{ steps.docker.outputs.image_id }}
+          EXT: ${{ steps.package.outputs.ext }}
         run: |
           {
             echo "### Packaging complete (Spring Boot REST API)"
             echo ""
             echo "| Field | Value |"
             echo "| --- | --- |"
-            echo "| Application | \`${{ needs.integration.outputs.app_repository }}\` |"
-            echo "| Ref | \`${{ needs.integration.outputs.app_ref }}\` |"
-            echo "| ArtifactId | \`${{ steps.package.outputs.artifact_id }}\` |"
-            echo "| Version | \`${{ steps.package.outputs.version }}\` |"
-            echo "| Packaging | \`${{ steps.package.outputs.packaging }}\` |"
-            echo "| Commit | \`${{ steps.package.outputs.short_sha }}\` |"
-            echo "| Versioned WAR | \`${{ steps.package.outputs.versioned_name }}\` |"
-            echo "| Stable WAR | \`${{ steps.package.outputs.stable_name }}\` |"
-            echo "| Docker image (local) | \`${{ steps.package.outputs.image_local }}\` |"
-            echo "| Docker image (GHCR) | \`${{ steps.package.outputs.image_remote }}\` |"
-            echo "| Image archive | \`${{ steps.package.outputs.image_tar }}\` |"
-            echo "| Image ID | \`${{ steps.docker.outputs.image_id }}\` |"
+            echo "| Application | \`${APP_REPOSITORY}\` |"
+            echo "| Ref | \`${APP_REF}\` |"
+            echo "| ArtifactId | \`${ARTIFACT_ID}\` |"
+            echo "| Version | \`${VERSION}\` |"
+            echo "| Packaging | \`${PACKAGING}\` |"
+            echo "| Commit | \`${SHORT_SHA}\` |"
+            echo "| Versioned WAR | \`${VERSIONED_NAME}\` |"
+            echo "| Stable WAR | \`${STABLE_NAME}\` |"
+            echo "| Docker image (local) | \`${IMAGE_LOCAL}\` |"
+            echo "| Docker image (GHCR) | \`${IMAGE_REMOTE}\` |"
+            echo "| Image archive | \`${IMAGE_TAR}\` |"
+            echo "| Image ID | \`${IMAGE_ID}\` |"
             echo "| Artifacts | \`rest-api-release-target\`, \`rest-api-release-package\`, \`rest-api-release-docker-image\` |"
             echo ""
             echo "### Deploy options"
             echo ""
-            echo "1. **WAR** — download \`rest-api-release-package\` and deploy \`.${{ steps.package.outputs.ext }}\` to a servlet container."
-            echo "2. **Image archive** — \`docker load < ${{ steps.package.outputs.image_tar }}\` then run \`${{ steps.package.outputs.image_local }}\`."
-            if [ "${{ github.event_name }}" != "pull_request" ]; then
-              echo "3. **GHCR** — \`docker pull ${{ steps.package.outputs.image_remote }}\` (also tagged \`:latest\`)."
+            echo "1. **WAR** — download \`rest-api-release-package\` and deploy \`.${EXT}\` to a servlet container."
+            echo "2. **Image archive** — \`docker load < ${IMAGE_TAR}\` then run \`${IMAGE_LOCAL}\`."
+            if [ "${EVENT_NAME}" != "pull_request" ]; then
+              echo "3. **GHCR** — \`docker pull ${IMAGE_REMOTE}\` (also tagged \`:latest\`)."
             else
               echo "3. **GHCR** — push skipped on pull_request; image is available as the tar artifact only."
             fi

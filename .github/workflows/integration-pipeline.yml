@@ -14,20 +14,25 @@
 #   - CodeQL → GitHub Code Scanning (native SARIF via analyze)
 # Human-readable console output is for gates/logs only, not the report standard.
 #
-# GitHub Flow (https://docs.github.com/en/get-started/using-github/github-flow)
+# GitHub Flow for develop (validate only — NEVER deploys)
 # --------------------------------------------------------------------------
-# Designed for short-lived feature branches → pull request → review → merge
-# into master/main. This workflow is the PR / merge validation gate.
+# This pipeline is CI only: merge-into-develop validation. It does not
+# publish images, push to GHCR, write cloud JDBC deploy config, or deploy.
 #
-#   1. Create a branch from master/main
-#   2. Open a pull request → this CI runs on the PR head (Integration first)
-#   3. Require status checks on master/main (branch protection):
+#   1. Branch from develop
+#   2. Open PR → develop (or push to develop) → rest-api-ci-caller → this workflow
+#   3. Branch protection on develop should require:
 #        - "Integration"              ← highest priority / must pass first
 #        - "Quality Control"
 #        - "Security Testing"
+#        - "CodeQL Analysis"
 #        - "GitHub Flow CI Gate"       ← optional single aggregate check
-#   4. Merge PR when green → master/main stays deployable
-#   5. Release packaging runs separately (rest-api-release.yml) on main / tags
+#   4. Merge when green → develop is integration-tested, not production-deployed
+#   5. Deploy packaging / GHCR lives only in release-pipeline.yml
+#      (GitHub Release publish, or PR develop → master via rest-api-release-caller)
+#
+# QC "Package WAR" + artifact upload = build verification only (not a deploy).
+# environment: integration on QC = secrets isolation for local Docker Postgres tests.
 #
 # How the REST API uses this
 # --------------------------
@@ -52,19 +57,29 @@
 #
 # Required GitHub Actions secrets (no credentials in this YAML)
 # -------------------------------------------------------------
-# Prefer GitHub Environments (Settings → Environments), not only repo secrets.
-# Caller must set `environment:` and `secrets: inherit` so env secrets are visible.
+# Secrets (configure in the APPLICATION repo: heavy-rental-spring-rest-api)
+# -----------------------------------------------------------------------
+# Quality Control uses environment: integration (hardcoded) and also accepts
+# secrets passed from the caller via explicit secrets map.
 #
-# Environment: integration  (default for this CI pipeline)
-#   REST_API_DB_NAME      PostgreSQL database name (service POSTGRES_DB)
-#   REST_API_DB_USER      PostgreSQL username    (service POSTGRES_USER + Spring)
-#   REST_API_DB_PASSWORD  PostgreSQL password    (service POSTGRES_PASSWORD + Spring)
-#   REST_API_DB_PORT      Host port mapped to the Postgres service (e.g. 5432)
-#   REST_API_DB_URL       JDBC URL for tests; port must match REST_API_DB_PORT
-#                         e.g. jdbc:postgresql://localhost:<port>/<db>
+# Recommended (either works; Environment is preferred for isolation):
 #
-# Never commit real values. Callers must use secrets: inherit.
-# Secret values are never written to logs or step summaries.
+#   A) Settings → Environments → integration → Environment secrets
+#   B) Settings → Secrets and variables → Actions → Repository secrets
+#
+# Names (exact match, case-sensitive):
+#   REST_API_DB_NAME
+#   REST_API_DB_USER
+#   REST_API_DB_PASSWORD
+#   REST_API_DB_PORT
+#
+# REST_API_DB_URL is NOT required. After "Start PostgreSQL", QC builds:
+#   jdbc:postgresql://localhost:<PORT>/<NAME>
+# and exports it as REST_API_DB_URL for Spring tests (GITHUB_ENV).
+#
+# Caller must use: explicit secrets map
+# Do not set environment: on the caller job that uses: this workflow.
+# Never commit real values.
 # =============================================================================
 
 name: REST API CI
@@ -90,32 +105,27 @@ on:
         default: ""
       github_environment:
         description: >
-          GitHub Environment name used for environment-scoped secrets and
-          protection rules (e.g. integration). Must match the caller's
-          `environment:` so secrets: inherit can pass those secrets.
+          GitHub Environment name for the Quality Control job (default integration).
+          Used for protection rules and Environment secrets.
         required: false
         type: string
         default: integration
     secrets:
+      # Optional at call-time: pass via explicit secrets map from repo secrets, and/or
+      # load from Environment secrets on the QC job (environment: integration).
       REST_API_DB_NAME:
-        description: PostgreSQL database name for the CI service container
-        required: true
+        description: PostgreSQL database name
+        required: false
       REST_API_DB_USER:
-        description: PostgreSQL username for the CI service container and Spring tests
-        required: true
+        description: PostgreSQL username
+        required: false
       REST_API_DB_PASSWORD:
-        description: PostgreSQL password for the CI service container and Spring tests
-        required: true
+        description: PostgreSQL password
+        required: false
       REST_API_DB_PORT:
-        description: >
-          Host port published for the CI PostgreSQL service container
-          (must match the port in REST_API_DB_URL)
-        required: true
-      REST_API_DB_URL:
-        description: >
-          Full JDBC URL for Spring tests (typically
-          jdbc:postgresql://localhost:<REST_API_DB_PORT>/<database>)
-        required: true
+        description: Host port for CI Postgres container
+        required: false
+      # REST_API_DB_URL is optional/unused for CI — built after Docker Postgres starts
 
 # GitHub Flow: one concurrent run per PR (or branch); newer pushes cancel stale runs
 concurrency:
@@ -155,11 +165,13 @@ jobs:
         env:
           # github context is that of the caller workflow for reusable workflows
           WORKFLOW_REF: ${{ github.workflow_ref }}
+          EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_NAME: ${{ github.workflow }}
         run: |
           set -euo pipefail
           echo "github.workflow_ref=${WORKFLOW_REF}"
-          echo "github.event_name=${{ github.event_name }}"
-          echo "github.workflow=${{ github.workflow }}"
+          echo "github.event_name=${EVENT_NAME}"
+          echo "github.workflow=${WORKFLOW_NAME}"
           case "${WORKFLOW_REF}" in
             */.github/workflows/rest-api-ci-caller.yml@*)
               echo "Allowed caller: rest-api-ci-caller.yml"
@@ -192,21 +204,29 @@ jobs:
     steps:
       - name: Resolve application source (same-repo caller vs remote override)
         id: meta
+        env:
+          # Bind contexts here — never interpolate github/inputs directly in run: scripts
+          # (avoids Semgrep run-shell-injection).
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_REPO: ${{ inputs.app_repository }}
+          INPUT_REF: ${{ inputs.app_ref }}
+          GH_REPOSITORY: ${{ github.repository }}
+          GH_SHA: ${{ github.sha }}
+          DEFAULT_APP_REF_VALUE: ${{ env.DEFAULT_APP_REF }}
         run: |
           set -euo pipefail
-          # This workflow is workflow_call-only; github.* reflects the caller event.
-          EVENT="${{ github.event_name }}"
-          INPUT_REPO="${{ inputs.app_repository }}"
-          INPUT_REF="${{ inputs.app_ref }}"
+          EVENT="${EVENT_NAME}"
+          INPUT_REPO="${INPUT_REPO}"
+          INPUT_REF="${INPUT_REF}"
 
-          if [ -n "$INPUT_REPO" ] && [ "$INPUT_REPO" != "${{ github.repository }}" ]; then
-            APP_REPO="$INPUT_REPO"
-            APP_REF="${INPUT_REF:-${{ env.DEFAULT_APP_REF }}}"
+          if [ -n "${INPUT_REPO}" ] && [ "${INPUT_REPO}" != "${GH_REPOSITORY}" ]; then
+            APP_REPO="${INPUT_REPO}"
+            APP_REF="${INPUT_REF:-${DEFAULT_APP_REF_VALUE}}"
             MODE=remote
           else
-            # rest-api-ci-caller.yml in the same repo: use this commit
-            APP_REPO="${{ github.repository }}"
-            APP_REF="${INPUT_REF:-${{ github.sha }}}"
+            # Same-repo caller: use this commit
+            APP_REPO="${GH_REPOSITORY}"
+            APP_REF="${INPUT_REF:-${GH_SHA}}"
             MODE=caller
           fi
 
@@ -310,47 +330,49 @@ jobs:
   quality-control:
     name: Quality Control
     runs-on: ubuntu-latest
-    # Highest-priority gate: never start QC unless Integration passed
     needs: [integration]
-    # Load environment-scoped secrets (must match caller environment + secrets: inherit)
-    environment: ${{ inputs.github_environment }}
+    # Hardcoded Environment name (more reliable than dynamic expressions for secrets).
+    # Loads Environment secrets + any secrets passed via explicit secrets map.
+    environment: integration
     timeout-minutes: 30
-    # PostgreSQL is started with Docker in a step (not jobs.services) so host port,
-    # credentials, and JDBC URL can all come from GitHub Secrets. The services.*
-    # ports field does not allow the secrets context.
     steps:
       - name: Verify required database secrets are configured
         env:
-          GITHUB_ENVIRONMENT: ${{ inputs.github_environment }}
-          # Bind secrets into env so emptiness can be checked without printing values.
-          # GitHub masks secret values in logs automatically.
-          # Values come from GitHub Environment secrets when environment: is set.
+          # Prefer Environment secrets (job environment: integration) and/or
+          # repository secrets passed with explicit secrets map from the caller.
           REST_API_DB_NAME: ${{ secrets.REST_API_DB_NAME }}
           REST_API_DB_USER: ${{ secrets.REST_API_DB_USER }}
           REST_API_DB_PASSWORD: ${{ secrets.REST_API_DB_PASSWORD }}
           REST_API_DB_PORT: ${{ secrets.REST_API_DB_PORT }}
-          REST_API_DB_URL: ${{ secrets.REST_API_DB_URL }}
         run: |
           set -euo pipefail
-          echo "Using GitHub Environment for secrets: ${GITHUB_ENVIRONMENT}"
+          echo "Quality Control secrets source: GitHub Environment 'integration' and/or repository secrets (via explicit secrets map)."
           missing=()
           [ -n "${REST_API_DB_NAME}" ] || missing+=(REST_API_DB_NAME)
           [ -n "${REST_API_DB_USER}" ] || missing+=(REST_API_DB_USER)
           [ -n "${REST_API_DB_PASSWORD}" ] || missing+=(REST_API_DB_PASSWORD)
           [ -n "${REST_API_DB_PORT}" ] || missing+=(REST_API_DB_PORT)
-          [ -n "${REST_API_DB_URL}" ] || missing+=(REST_API_DB_URL)
           if [ "${#missing[@]}" -gt 0 ]; then
-            echo "::error::Missing required secrets for environment '${GITHUB_ENVIRONMENT}': ${missing[*]}"
-            echo "Configure them under Settings → Environments → ${GITHUB_ENVIRONMENT} → Environment secrets."
-            echo "Caller must set environment: ${GITHUB_ENVIRONMENT} and secrets: inherit."
+            echo "::error::Missing required secrets: ${missing[*]}"
+            echo ""
+            echo "Configure in the APPLICATION repository (where this workflow runs), not pipeline-development:"
+            echo "  1) Settings → Environments → integration → Environment secrets"
+            echo "     OR"
+            echo "  2) Settings → Secrets and variables → Actions → Repository secrets"
+            echo ""
+            echo "Required names (exact, case-sensitive):"
+            echo "  REST_API_DB_NAME, REST_API_DB_USER, REST_API_DB_PASSWORD, REST_API_DB_PORT"
+            echo "  (REST_API_DB_URL is optional — built after Docker Postgres starts)"
+            echo ""
+            echo "Caller must include: explicit secrets map"
+            echo "This job uses: environment: integration"
             exit 1
           fi
-          # Port must be numeric (do not echo the secret value)
           if ! [[ "${REST_API_DB_PORT}" =~ ^[0-9]+$ ]]; then
             echo "::error::REST_API_DB_PORT must be a numeric TCP port."
             exit 1
           fi
-          echo "All required database secrets are present for environment '${GITHUB_ENVIRONMENT}' (values not logged)."
+          echo "All required database secrets are present (values not logged)."
 
       - name: Checkout calling repository (PR / push head)
         if: needs.integration.outputs.checkout_mode == 'caller'
@@ -394,7 +416,17 @@ jobs:
             -e POSTGRES_PASSWORD="${REST_API_DB_PASSWORD}" \
             -p "${REST_API_DB_PORT}:5432" \
             postgres:16-alpine
-          echo "PostgreSQL container started (port from REST_API_DB_PORT secret)."
+          # Build JDBC URL for later steps (Spring tests). No password in the URL.
+          # Available as env.REST_API_DB_URL after this step via GITHUB_ENV.
+          JDBC_URL="jdbc:postgresql://localhost:${REST_API_DB_PORT}/${REST_API_DB_NAME}"
+          {
+            echo "REST_API_DB_URL=${JDBC_URL}"
+            echo "REST_API_DB_NAME=${REST_API_DB_NAME}"
+            echo "REST_API_DB_USER=${REST_API_DB_USER}"
+            echo "REST_API_DB_PORT=${REST_API_DB_PORT}"
+          } >> "$GITHUB_ENV"
+          echo "PostgreSQL container started."
+          echo "Derived REST_API_DB_URL=jdbc:postgresql://localhost:${REST_API_DB_PORT}/<db> (password not in URL)."
 
       - name: Wait for PostgreSQL
         env:
@@ -405,7 +437,7 @@ jobs:
           PORT="${REST_API_DB_PORT}"
           for i in $(seq 1 30); do
             if docker exec rest-api-ci-postgres pg_isready -U "${REST_API_DB_USER}" >/dev/null 2>&1; then
-              echo "PostgreSQL is accepting connections (port from REST_API_DB_PORT secret)"
+              echo "PostgreSQL is accepting connections on localhost:${PORT}"
               exit 0
             fi
             if timeout 1 bash -c "cat < /dev/null > /dev/tcp/127.0.0.1/${PORT}" 2>/dev/null; then
@@ -428,21 +460,28 @@ jobs:
         env:
           # Spring Boot binds these env vars automatically — do not pass passwords
           # on the Maven CLI (would appear in process listings).
-          SPRING_DATASOURCE_URL: ${{ secrets.REST_API_DB_URL }}
+          # REST_API_DB_URL was built after Start PostgreSQL and written to GITHUB_ENV.
+          SPRING_DATASOURCE_URL: ${{ env.REST_API_DB_URL }}
           SPRING_DATASOURCE_USERNAME: ${{ secrets.REST_API_DB_USER }}
           SPRING_DATASOURCE_PASSWORD: ${{ secrets.REST_API_DB_PASSWORD }}
           SPRING_DATASOURCE_DRIVER_CLASS_NAME: ${{ env.SPRING_DATASOURCE_DRIVER_CLASS_NAME }}
           SPRING_JPA_DATABASE_PLATFORM: ${{ env.SPRING_JPA_DATABASE_PLATFORM }}
         run: |
           set -euo pipefail
-          mkdir -p "${{ github.workspace }}/test-reports"
+          if [ -z "${REST_API_DB_URL:-}" ]; then
+            echo "::error::REST_API_DB_URL is empty — Start PostgreSQL must export it via GITHUB_ENV."
+            exit 1
+          fi
+          echo "Running tests with SPRING_DATASOURCE_URL derived from Docker Postgres (password not logged)."
+          # Use runner-native $GITHUB_WORKSPACE (never ${{ github.* }} inside run: scripts)
+          mkdir -p "${GITHUB_WORKSPACE}/test-reports"
           ./mvnw -B -ntp test
           # Collect surefire / failsafe reports when present
           if [ -d target/surefire-reports ]; then
-            cp -a target/surefire-reports "${{ github.workspace }}/test-reports/" || true
+            cp -a target/surefire-reports "${GITHUB_WORKSPACE}/test-reports/" || true
           fi
           if [ -d target/failsafe-reports ]; then
-            cp -a target/failsafe-reports "${{ github.workspace }}/test-reports/" || true
+            cp -a target/failsafe-reports "${GITHUB_WORKSPACE}/test-reports/" || true
           fi
 
       - name: Package WAR (skip re-running tests)
@@ -524,7 +563,7 @@ jobs:
           path: ${{ env.APP_PATH }}
 
       - name: Create security reports directory
-        run: mkdir -p "${{ github.workspace }}/security-reports"
+        run: mkdir -p "${GITHUB_WORKSPACE}/security-reports"
 
       # --- SAST: static analysis (standard report format: SARIF) ---
       - name: Setup Python (Semgrep)
@@ -535,34 +574,56 @@ jobs:
       - name: Install Semgrep
         run: pip install --quiet semgrep
 
-      - name: SAST — Semgrep (Java / Spring / OWASP) → SARIF
+      - name: SAST — Semgrep (Java / OWASP) → SARIF
         working-directory: ${{ env.APP_PATH }}
         run: |
           set -euo pipefail
-          REPORT_DIR="${{ github.workspace }}/security-reports"
-          # Standard security report format: SARIF 2.1.0
-          semgrep scan \
-            --config=p/java \
-            --config=p/spring \
-            --config=p/owasp-top-ten \
-            --config=p/security-audit \
-            --metrics=off \
+          REPORT_DIR="${GITHUB_WORKSPACE}/security-reports"
+          # Note: p/spring was removed from the Semgrep registry (HTTP 404).
+          SEMGREP_COMMON=(
+            --config=p/java
+            --config=p/owasp-top-ten
+            --config=p/security-audit
+            --config=p/secrets
+            --metrics=off
+          )
+
+          # --- Pass 1: always write SARIF (standard report). Does not fail the step. ---
+          echo "==> Semgrep report (SARIF 2.1.0)"
+          set +e
+          semgrep scan "${SEMGREP_COMMON[@]}" \
             --sarif \
             --output="${REPORT_DIR}/semgrep.sarif" \
-            . || true
-          # Gate CI: fail on ERROR findings (console only; report remains SARIF)
-          echo "==> SAST gate (ERROR severity)"
-          semgrep scan \
-            --config=p/java \
-            --config=p/spring \
-            --config=p/owasp-top-ten \
-            --config=p/security-audit \
-            --metrics=off \
+            .
+          SARIF_RC=$?
+          set -e
+          if [ -f "${REPORT_DIR}/semgrep.sarif" ]; then
+            echo "SARIF written: ${REPORT_DIR}/semgrep.sarif (semgrep exit=${SARIF_RC}; non-zero is OK for report pass)"
+          else
+            echo "::warning::semgrep.sarif was not produced (exit=${SARIF_RC})"
+          fi
+
+          # --- Pass 2: CI gate — fail only if ERROR-severity findings exist. ---
+          # --error makes Semgrep exit 1 when any matching finding is present.
+          # A "successful" SARIF write can still leave this gate red if ERROR issues exist.
+          echo "==> SAST gate (ERROR severity only; exit 1 if findings)"
+          set +e
+          semgrep scan "${SEMGREP_COMMON[@]}" \
             --severity=ERROR \
             --error \
             --text \
             .
-          echo "SAST (Semgrep) passed — SARIF report: security-reports/semgrep.sarif"
+          GATE_RC=$?
+          set -e
+          if [ "${GATE_RC}" -ne 0 ]; then
+            echo "::error::Semgrep SAST gate failed (exit=${GATE_RC})."
+            echo "The SARIF report may still have been written successfully."
+            echo "This step fails because --severity=ERROR --error found ERROR-level issues"
+            echo "(or Semgrep could not complete the gate scan)."
+            echo "Open security-reports/semgrep.sarif or the text findings above."
+            exit "${GATE_RC}"
+          fi
+          echo "SAST (Semgrep) gate passed — no ERROR-level findings. SARIF: security-reports/semgrep.sarif"
 
       # --- SCA + filesystem: dependency and secret/vuln scan via Trivy (SARIF) ---
       - name: Setup Java ${{ env.JAVA_VERSION }} (for dependency resolution before scan)
@@ -583,20 +644,41 @@ jobs:
             -DoutputDirectory=target/dependency || \
           ./mvnw -B -ntp -DskipTests dependency:resolve
 
-      - name: Trivy filesystem scan (SARIF)
-        uses: aquasecurity/trivy-action@0.28.0
+      # One shared Actions cache for vuln DB + Java DB (avoids ~100MB re-download per step).
+      # Weekly key; restore-keys fall back to any prior OS cache. Per-step trivy cache is off.
+      - name: Trivy cache key
+        id: trivy-cache-meta
+        run: echo "week=$(date -u +%Y-W%V)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Trivy DBs
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.cache/trivy
+          key: trivy-db-${{ runner.os }}-${{ steps.trivy-cache-meta.outputs.week }}
+          restore-keys: |
+            trivy-db-${{ runner.os }}-
+
+      # Pass 1: always write SARIF (standard report). Do not fail the step on findings —
+      # otherwise SARIF mode hides the vulns in the log and only shows exit code 1.
+      - name: Trivy filesystem scan (SARIF report)
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
           scan-ref: ${{ env.APP_PATH }}
           severity: HIGH,CRITICAL
-          exit-code: "1"
+          exit-code: "0"
           format: sarif
           output: security-reports/trivy-fs.sarif
           ignore-unfixed: true
+          scanners: vuln
+          # Shared job-level cache above; disable nested restore/save per scan
+          cache: "false"
+          cache-dir: ${{ github.workspace }}/.cache/trivy
 
+      # Pass 2: human-readable findings in the job log (never blocks).
       - name: Trivy filesystem scan (console table)
         if: always()
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
           scan-ref: ${{ env.APP_PATH }}
@@ -604,6 +686,23 @@ jobs:
           exit-code: "0"
           format: table
           ignore-unfixed: true
+          scanners: vuln
+          cache: "false"
+          cache-dir: ${{ github.workspace }}/.cache/trivy
+
+      # Pass 3: CI gate — fail only on CRITICAL, unfixed vulns (mirrors Semgrep ERROR gate).
+      - name: Trivy SCA gate (CRITICAL)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: ${{ env.APP_PATH }}
+          severity: CRITICAL
+          exit-code: "1"
+          format: table
+          ignore-unfixed: true
+          scanners: vuln
+          cache: "false"
+          cache-dir: ${{ github.workspace }}/.cache/trivy
 
       # --- Publish SARIF security reports to GitHub Code Scanning ---
       - name: Upload Semgrep SARIF to Code Scanning

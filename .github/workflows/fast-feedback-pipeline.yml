@@ -82,11 +82,13 @@ jobs:
       - name: Allow only rest-api-fast-feedback-caller.yml
         env:
           WORKFLOW_REF: ${{ github.workflow_ref }}
+          EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_NAME: ${{ github.workflow }}
         run: |
           set -euo pipefail
           echo "github.workflow_ref=${WORKFLOW_REF}"
-          echo "github.event_name=${{ github.event_name }}"
-          echo "github.workflow=${{ github.workflow }}"
+          echo "github.event_name=${EVENT_NAME}"
+          echo "github.workflow=${WORKFLOW_NAME}"
           case "${WORKFLOW_REF}" in
             */.github/workflows/rest-api-fast-feedback-caller.yml@*)
               echo "Allowed caller: rest-api-fast-feedback-caller.yml"
@@ -118,21 +120,29 @@ jobs:
     steps:
       - name: Resolve application source (same-repo caller vs remote override)
         id: meta
+        env:
+          # Bind contexts here — never interpolate github/inputs directly in run: scripts
+          # (avoids Semgrep run-shell-injection).
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_REPO: ${{ inputs.app_repository }}
+          INPUT_REF: ${{ inputs.app_ref }}
+          GH_REPOSITORY: ${{ github.repository }}
+          GH_SHA: ${{ github.sha }}
+          DEFAULT_APP_REF_VALUE: ${{ env.DEFAULT_APP_REF }}
         run: |
           set -euo pipefail
-          # This workflow is workflow_call-only; github.* reflects the caller event.
-          EVENT="${{ github.event_name }}"
-          INPUT_REPO="${{ inputs.app_repository }}"
-          INPUT_REF="${{ inputs.app_ref }}"
+          EVENT="${EVENT_NAME}"
+          INPUT_REPO="${INPUT_REPO}"
+          INPUT_REF="${INPUT_REF}"
 
-          if [ -n "$INPUT_REPO" ] && [ "$INPUT_REPO" != "${{ github.repository }}" ]; then
-            APP_REPO="$INPUT_REPO"
-            APP_REF="${INPUT_REF:-${{ env.DEFAULT_APP_REF }}}"
+          if [ -n "${INPUT_REPO}" ] && [ "${INPUT_REPO}" != "${GH_REPOSITORY}" ]; then
+            APP_REPO="${INPUT_REPO}"
+            APP_REF="${INPUT_REF:-${DEFAULT_APP_REF_VALUE}}"
             MODE=remote
           else
-            # rest-api-fast-feedback-caller.yml in the same repo: use this commit
-            APP_REPO="${{ github.repository }}"
-            APP_REF="${INPUT_REF:-${{ github.sha }}}"
+            # Same-repo caller: use this commit
+            APP_REPO="${GH_REPOSITORY}"
+            APP_REF="${INPUT_REF:-${GH_SHA}}"
             MODE=caller
           fi
 

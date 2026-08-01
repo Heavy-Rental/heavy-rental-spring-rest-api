@@ -6,36 +6,25 @@
 #   1. A GitHub Release is published, or
 #   2. A pull request is opened/updated from develop → master
 #
-# Place both files in the Spring REST API repository:
+# Secrets (in heavy-rental-spring-rest-api)
+# ----------------------------------------
+# Do NOT set `environment:` on this caller job (invalid with uses:).
+# QC inside the reusable workflow uses environment: production.
 #
-#   .github/workflows/rest-api-release-caller.yml  ← this file (triggers)
-#   .github/workflows/release-pipeline.yml         ← reusable pipeline (called)
-#
-# GitHub Environments + secrets
-# -----------------------------
-# This job uses environment: production so environment-scoped secrets work
-# with secrets: inherit for both:
-#
-#   develop → master PR
-#   release published
-#
-# Create Environment "production" (Settings → Environments) and add:
-#
+# Add secrets (Environment "production" and/or Repository secrets):
+#   REST_API_CLOUD_DB_HOST     e.g. mydb.postgres.database.azure.com
 #   REST_API_CLOUD_DB_NAME
 #   REST_API_CLOUD_DB_USER
 #   REST_API_CLOUD_DB_PASSWORD
 #   REST_API_CLOUD_DB_PORT
-#   REST_API_CLOUD_DB_URL
 #
-# CI (rest-api-ci-caller) uses environment: integration with REST_API_DB_* instead.
+# JDBC URLs are derived (not secrets):
+#   QC tests:    jdbc:postgresql://localhost:<PORT>/<NAME>
+#   Cloud deploy: jdbc:postgresql://<HOST>:<PORT>/<NAME>
+# Packaging writes spring-datasource.env for deploy (no password).
 #
-# Job priority
-# ------------
-#   1. Integration
-#   2. Quality Control (uses Environment cloud secrets)
-#   2. Security Testing
-#   2. CodeQL Analysis
-#   3. Packaging (needs QC + Security + CodeQL)
+# explicit secrets: map forwards repository secrets; Environment secrets load on QC
+# via environment: production (PR develop→master and published release).
 # =============================================================================
 
 name: Release
@@ -66,10 +55,13 @@ jobs:
       (github.event_name == 'pull_request' &&
        github.head_ref == 'develop' &&
        github.base_ref == 'master')
-    # Production Environment for secrets: inherit (PR develop→master and published release)
-    environment: production
     uses: ./.github/workflows/release-pipeline.yml
     with:
-      # Must match `environment:` so QC attaches the same Environment
       github_environment: production
-    secrets: inherit
+    # Explicit secrets only (Semgrep: avoid secrets: inherit)
+    secrets:
+      REST_API_CLOUD_DB_HOST: ${{ secrets.REST_API_CLOUD_DB_HOST }}
+      REST_API_CLOUD_DB_NAME: ${{ secrets.REST_API_CLOUD_DB_NAME }}
+      REST_API_CLOUD_DB_USER: ${{ secrets.REST_API_CLOUD_DB_USER }}
+      REST_API_CLOUD_DB_PASSWORD: ${{ secrets.REST_API_CLOUD_DB_PASSWORD }}
+      REST_API_CLOUD_DB_PORT: ${{ secrets.REST_API_CLOUD_DB_PORT }}

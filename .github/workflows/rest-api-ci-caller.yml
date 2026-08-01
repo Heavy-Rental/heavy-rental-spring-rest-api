@@ -2,35 +2,34 @@
 # Install into: heavy-rental-spring-rest-api
 # Path:         .github/workflows/rest-api-ci-caller.yml
 # =============================================================================
-# GitHub Flow CI caller — validates feature-branch pull requests before merge.
+# GitHub Flow CI caller — validate PRs/pushes to develop only.
+# Does NOT deploy. Does NOT run release packaging / GHCR.
 #
 # Place both files in the Spring REST API repository:
 #
 #   .github/workflows/rest-api-ci-caller.yml      ← this file (triggers)
 #   .github/workflows/integration-pipeline.yml    ← reusable pipeline (called)
 #
-# Reusable workflow (same repository):
-#   ./.github/workflows/integration-pipeline.yml
+# Triggers: PR → develop, push → develop, workflow_dispatch.
+# Release / deploy packaging: rest-api-release-caller.yml only.
 #
-# GitHub Environment + secrets
-# ----------------------------
-# This job uses environment: integration so environment-scoped secrets are
-# available and forwarded with secrets: inherit.
+# Secrets (in heavy-rental-spring-rest-api)
+# ----------------------------------------
+# Do NOT set `environment:` on this caller job (invalid with uses:).
+# QC inside the reusable workflow uses environment: integration
+# (for test DB secrets only — not a production deploy target).
 #
-# Create Environment "integration" (Settings → Environments) and add secrets:
+# Add secrets (Environment "integration" and/or Repository secrets):
 #   REST_API_DB_NAME
 #   REST_API_DB_USER
 #   REST_API_DB_PASSWORD
 #   REST_API_DB_PORT
-#   REST_API_DB_URL
 #
-# Job priority
-# ------------
-#   1. Integration           ← HIGHEST PRIORITY
-#   2. Quality Control       (uses Environment secrets for Postgres tests)
-#   2. Security Testing
-#   2. CodeQL Analysis
-#   3. GitHub Flow CI Gate
+# REST_API_DB_URL is optional — after Docker Postgres starts, QC builds:
+#   jdbc:postgresql://localhost:<PORT>/<NAME>
+#
+# explicit secrets: map forwards repository secrets into the reusable workflow;
+# Environment secrets are available on the QC job via environment: integration.
 # =============================================================================
 
 name: CI
@@ -54,12 +53,15 @@ permissions:
   actions: read
 
 jobs:
+  # Reusable-workflow call: only uses / with / secrets (no environment, no runs-on)
   integration-pipeline:
     name: Integration pipeline
-    # Required: load Environment secrets, then pass them into the reusable workflow
-    environment: integration
     uses: ./.github/workflows/integration-pipeline.yml
     with:
-      # Must match `environment:` above so QC can attach the same Environment
       github_environment: integration
-    secrets: inherit
+    # Explicit secrets only (Semgrep: avoid secrets: inherit)
+    secrets:
+      REST_API_DB_NAME: ${{ secrets.REST_API_DB_NAME }}
+      REST_API_DB_USER: ${{ secrets.REST_API_DB_USER }}
+      REST_API_DB_PASSWORD: ${{ secrets.REST_API_DB_PASSWORD }}
+      REST_API_DB_PORT: ${{ secrets.REST_API_DB_PORT }}
