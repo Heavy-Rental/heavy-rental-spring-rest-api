@@ -70,9 +70,12 @@ public class SecurityConfig {
 				.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
 			.authorizeHttpRequests(auth -> auth
 				.requestMatchers(HttpMethod.GET, "/api/auth/getBearerToken").permitAll()
+				.requestMatchers(HttpMethod.POST, "/api/auth/login").hasAuthority("ROLE_INTERIM")
+				.requestMatchers(HttpMethod.POST, "/api/auth/logout")
+					.hasAnyAuthority("ROLE_USER", "ROLE_ADMIN")
 				.requestMatchers("/error").permitAll()
 				.requestMatchers("/actuator/health", "/actuator/info").permitAll()
-				.anyRequest().authenticated())
+				.anyRequest().hasAnyAuthority("ROLE_USER", "ROLE_ADMIN"))
 			.oauth2ResourceServer(oauth2 -> oauth2
 				.jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter()))
 				.authenticationEntryPoint(restAuthenticationEntryPoint()))
@@ -139,7 +142,9 @@ public class SecurityConfig {
 				Map.of(
 						"error", "unauthorized",
 						"message",
-						"Authentication required. Obtain a token via GET /api/auth/getBearerToken, then send Authorization: Bearer <token>."));
+						"Authentication required. Obtain an interim token via GET /api/auth/getBearerToken, "
+								+ "login via POST /api/auth/login with that Bearer token, "
+								+ "then use the returned access token as Authorization: Bearer <token>."));
 	}
 
 	@Bean

@@ -174,11 +174,14 @@ Full auth contracts live in feature specs; this is the environment-level model:
 | Session | **STATELESS** (no server session for auth) |
 | CSRF | Disabled (stateless API) |
 | Password storage | BCrypt |
-| Access tokens | JWT, **HS256**, claims include `jti`, `iss`, `iat`, `exp`, `sub`, `roles` |
+| Tokens | JWT **HS256**; two tiers — **interim** (`tokenType=interim`, `ROLE_INTERIM`) and **access/session** (`tokenType=access`, user roles) |
+| Claims | `jti`, `iss`, `iat`, `exp`, `sub`, `roles`, `tokenType` (+ `generatedAt` on interim) |
 | Resource server | OAuth2 Resource Server validates Bearer JWTs |
-| Revocation | In-memory `TokenDenylist` by `jti` (process-local) |
+| Revocation | In-memory `TokenDenylist` by `jti` (process-local); logout + interim single-use after login |
 | Public routes | `GET /api/auth/getBearerToken`; `/error`; actuator health/info |
-| Protected routes | All other requests require valid Bearer JWT |
+| Login | `POST /api/auth/login` requires interim Bearer + credentials → access JWT |
+| Logout | `POST /api/auth/logout` requires access Bearer → denylist |
+| Protected routes | Business APIs require `ROLE_USER` or `ROLE_ADMIN` (not interim alone) |
 
 ---
 
@@ -206,11 +209,18 @@ Full auth contracts live in feature specs; this is the environment-level model:
 
 ## 7. Current API inventory
 
-Contracts for Bearer issuance are detailed in [`SPEC-request-bearer-token.md`](./SPEC-request-bearer-token.md). Inventory for environment awareness:
+Auth feature SPECs:
+
+- Interim mint: [`SPEC-request-bearer-token.md`](./SPEC-request-bearer-token.md)
+- Login / logout session: [`SPEC-auth-login-logout.md`](./SPEC-auth-login-logout.md)
+
+Inventory for environment awareness:
 
 | Method | Path | Auth | Role |
 |--------|------|------|------|
-| `GET` | `/api/auth/getBearerToken` | Public (no credentials) | Raw JWT from random UUID + date/time; see feature SPEC |
+| `GET` | `/api/auth/getBearerToken` | Public | Interim JWT (UUID + date/time, `ROLE_INTERIM`); see request-bearer SPEC |
+| `POST` | `/api/auth/login` | Interim Bearer | Username/password → session access JWT; see login-logout SPEC |
+| `POST` | `/api/auth/logout` | Access Bearer | Revoke session token (`jti` denylist); see login-logout SPEC |
 | `GET` | `/actuator/health` | Public | Health |
 | `GET` | `/actuator/info` | Public | Info |
 
@@ -265,13 +275,23 @@ cd heavy-rental-spring-rest-api
 # Health
 curl -s http://localhost:8080/actuator/health
 
-# Bearer token (random UUID + date/time → plain JWT)
-TOKEN=$(curl -s http://localhost:8080/api/auth/getBearerToken)
-echo "$TOKEN"
+# 1) Interim token
+INTERIM=$(curl -s http://localhost:8080/api/auth/getBearerToken)
+echo "$INTERIM"
 
-# Protected call (when a protected resource exists)
+# 2) Login → session access token (JSON)
+curl -s -X POST http://localhost:8080/api/auth/login \
+  -H "Authorization: Bearer $INTERIM" \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"<password>"}'
+
+# 3) Protected call with accessToken from login response
 curl -s http://localhost:8080/<protected-path> \
-  -H "Authorization: Bearer $TOKEN"
+  -H "Authorization: Bearer <accessToken>"
+
+# 4) Logout
+curl -s -X POST http://localhost:8080/api/auth/logout \
+  -H "Authorization: Bearer <accessToken>"
 ```
 
 ---
@@ -352,5 +372,7 @@ Unless a dedicated SDD says otherwise:
 | 1.0.0 | 2026-08-02 | Initial as-built environment context: Spring Boot 4.1 / Java 21 / WAR, Postgres on `db`, JWT security, SDD conventions, no Compose |
 | 1.1.0 | 2026-08-02 | Auth API reduced to `GET /api/auth/getBearerToken` only (register/login/logout/user removed) |
 | 1.2.0 | 2026-08-02 | getBearerToken mints JWT from random UUID + date/time (no Basic credentials) |
+| 1.3.0 | 2026-08-02 | Multi-step auth inventory: interim getBearerToken → login → logout |
+| 1.3.1 | 2026-08-02 | Split feature SPECs: SPEC-request-bearer-token (mint) + SPEC-auth-login-logout (session) |
 
 When changing stack, database strategy, packaging, default security model, or SDD file locations, bump this table and notify dependent feature specs.
