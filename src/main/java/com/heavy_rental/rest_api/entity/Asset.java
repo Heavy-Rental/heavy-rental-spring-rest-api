@@ -29,8 +29,11 @@ public class Asset {
   @JoinColumn(name = "category_id", nullable = false)
   private AssetCategory category;
   
-  @Column(name = "capacity")
+  @Column(name = "capacity", precision = 10, scale = 2)
   private Integer capacity;
+
+  @Column(name = "platform_height", precision = 10, scale = 2)
+  private BigDecimal platformHeight;
 
   @Column(length = 255)
   private String description;
