@@ -1,5 +1,7 @@
 package com.heavy_rental.rest_api.entity;
 
+import java.time.LocalDateTime;
+
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
@@ -21,6 +23,10 @@ import lombok.Setter;
 @Builder
 public class User {
 
+	public enum UserRole {
+		CUSTOMER, ADMIN, DRIVER
+	}
+
 	@Id
 	@GeneratedValue(strategy = GenerationType.IDENTITY)
 	private Long id;
@@ -34,6 +40,10 @@ public class User {
 	@Column(length = 255)
 	private String email;
 
+	@Column(length = 255)
+	private String company;
+
+	// Have to change to use UserRole enum instead of String for role
 	/** Spring Security authority, e.g. ROLE_USER or ROLE_ADMIN */
 	@Column(nullable = false, length = 50)
 	@Builder.Default
@@ -42,4 +52,8 @@ public class User {
 	@Column(nullable = false)
 	@Builder.Default
 	private boolean enabled = true;
+
+	@Column(nullable = false)
+	private LocalDateTime createdAt;
+
 }
