@@ -46,7 +46,7 @@ public class Authentication {
 	}
 
 	/**
-	 * Authenticate with username/password using an interim Bearer token.
+	 * Authenticate with email/password using an interim Bearer token.
 	 * Returns a session access JWT.
 	 */
 	@PostMapping("/login")

@@ -42,10 +42,10 @@ public class DefaultUserInitializer implements ApplicationRunner {
 		}
 
 		User admin = User.builder()
-				.username(defaultUsername)
+				.name(defaultUsername)
 				.password(passwordEncoder.encode(defaultPassword))
 				.email(defaultUsername + "@localhost")
-				.role("ROLE_ADMIN")
+				.role(User.UserRole.ADMIN)
 				.enabled(true)
 				.build();
 

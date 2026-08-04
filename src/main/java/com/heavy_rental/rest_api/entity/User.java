@@ -1,7 +1,11 @@
 package com.heavy_rental.rest_api.entity;
 
+import java.time.LocalDateTime;
+
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
@@ -21,12 +25,16 @@ import lombok.Setter;
 @Builder
 public class User {
 
+	public enum UserRole {
+		USER, ADMIN, DRIVER
+	}
+
 	@Id
 	@GeneratedValue(strategy = GenerationType.IDENTITY)
 	private Long id;
 
 	@Column(nullable = false, unique = true, length = 100)
-	private String username;
+	private String name;
 
 	@Column(nullable = false)
 	private String password;
@@ -34,12 +42,19 @@ public class User {
 	@Column(length = 255)
 	private String email;
 
-	/** Spring Security authority, e.g. ROLE_USER or ROLE_ADMIN */
-	@Column(nullable = false, length = 50)
+	@Column(length = 255)
+	private String company;
+
+	@Enumerated(EnumType.STRING)
+	@Column(nullable = false, length = 20)
 	@Builder.Default
-	private String role = "ROLE_USER";
+	private UserRole role = UserRole.USER;
 
 	@Column(nullable = false)
 	@Builder.Default
 	private boolean enabled = true;
+
+	@Column(name = "created_at")
+	private LocalDateTime createdAt;
+
 }

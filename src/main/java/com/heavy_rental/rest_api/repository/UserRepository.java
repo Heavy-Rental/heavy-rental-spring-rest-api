@@ -1,5 +1,6 @@
 package com.heavy_rental.rest_api.repository;
 
+import java.util.List;
 import java.util.Optional;
 
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -8,9 +9,9 @@ import com.heavy_rental.rest_api.entity.User;
 
 public interface UserRepository extends JpaRepository<User, Long> {
 
-	Optional<User> findByUsername(String username);
+	List<User> findByRole(User.UserRole role);
 
-	boolean existsByUsername(String username);
+	Optional<User> findByEmail(String email);
 
 	boolean existsByEmail(String email);
 }
