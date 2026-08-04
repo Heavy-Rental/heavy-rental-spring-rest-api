@@ -24,6 +24,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 import com.heavy_rental.rest_api.entity.User;
+import com.heavy_rental.rest_api.entity.User.UserRole;
 import com.heavy_rental.rest_api.repository.UserRepository;
 import com.heavy_rental.rest_api.security.JwtService;
 
@@ -49,18 +50,18 @@ class AuthenticationIntegrationTest {
 	@Autowired
 	private ObjectMapper objectMapper;
 
-	private String username;
+	private String email;
 	private String password;
 
 	@BeforeEach
 	void createUser() {
-		username = "user_" + UUID.randomUUID().toString().substring(0, 8);
+		email = "user_" + UUID.randomUUID().toString().substring(0, 8) + "@example.com";
 		password = "password123";
 		userRepository.save(User.builder()
-				.username(username)
+				.name("Test User " + UUID.randomUUID().toString().substring(0, 8))
 				.password(passwordEncoder.encode(password))
-				.email(username + "@example.com")
-				.role("ROLE_USER")
+				.email(email)
+				.role(UserRole.USER)
 				.enabled(true)
 				.build());
 	}
@@ -116,8 +117,8 @@ class AuthenticationIntegrationTest {
 		mockMvc.perform(post("/api/auth/login")
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("""
-								{"username":"%s","password":"%s"}
-								""".formatted(username, password)))
+								{"email":"%s","password":"%s"}
+							""".formatted(email, password)))
 				.andExpect(status().isUnauthorized())
 				.andExpect(jsonPath("$.error").value("unauthorized"));
 	}
@@ -130,8 +131,8 @@ class AuthenticationIntegrationTest {
 						.header(HttpHeaders.AUTHORIZATION, "Bearer " + interim)
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("""
-								{"username":"%s","password":"wrong-password"}
-								""".formatted(username)))
+								{"email":"%s","password":"wrong-password"}
+							""".formatted(email)))
 				.andExpect(status().isUnauthorized())
 				.andExpect(jsonPath("$.error").value("invalid_credentials"));
 	}
@@ -144,18 +145,18 @@ class AuthenticationIntegrationTest {
 						.header(HttpHeaders.AUTHORIZATION, "Bearer " + interim)
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("""
-								{"username":"%s","password":"%s"}
-								""".formatted(username, password)))
+								{"email":"%s","password":"%s"}
+							""".formatted(email, password)))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.accessToken").isNotEmpty())
 				.andExpect(jsonPath("$.tokenType").value("Bearer"))
-				.andExpect(jsonPath("$.username").value(username))
+				.andExpect(jsonPath("$.username").value(email))
 				.andExpect(jsonPath("$.expiresIn").isNumber())
 				.andReturn();
 
 		String accessToken = readAccessToken(loginResult);
 		Jwt accessJwt = jwtDecoder.decode(accessToken);
-		Assertions.assertEquals(username, accessJwt.getSubject());
+		Assertions.assertEquals(email, accessJwt.getSubject());
 		Assertions.assertEquals(JwtService.TOKEN_TYPE_ACCESS, JwtService.tokenTypeFrom(accessJwt));
 		Assertions.assertTrue(JwtService.rolesFrom(accessJwt).contains("ROLE_USER"));
 	}
@@ -168,8 +169,8 @@ class AuthenticationIntegrationTest {
 						.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("""
-								{"username":"%s","password":"%s"}
-								""".formatted(username, password)))
+								{"email":"%s","password":"%s"}
+							""".formatted(email, password)))
 				.andExpect(status().isForbidden())
 				.andExpect(jsonPath("$.error").value("forbidden"));
 	}
@@ -182,16 +183,16 @@ class AuthenticationIntegrationTest {
 						.header(HttpHeaders.AUTHORIZATION, "Bearer " + interim)
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("""
-								{"username":"%s","password":"%s"}
-								""".formatted(username, password)))
+								{"email":"%s","password":"%s"}
+							""".formatted(email, password)))
 				.andExpect(status().isOk());
 
 		mockMvc.perform(post("/api/auth/login")
 						.header(HttpHeaders.AUTHORIZATION, "Bearer " + interim)
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("""
-								{"username":"%s","password":"%s"}
-								""".formatted(username, password)))
+								{"email":"%s","password":"%s"}
+							""".formatted(email, password)))
 				.andExpect(status().isUnauthorized());
 	}
 
@@ -230,8 +231,8 @@ class AuthenticationIntegrationTest {
 						.header(HttpHeaders.AUTHORIZATION, "Bearer " + interim)
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("""
-								{"username":"%s","password":"%s"}
-								""".formatted(username, password)))
+								{"email":"%s","password":"%s"}
+							""".formatted(email, password)))
 				.andExpect(status().isOk())
 				.andReturn();
 		return readAccessToken(loginResult);

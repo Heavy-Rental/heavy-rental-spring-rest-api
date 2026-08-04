@@ -4,6 +4,8 @@ import java.time.LocalDateTime;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
@@ -24,7 +26,7 @@ import lombok.Setter;
 public class User {
 
 	public enum UserRole {
-		CUSTOMER, ADMIN, DRIVER
+		USER, ADMIN, DRIVER
 	}
 
 	@Id
@@ -32,7 +34,7 @@ public class User {
 	private Long id;
 
 	@Column(nullable = false, unique = true, length = 100)
-	private String username;
+	private String name;
 
 	@Column(nullable = false)
 	private String password;
@@ -43,11 +45,10 @@ public class User {
 	@Column(length = 255)
 	private String company;
 
-	// Have to change to use UserRole enum instead of String for role
-	/** Spring Security authority, e.g. ROLE_USER or ROLE_ADMIN */
-	@Column(nullable = false, length = 50)
+	@Enumerated(EnumType.STRING)
+	@Column(nullable = false, length = 20)
 	@Builder.Default
-	private String role = "ROLE_USER";
+	private UserRole role = UserRole.USER;
 
 	@Column(nullable = false)
 	@Builder.Default

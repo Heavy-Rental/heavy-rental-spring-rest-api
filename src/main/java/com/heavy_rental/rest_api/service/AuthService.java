@@ -63,13 +63,13 @@ public class AuthService {
 		}
 
 		if (request == null
-				|| request.username() == null || request.username().isBlank()
+				|| request.email() == null || request.email().isBlank()
 				|| request.password() == null || request.password().isBlank()) {
-			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Username and password are required");
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Email and password are required");
 		}
 
 		Authentication authentication = authenticationManager.authenticate(
-				new UsernamePasswordAuthenticationToken(request.username().trim(), request.password()));
+				new UsernamePasswordAuthenticationToken(request.email().trim(), request.password()));
 
 		List<String> roles = authentication.getAuthorities().stream()
 				.map(GrantedAuthority::getAuthority)
