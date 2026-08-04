@@ -2,6 +2,8 @@ package com.heavy_rental.rest_api.entity;
 
 import jakarta.persistence.*;
 import lombok.*;
+
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 
@@ -42,14 +44,14 @@ public class Booking {
     @Enumerated(EnumType.STRING)
     private BookingStatus status;
 
-    @Column(name = "total_amount", precision = 10, scale = 2)
-    private Double totalAmount;
+    @Column(name = "total_amount")
+    private BigDecimal totalAmount;
 
-    @Column(name = "deposit_amount", precision = 10, scale = 2)
-    private Double depositAmount;
+    @Column(name = "deposit_amount")
+    private BigDecimal depositAmount;
 
-    @Column(name = "remaining_balance", precision = 10, scale = 2)
-    private Double remainingBalance;
+    @Column(name = "remaining_balance")
+    private BigDecimal remainingBalance;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "paid_status")
@@ -62,10 +64,10 @@ public class Booking {
     private String sitePostalCode;
 
     @Column(name = "site_latitude")
-    private Double siteLatitude;
+    private BigDecimal siteLatitude;
 
     @Column(name = "site_longitude")
-    private Double siteLongitude;
+    private BigDecimal siteLongitude;
 
     @Column(name = "delivery_notes", length = 500)
     private String deliveryNotes;

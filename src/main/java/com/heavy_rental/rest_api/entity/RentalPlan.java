@@ -2,6 +2,8 @@ package com.heavy_rental.rest_api.entity;
 
 import jakarta.persistence.*;
 import lombok.*;
+
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 
@@ -31,8 +33,8 @@ public class RentalPlan {
   @Column(name = "end_date")
   private LocalDate endDate;
 
-  @Column(name = "total_amount", precision = 10, scale = 2)
-  private Double totalAmount;
+  @Column(name = "total_amount")
+  private BigDecimal totalAmount;
 
   @Enumerated(EnumType.STRING)
   private PlanStatus status;
@@ -44,10 +46,10 @@ public class RentalPlan {
   private String sitePostalCode;
 
   @Column(name = "site_latitude")
-  private Double siteLatitude;
+  private BigDecimal siteLatitude;
 
   @Column(name = "site_longitude")
-  private Double siteLongitude;
+  private BigDecimal siteLongitude;
 
   @Column(name = "created_at")
   private LocalDateTime createdAt;

@@ -1,5 +1,7 @@
 package com.heavy_rental.rest_api.entity;
 
+import java.math.BigDecimal;
+
 import com.heavy_rental.rest_api.enums.ConditionType;
 
 import jakarta.persistence.*;
@@ -25,17 +27,17 @@ public class BookingItem {
     @JoinColumn(name = "asset_id")
     private Asset asset;
 
-    @Column(name = "daily_rate", precision = 10, scale = 2)
-    private Double dailyRate;
+    @Column(name = "daily_rate")
+    private BigDecimal dailyRate;
 
-    @Column(name = "subtotal", precision = 10, scale = 2)
-    private Double subtotal;
+    @Column(name = "subtotal")
+    private BigDecimal subtotal;
 
     @Column(name = "start_engine_hours")
-    private Double startEngineHours;
+    private BigDecimal startEngineHours;
 
     @Column(name = "end_engine_hours")
-    private Double endEngineHours;
+    private BigDecimal endEngineHours;
 
     // Shared Enum
     @Enumerated(EnumType.STRING)

@@ -1,6 +1,8 @@
 package com.heavy_rental.rest_api.entity;
 import jakarta.persistence.*;
 import lombok.*;
+
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 import com.heavy_rental.rest_api.enums.ConditionType;
@@ -34,13 +36,13 @@ public class Asset {
   private String description;
 
   @Column(name = "base_daily_rate", nullable = false, precision = 10, scale = 2)
-  private Double baseDailyRate;
+  private BigDecimal baseDailyRate;
 
   @Column(name = "min_daily_rate", nullable = false, precision = 10, scale = 2)
-  private Double minDailyRate;
+  private BigDecimal minDailyRate;
 
   @Column(name = "max_daily_rate", nullable = false, precision = 10, scale = 2)
-  private Double maxDailyRate;
+  private BigDecimal maxDailyRate;
 
   @Enumerated(EnumType.STRING)
   private ConditionType condition;

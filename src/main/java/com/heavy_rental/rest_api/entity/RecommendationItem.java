@@ -1,5 +1,7 @@
 package com.heavy_rental.rest_api.entity;
 
+import java.math.BigDecimal;
+
 import jakarta.persistence.*;
 import lombok.*;
 
@@ -26,10 +28,10 @@ public class RecommendationItem {
   @Column(name = "rank_order")
   private Integer rankOrder;
 
-  @Column(name = "match_score", precision = 5, scale = 2)
-  private Double matchScore;
+  @Column(name = "match_score")
+  private BigDecimal matchScore;
 
-  @Column(name = "ml_predicted_price", precision = 10, scale = 2)
-  private Double mlPredictedPrice;
+  @Column(name = "ml_predicted_price")
+  private BigDecimal mlPredictedPrice;
   
 }

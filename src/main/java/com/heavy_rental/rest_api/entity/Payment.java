@@ -2,6 +2,8 @@ package com.heavy_rental.rest_api.entity;
 
 import jakarta.persistence.*;
 import lombok.*;
+
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Entity
@@ -35,8 +37,8 @@ public class Payment {
     @Column(name = "stripe_customer_id")
     private String stripeCustomerId;
 
-    @Column(name = "amount", precision = 10, scale = 2)
-    private Double amount;
+    @Column(name = "amount")
+    private BigDecimal amount;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "payment_type")

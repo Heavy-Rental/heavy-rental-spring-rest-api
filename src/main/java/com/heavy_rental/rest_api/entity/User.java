@@ -53,7 +53,7 @@ public class User {
 	@Builder.Default
 	private boolean enabled = true;
 
-	@Column(nullable = false)
+	@Column(name = "created_at")
 	private LocalDateTime createdAt;
 
 }

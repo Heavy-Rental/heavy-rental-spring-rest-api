@@ -2,6 +2,8 @@ package com.heavy_rental.rest_api.entity;
 
 import jakarta.persistence.*;
 import lombok.*;
+
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Entity
@@ -24,8 +26,8 @@ public class AIRecommendation {
   @JoinColumn(name = "user_id")
   private User user;
 
-  @Column(name = "confidence_score")
-  private Double confidenceScore;
+  @Column(name = "confidence_score", precision = 10, scale = 2)
+  private BigDecimal confidenceScore;
 
   @Enumerated(EnumType.STRING)
   private RecommendationStatus status;
