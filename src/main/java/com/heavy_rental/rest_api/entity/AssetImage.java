@@ -20,8 +20,8 @@ public class AssetImage {
   @JoinColumn(name = "asset_id", nullable = false)
   private Asset asset;
 
-  @Column(nullable = false, length = 255)
-  private String imageUrl;
+  @Column(name= "image")
+  private String image;
 
   @Column(name = "uploaded_at", nullable = false)
   private LocalDateTime uploadedAt;

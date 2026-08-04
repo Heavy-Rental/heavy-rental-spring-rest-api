@@ -20,7 +20,7 @@ Interim minting (`GET /api/auth/getBearerToken`) is defined only in **SPEC-reque
 
 When this feature is correct:
 
-1. A client holding a valid **interim** JWT can call `POST /api/auth/login` with username/password and receive a **session access JWT** after Spring Security authentication.
+1. A client holding a valid **interim** JWT can call `POST /api/auth/login` with email/password and receive a **session access JWT** after Spring Security authentication.
 2. Interim tokens **cannot** authorize general protected APIs or logout; only access tokens with user roles can.
 3. After successful login, the interim token’s `jti` is denylisted (single-use interim).
 4. `POST /api/auth/logout` denylists the access token’s `jti` so it can no longer be used.
@@ -39,7 +39,7 @@ Client                              API
   │
   │  2. POST /api/auth/login
   │     Authorization: Bearer <interim>
-  │     { "username", "password" }
+  │     { "email", "password" }
   │◄──── LoginResponse (access JWT JSON) ───────────│
   │      (interim jti denylisted)
   │
@@ -80,7 +80,7 @@ Client                              API
 |--|------------------------|------------------|
 | **Issued by** | `GET /getBearerToken` | `POST /login` after `AuthenticationManager` success |
 | **Prerequisite** | None | Valid interim Bearer + credentials |
-| **`sub`** | Random UUID | Authenticated **username** |
+| **`sub`** | Random UUID | Authenticated **email** |
 | **`tokenType`** | `"interim"` | `"access"` |
 | **`roles`** | `["ROLE_INTERIM"]` | DB roles, e.g. `["ROLE_USER"]`, `["ROLE_ADMIN"]` |
 | **May call** | Login only | Logout + business APIs requiring USER/ADMIN |
@@ -110,12 +110,12 @@ Signing: HS256, same issuer/secret/TTL config as environment SPEC.
 
 ### Requirement 1: Login upgrades interim to access
 
-**User story:** As a client with an interim token, I want to authenticate with username/password and receive a higher-privilege session JWT.
+**User story:** As a client with an interim token, I want to authenticate with email/password and receive a higher-privilege session JWT.
 
 #### Acceptance criteria
 
 1. **GIVEN** a valid interim Bearer and an enabled user with correct password  
-   **WHEN** `POST /api/auth/login` with JSON `{ "username", "password" }` and `Authorization: Bearer <interim>`  
+   **WHEN** `POST /api/auth/login` with JSON `{ "email", "password" }` and `Authorization: Bearer <interim>`  
    **THEN** response is `200 OK` with:
 
    ```json
@@ -123,12 +123,14 @@ Signing: HS256, same issuer/secret/TTL config as environment SPEC.
      "accessToken": "<jwt>",
      "tokenType": "Bearer",
      "expiresIn": <seconds>,
-     "username": "<username>"
+     "username": "<email>"
    }
    ```
 
+   Note: the response field is still named `username` for now, but its value is the authenticated **email**.
+
 2. **GIVEN** the returned `accessToken` decoded  
-   **THEN** `sub` is the username, `tokenType` is `"access"`, and `roles` include the user’s DB role(s); credentials were verified via Spring Security `AuthenticationManager`.
+   **THEN** `sub` is the email, `tokenType` is `"access"`, and `roles` include the user’s DB role(s); credentials were verified via Spring Security `AuthenticationManager`.
 
 3. **GIVEN** no Bearer or invalid/expired/revoked interim  
    **WHEN** login is called  
@@ -146,7 +148,7 @@ Signing: HS256, same issuer/secret/TTL config as environment SPEC.
    **WHEN** the same interim token is reused for login  
    **THEN** `401` (interim denylisted).
 
-7. **GIVEN** blank username or password with valid interim  
+7. **GIVEN** blank email or password with valid interim  
    **WHEN** login is called  
    **THEN** `400` with `error` of `"bad_request"`.
 
@@ -186,12 +188,12 @@ Authorization: Bearer <interim-jwt>
 Content-Type: application/json
 
 {
-  "username": "admin",
+  "email": "admin@localhost",
   "password": "admin1234"
 }
 ```
 
-**DTO:** `LoginRequest(username, password)`
+**DTO:** `LoginRequest(email, password)`
 
 **Success `200` — `LoginResponse`:**
 
@@ -200,7 +202,7 @@ Content-Type: application/json
 | `accessToken` | string | Session JWT |
 | `tokenType` | string | `"Bearer"` |
 | `expiresIn` | long | Seconds |
-| `username` | string | Authenticated subject |
+| `username` | string | Authenticated subject (the **email** used to log in; field name is legacy) |
 
 ### 6.2 `POST /api/auth/logout`
 
@@ -248,9 +250,9 @@ Authorization: Bearer <access-jwt>
 ```text
 login(LoginRequest, Jwt interimJwt):
   1. Assert interimJwt present and tokenType == interim (defense in depth)
-  2. Validate username/password non-blank → 400
+  2. Validate email/password non-blank → 400
   3. AuthenticationManager.authenticate(...)
-  4. Issue access JWT: sub=username, roles=ROLE_* (excluding ROLE_INTERIM), tokenType=access
+  4. Issue access JWT: sub=email, roles=ROLE_* (excluding ROLE_INTERIM), tokenType=access
   5. tokenDenylist.deny(interimJwt.jti, interimJwt.exp)
   6. Return LoginResponse
 ```
@@ -271,21 +273,21 @@ Login authenticates with:
 ```java
 authenticationManager.authenticate(
     new UsernamePasswordAuthenticationToken(
-        request.username().trim(),
+        request.email().trim(),
         request.password()));  // plain password from the client — do NOT encode here
 ```
 
 #### What `UsernamePasswordAuthenticationToken` does **not** do
 
 - It does **not** encrypt or BCrypt-hash the password.
-- It only holds **principal** (username) and **credentials** (raw password string from the JSON body).
+- It only holds **principal** (email) and **credentials** (raw password string from the JSON body).
 
 #### What actually verifies the password
 
 | Step | Component | Behavior |
 |------|-----------|----------|
 | 1 | `AuthenticationManager` / `DaoAuthenticationProvider` | Orchestrates authentication |
-| 2 | `CustomUserDetailsService` | Loads user from `users` by username; password field is the **stored BCrypt hash** |
+| 2 | `CustomUserDetailsService` | Loads user from `users` by **email** (`UserRepository.findByEmail`); password field is the **stored BCrypt hash** |
 | 3 | `PasswordEncoder` (`BCryptPasswordEncoder` bean) | Calls **`matches(rawPasswordFromRequest, hashFromDb)`** |
 
 | Call | When to use |
@@ -301,17 +303,17 @@ There is **no** public register endpoint in this design. Hashes are written when
 
 1. **`DefaultUserInitializer`** (startup): if `users` is **empty**, seeds admin with  
    `passwordEncoder.encode(app.security.default-password)`  
-   Defaults in config: username `admin`, password `admin1234` (overridable via env).
+   Defaults in config: name/username `admin`, email `admin@localhost` (`<app.security.default-username>@localhost`), password `admin1234` (overridable via env).
 2. **Tests** (or future admin/register code): same pattern — `encode` then `userRepository.save`.
 3. **Manual SQL / ops** (if used): must store a BCrypt hash, not plain text.
 
-**Important:** `DefaultUserInitializer` runs **only when the table is empty**. Changing `app.security.default-password` later does **not** update an existing `admin` row. If login fails with `invalid_credentials` for `admin` / `admin1234`, the DB may still hold an older hash (e.g. seeded earlier as `admin123`). Fix by updating the hash, deleting users and restarting to re-seed, or logging in with the password that was used when the row was created.
+**Important:** `DefaultUserInitializer` runs **only when the table is empty**. Changing `app.security.default-password` later does **not** update an existing `admin` row. If login fails with `invalid_credentials` for `admin@localhost` / `admin1234`, the DB may still hold an older hash (e.g. seeded earlier as `admin123`). Fix by updating the hash, deleting users and restarting to re-seed, or logging in with the password that was used when the row was created.
 
 #### Login password path (summary)
 
 ```text
 Client JSON password (plain)
-  → UsernamePasswordAuthenticationToken(username, plainPassword)
+  → UsernamePasswordAuthenticationToken(email, plainPassword)
   → AuthenticationManager.authenticate
   → load UserDetails (password = BCrypt hash from users table)
   → BCryptPasswordEncoder.matches(plainPassword, hashFromDb)
@@ -347,16 +349,17 @@ cd heavy-rental-spring-rest-api
 
 1. Application running (`./mvnw spring-boot:run` from `heavy-rental-spring-rest-api/`).
 2. PostgreSQL reachable (e.g. `ping db` / `db:5432`).
-3. A user in the `users` table whose **plain password you know**.
+3. A user in the `users` table whose **email and plain password you know**.
 
 If the table was **empty** at first startup, `DefaultUserInitializer` seeds:
 
 | Property | Default (dev) |
 |----------|----------------|
-| Username | `admin` (`app.security.default-username` / `APP_DEFAULT_USERNAME`) |
+| Name / username | `admin` (`app.security.default-username` / `APP_DEFAULT_USERNAME`) |
+| Email (login field) | `admin@localhost` (`<default-username>@localhost`, not independently configurable) |
 | Password | `admin1234` (`app.security.default-password` / `APP_DEFAULT_PASSWORD`) |
 
-**Seed caveat:** initializer does **not** re-run if any users already exist. An older environment may have seeded a different default password (e.g. `admin123`). If `admin` / `admin1234` returns `invalid_credentials`, try the password used when the row was first created, or reset the admin hash / empty the table and restart (see §7.4).
+**Seed caveat:** initializer does **not** re-run if any users already exist. An older environment may have seeded a different default password (e.g. `admin123`). If `admin@localhost` / `admin1234` returns `invalid_credentials`, try the password used when the row was first created, or reset the admin hash / empty the table and restart (see §7.4).
 
 ### 8.4 Manual test with curl (recommended)
 
@@ -371,7 +374,7 @@ echo "Interim: $INTERIM"
 curl -s -X POST http://localhost:8080/api/auth/login \
   -H "Authorization: Bearer $INTERIM" \
   -H "Content-Type: application/json" \
-  -d '{"username":"admin","password":"admin1234"}'
+  -d '{"email":"admin@localhost","password":"admin1234"}'
 ```
 
 **Success (`200`)** example:
@@ -381,7 +384,7 @@ curl -s -X POST http://localhost:8080/api/auth/login \
   "accessToken": "eyJhbGciOiJIUzI1NiJ9...",
   "tokenType": "Bearer",
   "expiresIn": 3600,
-  "username": "admin"
+  "username": "admin@localhost"
 }
 ```
 
@@ -395,12 +398,12 @@ curl -s -X POST http://localhost:8080/api/auth/logout \
 
 ### 8.5 Manual test with Postman
 
-Login is **two requests**. Do not put username/password only on a single unauthenticated call.
+Login is **two requests**. Do not put email/password only on a single unauthenticated call.
 
 | Step | Method | URL | Authorization | Body |
 |------|--------|-----|---------------|------|
 | 1 | `GET` | `http://localhost:8080/api/auth/getBearerToken` | **No Auth** | none |
-| 2 | `POST` | `http://localhost:8080/api/auth/login` | Type: **Bearer Token** → paste **entire response body** from step 1 (raw JWT only) | **raw → JSON**: `{"username":"admin","password":"<plain-password-for-db-user>"}` |
+| 2 | `POST` | `http://localhost:8080/api/auth/login` | Type: **Bearer Token** → paste **entire response body** from step 1 (raw JWT only) | **raw → JSON**: `{"email":"<db-user-email>","password":"<plain-password-for-db-user>"}` |
 | 3 | `POST` | `http://localhost:8080/api/auth/logout` | Type: **Bearer Token** → paste `accessToken` from step 2 JSON | none |
 
 **Postman setup details**
@@ -437,7 +440,7 @@ On step 3, Bearer Token: `{{accessToken}}`.
 | `401` with `error: "invalid_credentials"` | Wrong plain password, user missing, or **stale seed password** (admin hash created under an older default; see §7.4) |
 | `403` on login | Used an **access** token as Bearer instead of an **interim** token |
 | `401` on second login with the same interim | Interim is **single-use** after a successful login — call getBearerToken again |
-| `400` with `error: "bad_request"` | Missing/blank `username` or `password` in JSON body |
+| `400` with `error: "bad_request"` | Missing/blank `email` or `password` in JSON body |
 | Still failing after “hashing password in client” | Password must stay **plain** in the JSON body; BCrypt `encode` is only for DB storage, not for the login request |
 | Connection refused | App not running on port `8080` |
 | DB/startup errors | Postgres not reachable; check `POSTGRES_*` / host `db` |
@@ -450,7 +453,7 @@ INTERIM=$(curl -s http://localhost:8080/api/auth/getBearerToken)
 curl -s -X POST http://localhost:8080/api/auth/login \
   -H "Authorization: Bearer $INTERIM" \
   -H 'Content-Type: application/json' \
-  -d '{"username":"admin","password":"admin1234"}'
+  -d '{"email":"admin@localhost","password":"admin1234"}'
 
 curl -s -X POST http://localhost:8080/api/auth/logout \
   -H "Authorization: Bearer <accessToken>"
@@ -491,3 +494,4 @@ curl -s -X POST http://localhost:8080/api/auth/logout \
 | **1.0.0** | 2026-08-02 | Initial SPEC: multi-step login/logout extracted from SPEC-request-bearer-token; documents as-built branch implementation |
 | 1.1.0 | 2026-08-02 | Expanded §8 verification: curl, Postman, prerequisites, common failures, automated test command |
 | 1.2.0 | 2026-08-02 | Document password verification (`authenticate` + `matches` vs `encode`); seed caveat; Postman pitfalls for invalid_credentials |
+| 1.3.0 | 2026-08-04 | `LoginRequest` login field is `email` (not `username`); updated flow, contracts, and examples accordingly. `LoginResponse.username` field name unchanged but now documented as holding the email value. Default admin seed login email is `admin@localhost`. |
