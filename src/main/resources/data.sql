@@ -16,7 +16,7 @@ INSERT INTO users (id, name, password, email, company, role, enabled, created_at
   (1, 'admin',      '$2a$10$aUibEu.Op9Ku2ANgszHQrez2oC8zSg8ly5TmLYtEu/cOlZzbkCev.', 'admin@localhost',        NULL,               'ADMIN',  true, '2026-01-01 00:00:00'),
   (2, 'Alex Tan',   '$2a$10$d8TNG4859GcqyXtTXquR9O6Jwb83vx4uXwb3SGfhP4BHUIV6NWgTu', 'alex.tan@example.sg',   'Tan Construction', 'USER',   true, '2026-01-05 09:00:00'),
   (3, 'Ravi Kumar', '$2a$10$2b9rJGeTNNaTx3Qo0YFuJO0ax4fCAwgzvATjztZTg/HNJCI9//dfO', 'ravi.kumar@example.sg', NULL,               'ADMIN',  true, '2026-01-05 09:00:00'),
-  (4, 'Ah Tan',     '$2a$10$oC6XrSRGhkKzySE8XCDrqeh56fhJlukWnT10jHcU93.Jsz2BVSk0O', 'ah.tan@example.sg',     NULL,               'DRIVER', true, '2026-01-05 09:00:00')
+  (4, 'Ah Tan',     '$2a$10$/Hrb7byw5a9ya.54mddREu1UuPWQ0gIS/gjci/pSyJmYHqT6S.fpK', 'ah.tan@example.sg',     NULL,               'DRIVER', true, '2026-01-05 09:00:00')
 ON CONFLICT (id) DO UPDATE SET
   name = EXCLUDED.name,
   password = EXCLUDED.password,
