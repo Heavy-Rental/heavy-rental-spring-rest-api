@@ -3,13 +3,13 @@
 | Field | Value |
 |-------|--------|
 | **Document type** | Feature SDD |
-| **Status** | Implemented |
+| **Status** | Superseded — seed data moved from `AssetDataInitializer` (Java) into `src/main/resources/data.sql` (see §9) |
 | **Module** | `heavy-rental-spring-rest-api` |
-| **Packages** | `com.heavy_rental.rest_api.config` |
+| **Packages** | `com.heavy_rental.rest_api.config` (historical — the class no longer exists) |
 | **Environment context** | [`SPEC-project-environment.md`](./SPEC-project-environment.md), [`SPEC-entity-repository.md`](./SPEC-entity-repository.md) (read first) |
-| **Related code** | `config/AssetDataInitializer.java`; `Asset`, `AssetCategory`, `AssetImage` entities; `AssetRepository`, `AssetCategoryRepository`, `AssetImageRepository`; existing `DefaultUserInitializer` (the pattern this follows) |
+| **Related code** | `src/main/resources/data.sql`; `Asset`, `AssetCategory`, `AssetImage` entities; `AssetRepository`, `AssetCategoryRepository`, `AssetImageRepository` |
 
-This document describes the **as-built** `AssetDataInitializer`, which seeds local/dev mock data into the asset catalog tables at application startup.
+This document originally described the **as-built** `AssetDataInitializer`, a Java `ApplicationRunner` that seeded local/dev mock data into the asset catalog tables at application startup. That class has since been removed — see §9 for why and where the same seed data lives now. §§2–8 are kept as historical record of the seed data's content and the reasoning that shaped it; they no longer describe the delivery mechanism.
 
 ---
 
@@ -119,9 +119,23 @@ Each row also sets `min_daily_rate`/`max_daily_rate` (bracketing `base_daily_rat
 
 ---
 
-## 8. Change control
+## 9. Migration to `data.sql` (supersedes §2's delivery-mechanism decision)
+
+`spring.jpa.defer-datasource-initialization=true` and `spring.sql.init.mode=always` were added to `application.properties` (for the broader data-seeding effort covering the other 10 entities — see [`SPEC-entity-repository.md`](./SPEC-entity-repository.md)). That makes `data.sql` run reliably after Hibernate creates the schema and, critically, **before** any `ApplicationRunner` bean executes — which is exactly the ordering problem §2's original decision log said didn't hold in this project. Two consequences:
+
+1. The reason to prefer a Java initializer over `data.sql` no longer applies.
+2. Leaving `AssetDataInitializer` in place would actively break: `data.sql` inserting into `asset_categories` first would trip the initializer's own `categoryRepository.count() > 0` guard, silently preventing it from ever seeding `assets`/`asset_images`.
+
+Resolution: `config/AssetDataInitializer.java` was deleted, and its exact seed data (§4) was transcribed into `src/main/resources/data.sql`, in the same `asset_categories → assets → asset_images` FK order (§3's ordering requirement still holds — it's just enforced by statement order in one file instead of Java code). Image files under `mock-images/` are unchanged; each is base64-encoded once (via `base64 -w0`) and embedded as a literal in the corresponding `INSERT INTO asset_images` row instead of being read/encoded at runtime.
+
+The tradeoffs called out in §7 change accordingly: seeding is now a single non-transactional script (Postgres does wrap a single `data.sql` run in a transaction by default, unlike the old per-row `save()` calls with no `@Transactional` boundary — an incidental improvement, not a design goal here). The idempotency behavior described in §3.2/FR-3 (only seed when empty) does **not** carry over: `data.sql`'s inserts are plain one-shot `INSERT`s with explicit IDs, consistent with how the rest of `data.sql` is written — a second app start without truncating the tables first will hit duplicate-key errors, same as every other table in that file.
+
+---
+
+## 10. Change control
 
 | Version | Date | Notes |
 |---------|------|--------|
 | 0.1.0 | 2026-08-05 | Initial draft capturing the agreed design prior to implementation. No code written yet. |
 | 1.0.0 | 2026-08-05 | Implemented `config/AssetDataInitializer.java`. Corrected the category list from an invented 5-category set (Excavators/Cranes/Scissor Lifts/Boom Lifts/Generators) to the actual approved 4 categories (Excavator/Scissors Lift/Boom Lift/Fork Lift), replacing the crane and generator assets with two forklifts. Recorded final image source (user-downloaded free-license stock photos) and the 9-file `mock-images/` mapping actually used. |
+| 1.1.0 | 2026-08-05 | Superseded the Java delivery mechanism: removed `AssetDataInitializer`, moved its seed data into `data.sql` (§9), now that `defer-datasource-initialization`/`sql.init.mode=always` make `data.sql` run reliably ahead of `ApplicationRunner`s in this project. |
