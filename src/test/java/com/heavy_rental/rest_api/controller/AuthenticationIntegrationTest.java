@@ -22,6 +22,7 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.heavy_rental.rest_api.entity.User;
 import com.heavy_rental.rest_api.entity.User.UserRole;
@@ -33,6 +34,7 @@ import tools.jackson.databind.ObjectMapper;
 
 @SpringBootTest
 @AutoConfigureMockMvc
+@Transactional
 class AuthenticationIntegrationTest {
 
 	@Autowired
