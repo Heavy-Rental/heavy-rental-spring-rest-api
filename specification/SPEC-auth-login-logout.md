@@ -305,7 +305,7 @@ There is **no** public register endpoint in this design. Hashes are written when
 2. **Tests** (or future admin/register code): `encode` then `userRepository.save`.
 3. **Manual SQL / ops** (if used): must store a BCrypt hash, not plain text.
 
-**Important:** `data.sql` inserts use explicit IDs with no `ON CONFLICT` handling (see `SPEC-seed-data.md` §7) — they only apply once, against a users table empty at boot. If login fails with `invalid_credentials` for a seeded account, the DB likely holds a row created before the hash in `data.sql` was last changed. Fix by updating the hash, truncating `users` (and the tables that FK to it) and restarting to re-seed, or logging in with the password that was used when the row was created. `DefaultUserInitializer`, which previously handled this via a startup, empty-table check, was removed once seeding moved entirely into `data.sql`.
+**Important:** the `users` insert in `data.sql` uses `ON CONFLICT (id) DO UPDATE` (see `SPEC-seed-data.md` §6.0/§7), so it self-heals on every app boot — if `admin@localhost` / `admin1234` (or either seeded customer/admin login) ever returns `invalid_credentials`, the fix is simply restarting the app so `data.sql` reruns and overwrites the hash, not a manual DB edit. `DefaultUserInitializer`, which previously handled default-admin seeding via a startup, empty-table check, was removed once seeding moved entirely into `data.sql`.
 
 #### Login password path (summary)
 
@@ -358,7 +358,7 @@ cd heavy-rental-spring-rest-api
 | `Ravi Kumar` | `ravi.kumar@example.sg` | ADMIN | `admin123` |
 | `Ah Tan` | `ah.tan@example.sg` | DRIVER | `driver123` |
 
-**Seed caveat:** these are plain `INSERT`s with no re-seed/upsert logic — they only apply once, against an empty table. An older environment may hold rows created before these hashes were last changed. If a seeded login returns `invalid_credentials`, try the password used when the row was first created, or reset the hash / empty the table and restart (see §7.4).
+**Seed caveat:** the `users` insert upserts (`ON CONFLICT (id) DO UPDATE`), so it applies on every app boot regardless of prior state. If a seeded login still returns `invalid_credentials`, the app hasn't restarted since `data.sql` last changed — restart it (see §7.4).
 
 ### 8.4 Manual test with curl (recommended)
 

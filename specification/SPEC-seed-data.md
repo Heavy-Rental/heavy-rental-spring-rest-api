@@ -36,7 +36,7 @@ Every table below (except `users`) had no data and no admin UI to create rows th
 
 ### 3.2 Out of scope
 
-- Idempotent refresh/upsert behavior — every insert here is a plain one-shot `INSERT` with an explicit ID. A second app start without truncating tables first will hit duplicate-key errors (see §7).
+- Nothing — as of 1.5.0 every `INSERT` in this file carries `ON CONFLICT (id) ...` (see §7), specifically so it tolerates being run more than once against the same Postgres instance without truncation.
 - Environment/profile gating — no Spring profiles exist in this project today.
 
 ---
@@ -71,6 +71,8 @@ Every table below (except `users`) had no data and no admin UI to create rows th
 | 4 | Ah Tan | ah.tan@example.sg | DRIVER | `driver123` |
 
 All passwords are stored as `BCryptPasswordEncoder` hashes generated with the same encoder bean the app uses (`config/SecurityConfig.java`), so they verify correctly via the normal login endpoint. Plaintext values are listed here only because this is local/dev seed data — never do this for a real environment.
+
+Unlike the other 12 tables (`ON CONFLICT (id) DO NOTHING`), this insert uses `ON CONFLICT (id) DO UPDATE` — see §7. `users` is the one table where a rerun should actively overwrite whatever's already there (e.g. a stale password hash from an earlier seed), rather than leaving it alone.
 
 ### 6.1 `asset_categories` (4 rows)
 
@@ -136,9 +138,9 @@ Only for bookings whose delivery/return has actually happened as of "today": `dr
 
 ## 7. Assumptions & dependencies
 
-- `spring.jpa.hibernate.ddl-auto=update`, `spring.sql.init.mode=always`, `spring.jpa.defer-datasource-initialization=true` — the combination that makes `data.sql` run once, reliably, after schema creation/update and before any `ApplicationRunner`.
+- `spring.jpa.hibernate.ddl-auto=update`, `spring.sql.init.mode=always`, `spring.jpa.defer-datasource-initialization=true` — the combination that makes `data.sql` run reliably after schema creation/update and before any `ApplicationRunner`, on **every** `ApplicationContext` refresh (not just the first app boot ever — see next point).
 - `'Alex Tan'`, `'Ravi Kumar'`, and `'Ah Tan'` must exist in `users` before the rest of `data.sql` runs, or the `rental_plan` inserts (customer_id `NOT NULL`) fail outright and abort the rest of the script. Satisfied as of 1.4.0 by the `0. users` block at the top of the same file (see §6.0).
-- Not idempotent: every insert uses an explicit ID with no `ON CONFLICT` handling. Re-running the app against a database that already has these rows (schema not dropped, since `ddl-auto=update`) will throw duplicate-key errors. Truncate the 12 tables (or drop/recreate the schema) before a second run if fresh data is wanted.
+- **`data.sql` runs more than once per test suite, against the same Postgres instance.** `spring.sql.init.mode=always` reruns it on every distinct `ApplicationContext` — e.g. `AuthenticationIntegrationTest`'s `@AutoConfigureMockMvc` config produces a different context than a plain `@SpringBootTest`, so a single `mvn test`/`mvn clean install` boots at least two contexts, each re-executing this file against a database that isn't dropped between them (`ddl-auto=update` never truncates). As of 1.5.0, every `INSERT` in this file carries `ON CONFLICT (id) DO NOTHING` (or, for `users`, `DO UPDATE` — see §6.0) specifically so this is safe: a rerun converges on the same rows instead of throwing `duplicate key value violates unique constraint`.
 - Relies on all 9 files referenced in §6.3 existing under `src/main/resources/mock-images/` with exact matching filenames at build time (they're read once, by the `base64` command, when `data.sql` was generated — not at runtime, unlike the old `AssetDataInitializer`).
 
 ---
@@ -162,3 +164,4 @@ Only for bookings whose delivery/return has actually happened as of "today": `dr
 | 1.2.0 | 2026-08-05 | Removed `AssetDataInitializer`; transcribed its seed data into `data.sql` in FK order, resolving the guard-condition conflict described in §4. Asset-referencing tables switched from `ILIKE` keyword guesses to exact-name lookups against the real 8-asset catalog, with all dependent rates/subtotals recalculated accordingly. |
 | 1.3.0 | 2026-08-05 | Renamed `SPEC-asset-mock-data.md` → `SPEC-seed-data.md` and rewrote as the single spec covering all 12 seeded tables (previously asset-catalog-only in framing, even after 1.2.0 folded the other tables into the same file in practice). |
 | 1.4.0 | 2026-08-05 | Added a `0. users` block to `data.sql`, resolving the hard dependency noted in §7: `'admin'`, `'Alex Tan'`, `'Ravi Kumar'`, `'Ah Tan'` are now seeded with `BCryptPasswordEncoder` password hashes before the rest of the file runs. `users` is no longer fully out of scope for this file (§3.2 updated accordingly). |
+| 1.5.0 | 2026-08-05 | Discovered `data.sql` reruns on every distinct `ApplicationContext` (not once per app lifetime), so `mvn test`/`mvn clean install` was hitting `duplicate key value violates unique constraint` once `users` (1.4.0) removed the one thing (`DefaultUserInitializer`'s empty-table check) that had been shielding a rerun from this. Added `ON CONFLICT (id) DO NOTHING` to all 12 non-`users` inserts and `ON CONFLICT (id) DO UPDATE` to `users`, so every insert in this file now tolerates reruns against a non-empty database. Also fixed unrelated, pre-existing schema drift on the live `asset_images` table hit immediately after (leftover `NOT NULL image_url` column and `image` still `varchar(255)`, both stale relative to the `AssetImage` entity) via a one-off `ALTER TABLE`; `ddl-auto=update` cannot fix this class of drift on its own since it never alters or drops existing columns. |
