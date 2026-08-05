@@ -5,10 +5,10 @@
 | **Document type** | SDD data-model reference (as-built) |
 | **Status** | Implemented |
 | **Module** | `heavy-rental-spring-rest-api` |
-| **Related code** | `src/main/resources/data.sql`; `src/main/resources/mock-images/`; `application.properties` (`spring.sql.init.mode`, `spring.jpa.defer-datasource-initialization`); all entities/repositories except `User` |
+| **Related code** | `src/main/resources/data.sql`; `src/main/resources/mock-images/`; `application.properties` (`spring.sql.init.mode`, `spring.jpa.defer-datasource-initialization`); all entities/repositories |
 | **Environment context** | [`SPEC-project-environment.md`](./SPEC-project-environment.md), [`SPEC-entity-repository.md`](./SPEC-entity-repository.md) (read first) |
 
-This document is the single source of truth for `data.sql` — what it seeds, in what order, why it's structured the way it is, and what it assumes about tables it doesn't own. It supersedes the narrower, assets-only `SPEC-asset-mock-data.md` (see §9 change control): that file described a Java `ApplicationRunner`, `AssetDataInitializer`, which seeded only `asset_categories`/`assets`/`asset_images`. That class has been deleted; its seed data was folded into this same `data.sql`, which now covers every table except `users`.
+This document is the single source of truth for `data.sql` — what it seeds, in what order, why it's structured the way it is, and what it assumes about tables it doesn't own. It supersedes the narrower, assets-only `SPEC-asset-mock-data.md` (see §9 change control): that file described a Java `ApplicationRunner`, `AssetDataInitializer`, which seeded only `asset_categories`/`assets`/`asset_images`. That class has been deleted; its seed data was folded into this same `data.sql`, which as of 1.4.0 covers all 13 tables, including `users` (see §6.0).
 
 ---
 
@@ -28,13 +28,14 @@ Every table below (except `users`) had no data and no admin UI to create rows th
 
 ## 3. Scope
 
-### 3.1 In scope — 12 tables, seeded in this FK dependency order
+### 3.1 In scope — 13 tables, seeded in this FK dependency order
 
-`asset_categories` → `assets` → `asset_images` → `rental_plan` → `rental_plan_records` → `bookings` → `booking_items` → `payments` → `delivery_records` → `return_records` → `ai_recommendations` → `recommendation_items`.
+`users` → `asset_categories` → `assets` → `asset_images` → `rental_plan` → `rental_plan_records` → `bookings` → `booking_items` → `payments` → `delivery_records` → `return_records` → `ai_recommendations` → `recommendation_items`.
+
+`users` (§6.0) is seeded first, in the same file as everything else — see §7. Four rows: `'admin'`, `'Alex Tan'` (customer), `'Ravi Kumar'` (admin), `'Ah Tan'` (driver), covering the names the rest of this file joins against. (A separate `DefaultUserInitializer` `ApplicationRunner` used to seed `admin` alone when the table was empty; it was removed once `data.sql` covered `users` directly — see §9, 1.4.0.)
 
 ### 3.2 Out of scope
 
-- `users` — seeded separately. `DefaultUserInitializer` (`config/DefaultUserInitializer.java`) creates one default admin (`name = 'admin'`) when the table is empty. `data.sql` additionally **depends on** three more users existing by the time it runs — `'Alex Tan'` (customer), `'Ravi Kumar'` (admin), `'Ah Tan'` (driver) — which are not yet seeded by any code in this repo as of this writing; see §7.
 - Idempotent refresh/upsert behavior — every insert here is a plain one-shot `INSERT` with an explicit ID. A second app start without truncating tables first will hit duplicate-key errors (see §7).
 - Environment/profile gating — no Spring profiles exist in this project today.
 
@@ -53,12 +54,23 @@ Every table below (except `users`) had no data and no admin UI to create rows th
 
 ## 5. FK linkage strategy
 
-- **`users`**: joined by `name` (the entity's `UNIQUE` column, not `id`, since this file never inserts into `users`). Expected values: `'admin'`, `'Alex Tan'`, `'Ravi Kumar'`, `'Ah Tan'`. `rental_plan.customer_id` is `NOT NULL` — if `'Alex Tan'` doesn't exist yet, every `rental_plan` insert fails outright. `bookings.customer_id`, `ai_recommendations.user_id`, and `delivery_records`/`return_records.driver_id` are nullable, so a missing name there degrades to `NULL` instead of failing the statement.
+- **`users`**: joined by `name` (the entity's `UNIQUE` column, not `id`) against the four rows this same file now inserts first: `'admin'`, `'Alex Tan'`, `'Ravi Kumar'`, `'Ah Tan'`. `rental_plan.customer_id` is `NOT NULL` — if `'Alex Tan'` doesn't exist yet, every `rental_plan` insert fails outright. `bookings.customer_id`, `ai_recommendations.user_id`, and `delivery_records`/`return_records.driver_id` are nullable, so a missing name there degrades to `NULL` instead of failing the statement.
 - **`assets`**: joined by exact `name` (also `UNIQUE`), e.g. `(SELECT id FROM assets WHERE name = 'CAT 320 Excavator')`. All asset-referencing FK columns in the 4 downstream tables are nullable, so this only matters for realism, not correctness.
 
 ---
 
 ## 6. Seed data by table
+
+### 6.0 `users` (4 rows)
+
+| id | name | email | role | password (plaintext, dev-only) |
+|---|---|---|---|---|
+| 1 | admin | admin@localhost | ADMIN | `admin1234` (hardcoded hash; no longer overridable via `app.security.default-password`, which was removed) |
+| 2 | Alex Tan | alex.tan@example.sg | USER | `customer123` |
+| 3 | Ravi Kumar | ravi.kumar@example.sg | ADMIN | `admin123` |
+| 4 | Ah Tan | ah.tan@example.sg | DRIVER | `driver123` |
+
+All passwords are stored as `BCryptPasswordEncoder` hashes generated with the same encoder bean the app uses (`config/SecurityConfig.java`), so they verify correctly via the normal login endpoint. Plaintext values are listed here only because this is local/dev seed data — never do this for a real environment.
 
 ### 6.1 `asset_categories` (4 rows)
 
@@ -125,7 +137,7 @@ Only for bookings whose delivery/return has actually happened as of "today": `dr
 ## 7. Assumptions & dependencies
 
 - `spring.jpa.hibernate.ddl-auto=update`, `spring.sql.init.mode=always`, `spring.jpa.defer-datasource-initialization=true` — the combination that makes `data.sql` run once, reliably, after schema creation/update and before any `ApplicationRunner`.
-- **Hard dependency, not yet satisfied by any code in this repo**: `'Alex Tan'`, `'Ravi Kumar'`, and `'Ah Tan'` must exist in `users` before `data.sql` runs, or the `rental_plan` inserts (customer_id `NOT NULL`) fail outright and abort the rest of the script. Only `'admin'` is currently seeded by `DefaultUserInitializer`.
+- `'Alex Tan'`, `'Ravi Kumar'`, and `'Ah Tan'` must exist in `users` before the rest of `data.sql` runs, or the `rental_plan` inserts (customer_id `NOT NULL`) fail outright and abort the rest of the script. Satisfied as of 1.4.0 by the `0. users` block at the top of the same file (see §6.0).
 - Not idempotent: every insert uses an explicit ID with no `ON CONFLICT` handling. Re-running the app against a database that already has these rows (schema not dropped, since `ddl-auto=update`) will throw duplicate-key errors. Truncate the 12 tables (or drop/recreate the schema) before a second run if fresh data is wanted.
 - Relies on all 9 files referenced in §6.3 existing under `src/main/resources/mock-images/` with exact matching filenames at build time (they're read once, by the `base64` command, when `data.sql` was generated — not at runtime, unlike the old `AssetDataInitializer`).
 
@@ -149,3 +161,4 @@ Only for bookings whose delivery/return has actually happened as of "today": `dr
 | 1.1.0 | 2026-08-05 | Extended seeding to the other 10 entities via `src/main/resources/data.sql`, using name-based subqueries to link to `users`/`assets` without seeding those tables directly. |
 | 1.2.0 | 2026-08-05 | Removed `AssetDataInitializer`; transcribed its seed data into `data.sql` in FK order, resolving the guard-condition conflict described in §4. Asset-referencing tables switched from `ILIKE` keyword guesses to exact-name lookups against the real 8-asset catalog, with all dependent rates/subtotals recalculated accordingly. |
 | 1.3.0 | 2026-08-05 | Renamed `SPEC-asset-mock-data.md` → `SPEC-seed-data.md` and rewrote as the single spec covering all 12 seeded tables (previously asset-catalog-only in framing, even after 1.2.0 folded the other tables into the same file in practice). |
+| 1.4.0 | 2026-08-05 | Added a `0. users` block to `data.sql`, resolving the hard dependency noted in §7: `'admin'`, `'Alex Tan'`, `'Ravi Kumar'`, `'Ah Tan'` are now seeded with `BCryptPasswordEncoder` password hashes before the rest of the file runs. `users` is no longer fully out of scope for this file (§3.2 updated accordingly). |

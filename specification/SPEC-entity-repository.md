@@ -47,7 +47,7 @@ When this spec is followed:
 
 ### 3.2 Out of scope / not yet built
 
-- **REST controllers, services, and DTOs for this data model.** Today only `User` / `UserRepository` are consumed by application code (`CustomUserDetailsService`, `DefaultUserInitializer`, the auth flow). The other 12 entities and their repositories compile and would create tables, but have **no controller, service, or DTO wired up** — there is no CRUD API for assets, bookings, payments, rental plans, delivery/return records, or AI recommendations yet. Adding one is a new feature SDD.
+- **REST controllers, services, and DTOs for this data model.** Today only `User` / `UserRepository` are consumed by application code (`CustomUserDetailsService`, the auth flow). The other 12 entities and their repositories compile and would create tables, but have **no controller, service, or DTO wired up** — there is no CRUD API for assets, bookings, payments, rental plans, delivery/return records, or AI recommendations yet. Adding one is a new feature SDD.
 - Database migrations (Flyway/Liquibase) — schema is Hibernate-generated only; see [`SPEC-project-environment.md`](./SPEC-project-environment.md) §5.2.
 - Validation annotations (Bean Validation) — none of these entities use `@NotNull`/`@Size`/etc.; the only enforced constraints are JPA `@Column(nullable=…)` / `unique=…`, which become DB-level `NOT NULL` / `UNIQUE` constraints.
 
