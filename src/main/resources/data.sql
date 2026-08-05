@@ -25,6 +25,10 @@ ON CONFLICT (id) DO UPDATE SET
   role = EXCLUDED.role,
   enabled = EXCLUDED.enabled;
 
+-- Sync the users id sequence to the current max id so nextval() (used when
+-- inserting new users at runtime) won't collide with the explicit ids above.
+SELECT setval(pg_get_serial_sequence('users', 'id'), COALESCE((SELECT MAX(id) FROM users), 1));
+
 -- ============================================================
 -- 1. asset_categories
 -- ============================================================
