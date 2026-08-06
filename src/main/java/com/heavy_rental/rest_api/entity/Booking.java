@@ -68,4 +68,10 @@ public class Booking {
 
     @Column(name = "created_at")
     private LocalDateTime createdAt;
+
+    @Column(name = "balance_charge_attempted_at")
+    private LocalDateTime balanceChargeAttemptedAt;
+
+    @Column(name = "needs_manual_follow_up", columnDefinition = "boolean default false")
+    private boolean needsManualFollowUp;
 }

@@ -37,6 +37,9 @@ public class Payment {
     @Column(name = "stripe_customer_id")
     private String stripeCustomerId;
 
+    @Column(name = "stripe_payment_method_id")
+    private String stripePaymentMethodId;
+
     @Column(name = "amount")
     private BigDecimal amount;
 
@@ -49,6 +52,12 @@ public class Payment {
 
     @Column(name = "failure_reason")
     private String failureReason;
+
+    @Column(name = "requires_manual_follow_up", columnDefinition = "boolean default false")
+    private boolean requiresManualFollowUp;
+
+    @Column(name = "manual_follow_up_reason")
+    private String manualFollowUpReason;
 
     @Column(name = "paid_at")
     private LocalDateTime paidAt;
