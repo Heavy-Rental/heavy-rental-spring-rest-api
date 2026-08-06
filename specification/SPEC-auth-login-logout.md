@@ -301,13 +301,11 @@ authenticationManager.authenticate(
 
 There is **no** public register endpoint in this design. Hashes are written when a user row is created, for example:
 
-1. **`DefaultUserInitializer`** (startup): if `users` is **empty**, seeds admin with  
-   `passwordEncoder.encode(app.security.default-password)`  
-   Defaults in config: name/username `admin`, email `admin@localhost` (`<app.security.default-username>@localhost`), password `admin1234` (overridable via env).
-2. **Tests** (or future admin/register code): same pattern — `encode` then `userRepository.save`.
+1. **`data.sql`** (startup, `0. users` block — see `SPEC-seed-data.md` §6.0): inserts `admin`, `Alex Tan`, `Ravi Kumar`, `Ah Tan` with pre-computed `BCryptPasswordEncoder` hashes baked directly into the `INSERT` statements (generated once, offline, with the same encoder bean the app uses at runtime — not computed at startup).
+2. **Tests** (or future admin/register code): `encode` then `userRepository.save`.
 3. **Manual SQL / ops** (if used): must store a BCrypt hash, not plain text.
 
-**Important:** `DefaultUserInitializer` runs **only when the table is empty**. Changing `app.security.default-password` later does **not** update an existing `admin` row. If login fails with `invalid_credentials` for `admin@localhost` / `admin1234`, the DB may still hold an older hash (e.g. seeded earlier as `admin123`). Fix by updating the hash, deleting users and restarting to re-seed, or logging in with the password that was used when the row was created.
+**Important:** the `users` insert in `data.sql` uses `ON CONFLICT (id) DO UPDATE` (see `SPEC-seed-data.md` §6.0/§7), so it self-heals on every app boot — if `admin@localhost` / `admin1234` (or either seeded customer/admin login) ever returns `invalid_credentials`, the fix is simply restarting the app so `data.sql` reruns and overwrites the hash, not a manual DB edit. `DefaultUserInitializer`, which previously handled default-admin seeding via a startup, empty-table check, was removed once seeding moved entirely into `data.sql`.
 
 #### Login password path (summary)
 
@@ -351,15 +349,16 @@ cd heavy-rental-spring-rest-api
 2. PostgreSQL reachable (e.g. `ping db` / `db:5432`).
 3. A user in the `users` table whose **email and plain password you know**.
 
-If the table was **empty** at first startup, `DefaultUserInitializer` seeds:
+`data.sql` seeds four accounts on first startup against an empty `users` table (see `SPEC-seed-data.md` §6.0):
 
-| Property | Default (dev) |
-|----------|----------------|
-| Name / username | `admin` (`app.security.default-username` / `APP_DEFAULT_USERNAME`) |
-| Email (login field) | `admin@localhost` (`<default-username>@localhost`, not independently configurable) |
-| Password | `admin1234` (`app.security.default-password` / `APP_DEFAULT_PASSWORD`) |
+| Name | Email (login field) | Role | Password (dev-only) |
+|------|----------------------|------|----------------------|
+| `admin` | `admin@localhost` | ADMIN | `admin1234` |
+| `Alex Tan` | `alex.tan@example.sg` | USER | `customer123` |
+| `Ravi Kumar` | `ravi.kumar@example.sg` | ADMIN | `admin123` |
+| `Ah Tan` | `ah.tan@example.sg` | DRIVER | `driver123` |
 
-**Seed caveat:** initializer does **not** re-run if any users already exist. An older environment may have seeded a different default password (e.g. `admin123`). If `admin@localhost` / `admin1234` returns `invalid_credentials`, try the password used when the row was first created, or reset the admin hash / empty the table and restart (see §7.4).
+**Seed caveat:** the `users` insert upserts (`ON CONFLICT (id) DO UPDATE`), so it applies on every app boot regardless of prior state. If a seeded login still returns `invalid_credentials`, the app hasn't restarted since `data.sql` last changed — restart it (see §7.4).
 
 ### 8.4 Manual test with curl (recommended)
 
@@ -495,3 +494,4 @@ curl -s -X POST http://localhost:8080/api/auth/logout \
 | 1.1.0 | 2026-08-02 | Expanded §8 verification: curl, Postman, prerequisites, common failures, automated test command |
 | 1.2.0 | 2026-08-02 | Document password verification (`authenticate` + `matches` vs `encode`); seed caveat; Postman pitfalls for invalid_credentials |
 | 1.3.0 | 2026-08-04 | `LoginRequest` login field is `email` (not `username`); updated flow, contracts, and examples accordingly. `LoginResponse.username` field name unchanged but now documented as holding the email value. Default admin seed login email is `admin@localhost`. |
+| 1.4.0 | 2026-08-05 | `DefaultUserInitializer` removed; `admin`, `Alex Tan`, `Ravi Kumar`, `Ah Tan` are now all seeded by `data.sql` with pre-computed BCrypt hashes. Updated password-hash provenance (§7) and manual-testing prerequisites (§8.3) accordingly. |

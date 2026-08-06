@@ -153,17 +153,17 @@ The API **must** use the project’s existing PostgreSQL. Connectivity is expect
 3. **Do not** hardcode a different host without updating this spec; prefer `POSTGRES_HOSTNAME` / default `db`.
 4. Schema management today is Hibernate `ddl-auto=update` only (no Flyway/Liquibase yet). Introducing migrations requires an explicit feature SDD and an update to this document.
 
-### 5.3 JWT and default-user configuration
+### 5.3 JWT configuration
 
 | Property | Env override | Purpose |
 |----------|--------------|---------|
 | `app.jwt.secret` | `APP_JWT_SECRET` | HS256 signing key (**≥ 32 characters**) |
 | `app.jwt.issuer` | `APP_JWT_ISSUER` | JWT `iss` claim + decoder validation |
 | `app.jwt.expirationMinutes` | `APP_JWT_EXPIRATION_MINUTES` | Access-token lifetime |
-| `app.security.default-username` | `APP_DEFAULT_USERNAME` | Seed admin username if `users` is empty |
-| `app.security.default-password` | `APP_DEFAULT_PASSWORD` | Seed admin password (dev convenience) |
 
-Defaults in `application.properties` are for local/dev convenience. Production must supply strong secrets and non-default admin credentials.
+Defaults in `application.properties` are for local/dev convenience. Production must supply strong secrets.
+
+`app.security.default-username` / `app.security.default-password` (and `DefaultUserInitializer`, which read them) were removed once `users` seeding moved into `data.sql` (§7.2) — there is no longer a runtime, env-overridable admin seed path. A production deployment must create its own admin user; see §7.2.
 
 ### 5.4 Security model (summary)
 
@@ -189,7 +189,7 @@ Full auth contracts live in feature specs; this is the environment-level model:
 
 | Package | Responsibility |
 |---------|----------------|
-| `config` | `SecurityConfig`, `JwtProperties`, `RestExceptionHandler`, `DefaultUserInitializer` |
+| `config` | `SecurityConfig`, `JwtProperties`, `RestExceptionHandler` |
 | `controller` | HTTP mappings only (thin) |
 | `service` | Business logic and orchestration (`AuthService`, `CustomUserDetailsService`) |
 | `security` | JWT generation helpers, token denylist |
@@ -239,7 +239,7 @@ Produced by `RestExceptionHandler` and security entry/access-denied handlers.
 
 - Entity: `User` → table `users` (username, BCrypt password, email, role, enabled).
 - Roles in use: `ROLE_USER`, `ROLE_ADMIN` (stored as authority strings; JWT claim `roles`).
-- `DefaultUserInitializer` creates a single admin when the users table is empty.
+- `data.sql` seeds `users` directly (see `SPEC-seed-data.md` §6.0), including an `admin` row with a fixed BCrypt hash. `DefaultUserInitializer` was removed once this was in place.
 
 ---
 
@@ -374,5 +374,6 @@ Unless a dedicated SDD says otherwise:
 | 1.2.0 | 2026-08-02 | getBearerToken mints JWT from random UUID + date/time (no Basic credentials) |
 | 1.3.0 | 2026-08-02 | Multi-step auth inventory: interim getBearerToken → login → logout |
 | 1.3.1 | 2026-08-02 | Split feature SPECs: SPEC-request-bearer-token (mint) + SPEC-auth-login-logout (session) |
+| 1.4.0 | 2026-08-05 | Removed `DefaultUserInitializer` and the `app.security.default-username`/`default-password` properties; `users` (including `admin`) is now seeded entirely by `data.sql` (see SPEC-seed-data §6.0) |
 
 When changing stack, database strategy, packaging, default security model, or SDD file locations, bump this table and notify dependent feature specs.
