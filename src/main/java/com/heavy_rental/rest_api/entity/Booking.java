@@ -16,11 +16,7 @@ import java.time.LocalDateTime;
 public class Booking {
 
     public enum BookingStatus {
-        PENDING, CONFIRMED, MOBILISED, COMPLETED, CANCELLED
-    }
-
-    public enum PaidStatus {
-        DEPOSIT, FULL, UNPAID
+        PENDING_DEPOSIT, PENDING_CONFIRMED, CONFIRMED, MOBILISED, COMPLETED, CANCELLED
     }
 
     @Id
@@ -52,10 +48,6 @@ public class Booking {
 
     @Column(name = "remaining_balance")
     private BigDecimal remainingBalance;
-
-    @Enumerated(EnumType.STRING)
-    @Column(name = "paid_status")
-    private PaidStatus paidStatus;
 
     @Column(name = "site_address")
     private String siteAddress;
