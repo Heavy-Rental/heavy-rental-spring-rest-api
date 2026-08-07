@@ -6,6 +6,7 @@ import lombok.*;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import org.hibernate.annotations.Formula;
 
 @Entity
 @Table(name = "bookings")
@@ -52,7 +53,8 @@ public class Booking {
     @Column(name = "site_address")
     private String siteAddress;
 
-    @Column(name = "site_postal_code")
+    @Setter(AccessLevel.NONE)
+    @Formula("substring(site_address from length(site_address) - 5 for 6)")
     private String sitePostalCode;
 
     @Column(name = "site_latitude")
