@@ -31,7 +31,8 @@ public class AssetService {
     private static final String JPEG_DATA_URI_PREFIX = "data:image/jpeg;base64,";
 
     private static final List<Booking.BookingStatus> ACTIVE_BOOKING_STATUSES =
-            List.of(Booking.BookingStatus.PENDING, Booking.BookingStatus.CONFIRMED, Booking.BookingStatus.MOBILISED);
+            List.of(Booking.BookingStatus.PENDING_DEPOSIT, Booking.BookingStatus.PENDING_CONFIRMED,
+                    Booking.BookingStatus.CONFIRMED, Booking.BookingStatus.MOBILISED);
 
     private final AssetRepository assetRepository;
     private final AssetCategoryRepository assetCategoryRepository;
@@ -79,12 +80,12 @@ public class AssetService {
         LocalDate[] window = resolveAvailabilityWindow(startDate, endDate);
         List<Long> assetIds = assets.stream().map(Asset::getId).toList();
         Map<Long, AssetImage> imageByAssetId = loadImageByAssetId(assetIds);
-        Set<Long> unavailableAssetIds = findUnavailableAssetIds(assetIds, window[0], window[1]);
+        Set<Long> unavailableAssetIds = findUnavailableAssetIds(assetIds, window);
 
         return assets.stream()
                 .map(asset -> toResponse(asset,
                         imageByAssetId.get(asset.getId()),
-                        !unavailableAssetIds.contains(asset.getId())))
+                        window == null ? null : !unavailableAssetIds.contains(asset.getId())))
                 .toList();
     }
 
@@ -95,9 +96,9 @@ public class AssetService {
 
         LocalDate[] window = resolveAvailabilityWindow(startDate, endDate);
         AssetImage image = firstImage(id);
-        Set<Long> unavailableAssetIds = findUnavailableAssetIds(List.of(id), window[0], window[1]);
+        Set<Long> unavailableAssetIds = findUnavailableAssetIds(List.of(id), window);
 
-        return toResponse(asset, image, !unavailableAssetIds.contains(id));
+        return toResponse(asset, image, window == null ? null : !unavailableAssetIds.contains(id));
     }
 
     @Transactional
@@ -138,6 +139,7 @@ public class AssetService {
         if (request.maxDailyRate() != null) asset.setMaxDailyRate(request.maxDailyRate());
         if (request.condition() != null) asset.setCondition(parseCondition(request.condition()));
         if (request.purchaseYear() != null) asset.setPurchaseYear(request.purchaseYear());
+        if (request.location() != null) asset.setLocation(request.location());
 
         Asset saved = assetRepository.save(asset);
         return toResponse(saved, firstImage(id), true);
@@ -183,6 +185,7 @@ public class AssetService {
         asset.setMaxDailyRate(request.maxDailyRate());
         asset.setCondition(request.condition() != null ? parseCondition(request.condition()) : null);
         asset.setPurchaseYear(request.purchaseYear());
+        asset.setLocation(request.location());
     }
 
     private ConditionType parseCondition(String condition) {
@@ -195,8 +198,7 @@ public class AssetService {
 
     private LocalDate[] resolveAvailabilityWindow(LocalDate startDate, LocalDate endDate) {
         if (startDate == null && endDate == null) {
-            LocalDate today = LocalDate.now();
-            return new LocalDate[] { today, today };
+            return null;
         }
         if (startDate == null || endDate == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
@@ -219,19 +221,19 @@ public class AssetService {
         return assetImageRepository.findByAssetId(assetId).stream().findFirst().orElse(null);
     }
 
-    private Set<Long> findUnavailableAssetIds(List<Long> assetIds, LocalDate startDate, LocalDate endDate) {
-        if (assetIds.isEmpty()) {
+    private Set<Long> findUnavailableAssetIds(List<Long> assetIds, LocalDate[] window) {
+        if (assetIds.isEmpty() || window == null) {
             return Set.of();
         }
         return bookingItemRepository.findAssetIdsWithOverlappingBooking(
-                assetIds, startDate, endDate, ACTIVE_BOOKING_STATUSES);
+                assetIds, window[0], window[1], ACTIVE_BOOKING_STATUSES);
     }
 
     private String toDataUri(AssetImage image) {
         return image != null ? JPEG_DATA_URI_PREFIX + image.getImage() : null;
     }
 
-    private EquipmentResponse toResponse(Asset asset, AssetImage image, boolean available) {
+    private EquipmentResponse toResponse(Asset asset, AssetImage image, Boolean available) {
         return new EquipmentResponse(
                 asset.getId(),
                 asset.getName(),
@@ -245,6 +247,7 @@ public class AssetService {
                 asset.getCondition() != null ? asset.getCondition().name() : null,
                 available,
                 asset.getDescription(),
-                toDataUri(image));
+                toDataUri(image),
+                asset.getLocation());
     }
 }

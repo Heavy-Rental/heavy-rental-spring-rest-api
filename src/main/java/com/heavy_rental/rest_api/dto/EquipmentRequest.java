@@ -13,5 +13,6 @@ public record EquipmentRequest(
         BigDecimal platformHeight,
         Integer purchaseYear,
         String condition,
-        String desc) {
+        String desc,
+        String location) {
 }

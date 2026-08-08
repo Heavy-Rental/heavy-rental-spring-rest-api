@@ -2,8 +2,8 @@
 
 | Field | Value |
 |-------|--------|
-| **Purpose** | Plain-language log of every change made to get `heavy-rental-react-web-portal`'s "Browse Equipment" page working against this backend's real `/api/equipment`, instead of the mock server |
-| **Scope** | Backend (`heavy-rental-spring-rest-api`, this repo) + Frontend (`heavy-rental-react-web-portal`, separate repo, changes described here from session notes since that repo isn't in this workspace) |
+| **Purpose** | Plain-language log of every backend change made to build `/api/equipment` and support `heavy-rental-react-web-portal`'s "Browse Equipment" page pointing at it instead of the mock server |
+| **Scope** | Backend only (`heavy-rental-spring-rest-api`, this repo). The paired frontend changes now live in the `heavy-rental-react-web-portal` repo itself, not here. |
 | **Related docs** | [`SPEC-equipment-browse-api.md`](./SPEC-equipment-browse-api.md) (backend design detail), [`SPEC-seed-data.md`](./SPEC-seed-data.md) (data fixes) |
 
 ---
@@ -24,7 +24,7 @@ Small additions (no existing code removed):
 No `SecurityConfig` changes — new routes fall under the existing auth rule automatically.
 
 ### 1.2 Fixed two real data bugs found in `data.sql`
-- `CAT 320 Excavator` had 2 photo rows seeded; removed the second (the API only ever returns one photo per equipment item, matching the frontend's actual data shape — see §2.1 below)
+- `CAT 320 Excavator` had 2 photo rows seeded; removed the second (the API only ever returns one photo per equipment item, matching the frontend's `Equipment.img: string` type — a single string, not an array)
 - `asset5-jlg-2630es-scissorlift.jpg` (asset id 4's photo) was a PNG mislabeled with a `.jpg` extension; re-encoded to a real JPEG
 
 ### 1.3 Added two stub endpoints (purely to unblock the frontend)
@@ -33,49 +33,49 @@ No `SecurityConfig` changes — new routes fall under the existing auth rule aut
 
 Neither has a real entity behind it. They exist only because the frontend's equipment page also calls these on every load, and errors out entirely if `/api/depots` fails — even though it's unrelated to equipment itself.
 
+### 1.4 Corrected `SPEC-entity-repository.md` per PR review feedback
+A teammate's review caught that this branch's code changes had made 4 statements in that doc false (it said there was no equipment CRUD API, omitted 3 new repository methods, and described cascade-delete/controller handling as future work that had actually already shipped). Fixed all 4, plus a 5th instance of the same pattern found while checking. Documentation-only — no entity, repository, or relationship content changed. See that doc's own `1.1.0` changelog entry for the full list.
+
+### 1.5 Merged `origin/develop` (teammate's HR-77 booking work) — clean, no conflicts
+Pulled in a teammate's `Booking` entity edit and new mock booking data. `data.sql` and `Booking.java`/`BookingRepository.java` merged automatically — the two branches' changes lived in different, non-overlapping parts of each file. Our equipment fixes (deduped photo, re-encoded JPEG) survived untouched, confirmed by re-checking the row count and file content after merging.
+
+### 1.6 Fixed a compile break the merge exposed
+`Booking.BookingStatus.PENDING` no longer existed after the merge — the teammate's entity edit split it into `PENDING_DEPOSIT` and `PENDING_CONFIRMED`. `AssetService.ACTIVE_BOOKING_STATUSES` (used to compute equipment availability) still referenced the old single `PENDING` constant. Updated it to include both new pending states.
+
+### 1.7 Switched `ddl-auto` from `update` to `create-drop`
+After fixing 1.6, startup still failed — Postgres rejected the merged `data.sql`'s new booking rows because the live database's `bookings_status_check` constraint still listed the *old* enum values (`update` mode never rewrites existing constraints, only adds new columns/tables). Switching to `create-drop` means the schema is dropped and rebuilt fresh from the entities on every restart, so constraints always match current code — permanently avoiding this class of problem for any future enum change, at the cost of local data no longer persisting across restarts (acceptable since `data.sql` reseeds everything anyway).
+
+### 1.8 Cleaned up and replaced seed photos
+- Deleted `mock-images/asset1-cat320-excavator-b.jpg`, the orphaned source file for CAT 320's already-removed duplicate photo (confirmed unreferenced anywhere in the codebase first)
+- Renamed the remaining files so their leading number matches their actual `asset_id` (previously mismatched/confusing — e.g. `asset5-jlg-2630es-scissorlift.jpg` was actually asset id 4)
+- Replaced the actual photo content for 3 assets (ids 3, 4, 6 — Genie GS-1930 Scissor Lift, JLG 2630ES Scissor Lift, Genie Z-45 Boom Lift), each verified as a genuine JPEG (magic-byte check) before regenerating its base64 into `data.sql`
+
+### 1.9 Made `available` nullable — "not checked yet" vs. `true`/`false`
+Previously, no `startDate`/`endDate` given meant the API silently defaulted to checking "available today," which could show equipment as **Booked** before a user had picked any dates at all — confusing, and not something anyone had actually asked for. Changed:
+- `EquipmentResponse.available`: `boolean` → `Boolean` (nullable)
+- `AssetService.resolveAvailabilityWindow`: no dates → returns `null` instead of defaulting to today (skips the booking-overlap query entirely in that case)
+- `browse()`/`getById()`: pass `null` for `available` when there's no date window, real `true`/`false` once dates are picked
+
+Paired with a matching frontend change (in `heavy-rental-react-web-portal`) that hides the availability badge entirely until `available` is an actual boolean.
+
+### 1.10 Added `location` as a real field
+Previously omitted (equipment cards showed a `—` fallback). Added properly:
+- `Asset.location` — new nullable column
+- `EquipmentResponse.location` / `EquipmentRequest.location` — added to both DTOs
+- `AssetService` — wired through `toResponse`, `applyRequest` (create/replace), and `patch`
+- `data.sql` — all 8 assets now seeded with a real location, alternating `Tuas`/`Marina South`
+
+No frontend code changes were needed for this — fallbacks already in place in `heavy-rental-react-web-portal` handled a real value correctly once one existed.
+
 ---
 
-## 2. Frontend changes (`heavy-rental-react-web-portal`)
-
-### 2.1 `src/app/api.ts`
-- Added `login(email, password)` — calls this backend's real `GET /api/auth/getBearerToken` → `POST /api/auth/login` flow and returns a real access token, instead of the old fake client-generated one.
-- Changed `equipmentApi.list()` to accept optional `{ startDate, endDate }`, appended as query params — lets the equipment list reflect real per-date availability.
-
-### 2.2 `src/App.tsx` — `handleLogin`
-Made login **mode-aware** (`import.meta.env.MODE`):
-- `npm run dev:api` → calls the new real `login()`, stores the real backend token
-- `npm run dev:mock` (or plain `npm run dev`) → unchanged, still uses the original fake `issueSession()`
-
-This keeps both modes working — mock and real backend are both still toggle-able by which npm script you run.
-
-### 2.3 `src/App.tsx` — `CustomerPortal`'s `equipmentRes`
-Passes `sharedStartDate`/`sharedEndDate` into `equipmentApi.list()` and added them to `useApiResource`'s dependency array, so the equipment list (and each item's `available` flag) refetches automatically whenever the date range changes.
-
-### 2.4 Missing-field crash fixes
-This backend's `EquipmentResponse` only has 13 fields; the frontend's `Equipment` type expects 20. The 8 it doesn't provide — `weekly`, `location`, `rating`, `reviews`, `tags`, `utilization`, `revenue`, `hoursThisMonth`, `idealFor` — come back as `undefined`, and several places in the frontend called a method directly on them (`.split`, `.map`, `.toLocaleString`) without checking first, which crashes React with no error boundary anywhere in this app — meaning **any single one of these crashes blanks the entire page**, not just the broken component.
-
-Fixed everywhere this was hit:
-
-| File | What broke | Fix |
-|---|---|---|
-| `src/features/browse/EquipmentGrid.tsx` | `<img src>` assumed `img` was always a bare Unsplash photo ID | Made conditional: use `img` directly if it starts with `data:`, else build the Unsplash URL as before |
-| `src/features/browse/EquipmentGrid.tsx` | `item.location.split(",")[0]` crashed on missing `location` | `item.location?.split(",")[0]`, plus `.filter(Boolean)` before `.map()` so no empty chip renders |
-| `src/App.tsx` (equipment detail page, `SPEC_ROWS`) | `Weekly Rate`/`Location` rows | Fallback to `"—"` when missing |
-| `src/App.tsx` (equipment detail page, main + 3 thumbnail images) | Same Unsplash-URL assumption as the grid | Same `data:`-prefix conditional, ×4 |
-| `src/App.tsx` (equipment detail page, Pricing section) | `weekly.toLocaleString()` crashed; savings-% line produced `NaN%` | Guarded both behind `detailItem.weekly ? ... : "—"` / `{detailItem.weekly && (...)}` |
-| `src/App.tsx` (equipment detail page, Ideal For / Tags) | `.map()` on missing `idealFor`/`tags` | `(detailItem.idealFor ?? []).map(...)`, same for `tags` |
-
-**Not yet checked**: `rating`, `reviews`, `utilization`, `revenue`, `hoursThisMonth` — these weren't hit during equipment browsing/detail testing, but the same crash pattern likely exists anywhere else in the app that reads them unguarded (e.g. `deriveAssetRecord()` in `src/app/assetRecord.ts`, used by the admin dashboard, passes these straight through from the raw equipment object via `...e`).
-
----
-
-## 3. What still isn't built
+## 2. What still isn't built
 
 Only `/api/equipment`, `/api/auth/*`, and the two empty stubs above exist on this backend. Anything needing real bookings, checkout/payment, admin asset management, or AI recommendations will `404` if exercised — expected, not a bug, until those features are built the same way equipment was.
 
 ---
 
-## 4. How to run both sides
+## 3. How to run both sides
 
 ```bash
 # Backend (this repo)

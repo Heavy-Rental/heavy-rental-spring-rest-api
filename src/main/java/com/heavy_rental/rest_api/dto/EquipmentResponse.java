@@ -13,7 +13,8 @@ public record EquipmentResponse(
         BigDecimal platformHeight,
         Integer purchaseYear,
         String condition,
-        boolean available,
+        Boolean available,
         String desc,
-        String img) {
+        String img,
+        String location) {
 }

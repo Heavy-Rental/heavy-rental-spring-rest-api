@@ -6,6 +6,7 @@ import lombok.*;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import org.hibernate.annotations.Formula;
 
 @Entity
 @Table(name = "bookings")
@@ -16,11 +17,7 @@ import java.time.LocalDateTime;
 public class Booking {
 
     public enum BookingStatus {
-        PENDING, CONFIRMED, MOBILISED, COMPLETED, CANCELLED
-    }
-
-    public enum PaidStatus {
-        DEPOSIT, FULL, UNPAID
+        PENDING_DEPOSIT, PENDING_CONFIRMED, CONFIRMED, MOBILISED, COMPLETED, CANCELLED
     }
 
     @Id
@@ -53,14 +50,11 @@ public class Booking {
     @Column(name = "remaining_balance")
     private BigDecimal remainingBalance;
 
-    @Enumerated(EnumType.STRING)
-    @Column(name = "paid_status")
-    private PaidStatus paidStatus;
-
     @Column(name = "site_address")
     private String siteAddress;
 
-    @Column(name = "site_postal_code")
+    @Setter(AccessLevel.NONE)
+    @Formula("substring(site_address from length(site_address) - 5 for 6)")
     private String sitePostalCode;
 
     @Column(name = "site_latitude")

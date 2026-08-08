@@ -56,4 +56,7 @@ public class Asset {
   @Column(name = "purchase_year")
   private Integer purchaseYear;
 
+  @Column(name = "location", length = 100)
+  private String location;
+
 }
