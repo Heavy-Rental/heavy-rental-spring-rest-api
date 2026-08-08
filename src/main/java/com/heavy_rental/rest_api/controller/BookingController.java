@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.heavy_rental.rest_api.dto.BookingResponse;
+import com.heavy_rental.rest_api.dto.BookingUpdateRequest;
 import com.heavy_rental.rest_api.service.BookingService;
 
 @RestController
@@ -33,7 +34,7 @@ public class BookingController {
     }
 
     @PutMapping("/{bookingId}")
-    public BookingResponse updateBooking(@PathVariable Long bookingId, @RequestBody BookingResponse request) {
+    public BookingResponse updateBooking(@PathVariable Long bookingId, @RequestBody BookingUpdateRequest request) {
         return bookingService.updateBooking(bookingId, request);
     }
 }

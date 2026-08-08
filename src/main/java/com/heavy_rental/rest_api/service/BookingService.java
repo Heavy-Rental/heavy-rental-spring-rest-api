@@ -8,6 +8,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import com.heavy_rental.rest_api.dto.BookingResponse;
+import com.heavy_rental.rest_api.dto.BookingUpdateRequest;
 import com.heavy_rental.rest_api.entity.Booking;
 import com.heavy_rental.rest_api.mapper.BookingMapper;
 import com.heavy_rental.rest_api.repository.BookingItemRepository;
@@ -40,14 +41,13 @@ public class BookingService {
     }
 
     @Transactional
-    public BookingResponse updateBooking(Long bookingId, BookingResponse request) {
+    public BookingResponse updateBooking(Long bookingId, BookingUpdateRequest request) {
         Booking booking = findByIdOr404(bookingId);
 
         booking.setStartDate(request.startDate());
         booking.setEndDate(request.endDate());
         booking.setSiteAddress(request.siteAddress());
         booking.setDeliveryNotes(request.deliveryNotes());
-        booking.setStatus(parseStatusOr400(request.bookingStatus()));
 
         bookingRepository.save(booking);
         return toResponse(booking);
