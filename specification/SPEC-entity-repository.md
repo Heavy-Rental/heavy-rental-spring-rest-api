@@ -47,7 +47,7 @@ When this spec is followed:
 
 ### 3.2 Out of scope / not yet built
 
-- **REST controllers, services, and DTOs for this data model.** Today only `User` / `UserRepository` are consumed by application code (`CustomUserDetailsService`, the auth flow). The other 12 entities and their repositories compile and would create tables, but have **no controller, service, or DTO wired up** — there is no CRUD API for assets, bookings, payments, rental plans, delivery/return records, or AI recommendations yet. Adding one is a new feature SDD.
+- **REST controllers, services, and DTOs for this data model — partially.** `User`/`UserRepository` are consumed by the auth flow (`CustomUserDetailsService`), and as of the equipment feature, `Asset` now has a full CRUD API (`EquipmentController`/`AssetService`/`EquipmentResponse`/`EquipmentRequest`) — see [`SPEC-equipment-browse-api.md`](./SPEC-equipment-browse-api.md). The remaining 11 entities and their repositories still compile and would create tables, but have **no controller, service, or DTO wired up** — there is no CRUD API for asset categories, bookings, payments, rental plans, delivery/return records, or AI recommendations yet. Adding one is a new feature SDD.
 - Database migrations (Flyway/Liquibase) — schema is Hibernate-generated only; see [`SPEC-project-environment.md`](./SPEC-project-environment.md) §5.2.
 - Validation annotations (Bean Validation) — none of these entities use `@NotNull`/`@Size`/etc.; the only enforced constraints are JPA `@Column(nullable=…)` / `unique=…`, which become DB-level `NOT NULL` / `UNIQUE` constraints.
 
@@ -341,19 +341,19 @@ All repositories are plain `interface X extends JpaRepository<Entity, Long>` —
 |---|---|---|
 | `UserRepository` | `User` | `List<User> findByRole(UserRole role)` · `Optional<User> findByEmail(String email)` · `boolean existsByEmail(String email)` |
 | `AssetCategoryRepository` | `AssetCategory` | `AssetCategory findByName(String name)` — ⚠️ returns the raw entity (not `Optional`); `null` if no match, unlike every other `findByX` in this codebase |
-| `AssetRepository` | `Asset` | `List<Asset> findByCategoryId(Long categoryId)` · `List<Asset> findByNameContainingIgnoreCase(String name)` · `List<Asset> findByCondition(ConditionType condition)` |
-| `AssetImageRepository` | `AssetImage` | `List<AssetImage> findByAssetId(Long assetId)` |
+| `AssetRepository` | `Asset` | `List<Asset> findByCategoryId(Long categoryId)` · `List<Asset> findByNameContainingIgnoreCase(String name)` · `List<Asset> findByCondition(ConditionType condition)` · `List<Asset> findAllWithCategory()` (`@Query`, `JOIN FETCH`) |
+| `AssetImageRepository` | `AssetImage` | `List<AssetImage> findByAssetId(Long assetId)` · `List<AssetImage> findByAssetIdIn(Collection<Long> assetIds)` |
 | `RentalPlanRepository` | `RentalPlan` | `List<RentalPlan> findByCustomerId(Long customerId)` · `List<RentalPlan> findByStatus(PlanStatus status)` |
 | `RentalPlanRecordRepository` | `RentalPlanRecord` | `List<RentalPlanRecord> findByRentalPlanId(Long rentalPlanId)` |
 | `BookingRepository` | `Booking` | `List<Booking> findByCustomerId(Long customerId)` · `List<Booking> findByStatus(BookingStatus status)` · `List<Booking> findByCustomerIdAndStatus(Long customerId, BookingStatus status)` · `List<Booking> findByPaidStatus(PaidStatus paidStatus)` |
-| `BookingItemRepository` | `BookingItem` | `List<BookingItem> findByBookingId(Long bookingId)` · `List<BookingItem> findByAssetId(Long assetId)` |
+| `BookingItemRepository` | `BookingItem` | `List<BookingItem> findByBookingId(Long bookingId)` · `List<BookingItem> findByAssetId(Long assetId)` · `Set<Long> findAssetIdsWithOverlappingBooking(...)` (`@Query`) |
 | `PaymentRepository` | `Payment` | `List<Payment> findByBookingId(Long bookingId)` · `List<Payment> findByStatus(PaymentStatus status)` |
 | `DeliveryRecordRepository` | `DeliveryRecord` | `List<DeliveryRecord> findByBookingId(Long bookingId)` · `List<DeliveryRecord> findByDriverId(Long driverId)` |
 | `ReturnRecordRepository` | `ReturnRecord` | `List<ReturnRecord> findByBookingId(Long bookingId)` · `List<ReturnRecord> findByDriverId(Long driverId)` |
 | `AIRecommendationRepository` | `AIRecommendation` | `List<AIRecommendation> findByUserId(Long userId)` · `List<AIRecommendation> findByStatus(RecommendationStatus status)` |
 | `RecommendationItemRepository` | `RecommendationItem` | `List<RecommendationItem> findByRecommendationId(Long recommendationId)` |
 
-None of these repositories currently define a `Pageable`/`Sort` variant, a `@Query`, or a projection — every method returns a full-entity `List<T>` (or `Optional<T>` / raw `T` for single lookups). None are `@Transactional` beyond Spring Data's defaults.
+Two exceptions as of the equipment feature: `AssetRepository.findAllWithCategory()` and `BookingItemRepository.findAssetIdsWithOverlappingBooking(...)` both use `@Query`; the latter returns `Set<Long>`, not entities. Every other method still returns a full-entity `List<T>` (or `Optional<T>` / raw `T` for single lookups), with no `Pageable`/`Sort` variant or projection. None are `@Transactional` beyond Spring Data's defaults — transaction boundaries for the equipment feature's reads live in `AssetService`, not the repository layer.
 
 ---
 
@@ -372,12 +372,12 @@ No other table declares a unique or composite-unique constraint (e.g. nothing pr
 ## 10. Design notes (as-built quirks)
 
 1. **Read-only from the "one" side.** Since no `@OneToMany` exists, code must call e.g. `bookingItemRepository.findByBookingId(id)` to get a booking's items — `booking.getItems()` does not exist and never will unless a future SDD adds it.
-2. **No cascading deletes.** Deleting a `User`, `Asset`, `Booking`, etc. that still has dependent rows will hit a DB FK violation, not a JPA cascade. This must be handled explicitly once delete endpoints are built.
+2. **No cascading deletes.** Deleting a `User`, `Asset`, `Booking`, etc. that still has dependent rows will hit a DB FK violation, not a JPA cascade. `AssetService.delete()` now handles this explicitly for `Asset` (deletes its own `AssetImage` rows first, catches `DataIntegrityViolationException`, returns `409` — see [`SPEC-equipment-browse-api.md`](./SPEC-equipment-browse-api.md) §6); every other entity still needs this handled once its delete endpoint is built.
 3. **`Asset.capacity` has dead `precision`/`scale` metadata** — it's an `Integer` field annotated as if it were a `BigDecimal`; Hibernate ignores those attributes for integer columns.
 4. **`RentalPlan.PlanStatus.QUOTEED`** is the literal enum constant in code (likely meant "QUOTED"). Any future DTO/API mapping to this enum should use the value as spelled unless a dedicated change renames it.
 5. **`AssetCategoryRepository.findByName` breaks the `Optional` convention** used everywhere else in this codebase (e.g. `UserRepository.findByEmail`); callers must null-check instead of using `Optional` idioms.
 6. **Schema is ephemeral.** `ddl-auto=create-drop` means every one of these tables is recreated on each app/test-context start and dropped on shutdown — there is no persisted data between runs in this environment (see [`SPEC-project-environment.md`](./SPEC-project-environment.md) §5.2).
-7. **No entity beyond `User` is wired to a controller, service, or DTO today.** These 12 remaining entities/repositories are a data-model foundation for future feature SDDs (assets catalog, booking flow, payments, delivery/return workflow, AI recommendations), not yet a working API surface.
+7. **Only `User` and `Asset` are wired to a controller, service, or DTO today.** The remaining 11 entities/repositories are still a data-model foundation for future feature SDDs (booking flow, payments, delivery/return workflow, AI recommendations), not yet a working API surface.
 
 ---
 
@@ -422,3 +422,4 @@ Or read the Hibernate DDL directly from build/test output (`spring.jpa.show-sql=
 | Version | Date | Notes |
 |---------|------|--------|
 | 1.0.0 | 2026-08-04 | Initial as-built data-model spec: 13 entities, 12 repositories, shared `ConditionType` enum, relationship map, unique constraints, and known modeling quirks |
+| 1.1.0 | 2026-08-08 | Corrected 4 claims left stale by the equipment feature (`SPEC-equipment-browse-api.md`), caught in PR review: §3.2 no longer says there's zero CRUD API (`Asset` now has one); §8's repository catalog now lists `AssetRepository.findAllWithCategory`, `AssetImageRepository.findByAssetIdIn`, and `BookingItemRepository.findAssetIdsWithOverlappingBooking`, and its "no repository uses `@Query`" claim is corrected; §10 notes #2 and #7 now reflect that cascade-delete handling and controller/service/DTO wiring exist for `Asset`. No entity/repository/relationship content changed — this is a documentation-only correction to keep this doc in sync with a dependent feature's changes, per this doc's own stated convention ("When this document and the codebase diverge, update them in the same change set"). |
