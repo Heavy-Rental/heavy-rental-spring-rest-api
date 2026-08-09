@@ -85,16 +85,16 @@ Unlike the other 12 tables (`ON CONFLICT (id) DO NOTHING`), this insert uses `ON
 
 ### 6.2 `assets` (8 rows, 2 per category)
 
-| name | category | base_daily_rate | condition | purchase_year |
-|---|---|---|---|---|
-| CAT 320 Excavator | Excavator | 450.00 | GOOD | 2021 |
-| Komatsu PC210 Excavator | Excavator | 470.00 | EXCELLENT | 2023 |
-| Genie GS-1930 Scissor Lift | Scissors Lift | 120.00 | EXCELLENT | 2022 |
-| JLG 2630ES Scissor Lift | Scissors Lift | 140.00 | FAIR | 2018 |
-| JLG 460SJ Boom Lift | Boom Lift | 210.00 | GOOD | 2020 |
-| Genie Z-45 Boom Lift | Boom Lift | 195.00 | NEEDS_REPAIR | 2017 |
-| Toyota 8FD25 Forklift | Fork Lift | 150.00 | GOOD | 2021 |
-| Hyster H2.5FT Forklift | Fork Lift | 160.00 | EXCELLENT | 2023 |
+| name | category | base_daily_rate | condition | purchase_year | location |
+|---|---|---|---|---|---|
+| CAT 320 Excavator | Excavator | 450.00 | GOOD | 2021 | Tuas |
+| Komatsu PC210 Excavator | Excavator | 470.00 | EXCELLENT | 2023 | Marina South |
+| Genie GS-1930 Scissor Lift | Scissors Lift | 120.00 | EXCELLENT | 2022 | Tuas |
+| JLG 2630ES Scissor Lift | Scissors Lift | 140.00 | FAIR | 2018 | Marina South |
+| JLG 460SJ Boom Lift | Boom Lift | 210.00 | GOOD | 2020 | Tuas |
+| Genie Z-45 Boom Lift | Boom Lift | 195.00 | NEEDS_REPAIR | 2017 | Marina South |
+| Toyota 8FD25 Forklift | Fork Lift | 150.00 | GOOD | 2021 | Tuas |
+| Hyster H2.5FT Forklift | Fork Lift | 160.00 | EXCELLENT | 2023 | Marina South |
 
 Each row also sets `min_daily_rate`/`max_daily_rate` (bracketing `base_daily_rate`), a description, and — where applicable — `capacity` (forklifts, kg) or `platform_height` (scissor/boom lifts, m).
 
@@ -102,7 +102,7 @@ Each row also sets `min_daily_rate`/`max_daily_rate` (bracketing `base_daily_rat
 
 One image per asset, no exceptions — `CAT 320 Excavator` originally had 2 rows; the second was removed once `SPEC-equipment-browse-api.md` fixed the API contract to expose exactly one photo per asset (`img: string`, not an array), since an unreachable second row would have been dead data. Each `image` value is the base64 encoding of a real file under `mock-images/`; `uploaded_at` is a fixed timestamp.
 
-All 9 files under `mock-images/` are verified real JPEGs (checked via magic bytes). One, `asset5-jlg-2630es-scissorlift.jpg` (the image for asset id 4), was originally a PNG mislabeled with a `.jpg` extension; it was re-encoded to a genuine JPEG (flattened onto white, since JPEG has no alpha channel) and its base64 in `data.sql` regenerated to match, via the same `base64 -w0` method described in §4.
+All 8 files under `mock-images/` are verified real JPEGs (checked via magic bytes). One, `asset4-jlg-2630es-scissorlift.jpg` (the image for asset id 4), was originally a PNG mislabeled with a `.jpg` extension; it was re-encoded to a genuine JPEG (flattened onto white, since JPEG has no alpha channel) and its base64 in `data.sql` regenerated to match, via the same `base64 -w0` method described in §4.
 
 ### 6.4 `rental_plan` (6 rows)
 
@@ -169,3 +169,4 @@ Only for bookings whose delivery/return has actually happened as of "today": `dr
 | 1.5.0 | 2026-08-05 | Discovered `data.sql` reruns on every distinct `ApplicationContext` (not once per app lifetime), so `mvn test`/`mvn clean install` was hitting `duplicate key value violates unique constraint` once `users` (1.4.0) removed the one thing (`DefaultUserInitializer`'s empty-table check) that had been shielding a rerun from this. Added `ON CONFLICT (id) DO NOTHING` to all 12 non-`users` inserts and `ON CONFLICT (id) DO UPDATE` to `users`, so every insert in this file now tolerates reruns against a non-empty database. Also fixed unrelated, pre-existing schema drift on the live `asset_images` table hit immediately after (leftover `NOT NULL image_url` column and `image` still `varchar(255)`, both stale relative to the `AssetImage` entity) via a one-off `ALTER TABLE`; `ddl-auto=update` cannot fix this class of drift on its own since it never alters or drops existing columns. |
 | 1.6.0 | 2026-08-06 | Two corrections found while building `SPEC-equipment-browse-api.md`: (1) `asset5-jlg-2630es-scissorlift.jpg` (asset id 4's image) was a PNG mislabeled with a `.jpg` extension — re-encoded to a real JPEG and its `data.sql` base64 regenerated. (2) `CAT 320 Excavator`'s second `asset_images` row (id 2) was removed, since the equipment API now exposes exactly one photo per asset — `asset_images` is now 8 rows, not 9 (§6.3). |
 | 1.7.0 | 2026-08-08 | Deleted `mock-images/asset1-cat320-excavator-b.jpg`, the leftover source file for CAT 320's second photo removed in 1.6.0. It was unreferenced by any `INSERT` and confirmed unreferenced anywhere else in the codebase before deletion — `mock-images/` now contains exactly the 8 files §6.3/§7 actually use, no orphaned files. |
+| 1.8.0 | 2026-08-09 | Two corrections found in PR review: (1) §6.3 said "All 9 files" and still named the pre-rename `asset5-jlg-2630es-scissorlift.jpg` — a separate, unrelated merge from `develop` (HR-77) renamed every `assetN-*` image file to match its actual asset id (the file for asset 4 is `asset4-jlg-2630es-scissorlift.jpg`) and dropped one now-orphaned old file; corrected to "8 files" and the current name (the 1.6.0/1.7.0 entries above are left as-is — they're accurate for what was true when written, before that rename landed). (2) Added a `location` column to the §6.2 asset table — `Asset.location` was added to the entity/seed data in this same PR but never documented here. |

@@ -181,7 +181,8 @@ All query params optional. `category` matches `AssetCategory.name` exactly (400 
     "condition": "GOOD",
     "available": true,
     "desc": "...",
-    "img": "data:image/jpeg;base64,/9j/4AAQSkZJRg..."
+    "img": "data:image/jpeg;base64,/9j/4AAQSkZJRg...",
+    "location": "Tuas"
   }
 ]
 ```
@@ -210,11 +211,12 @@ Content-Type: application/json
   "platformHeight": null,
   "purchaseYear": 2024,
   "condition": "EXCELLENT",
-  "desc": "Brand new unit"
+  "desc": "Brand new unit",
+  "location": "Tuas"
 }
 ```
 
-**DTO:** `EquipmentRequest(name, serialno, categoryId, baseDailyRate, minDailyRate, maxDailyRate, capacity, platformHeight, purchaseYear, condition, desc)`
+**DTO:** `EquipmentRequest(name, serialno, categoryId, baseDailyRate, minDailyRate, maxDailyRate, capacity, platformHeight, purchaseYear, condition, desc, location)`
 
 `201 Created` — `EquipmentResponse` with `img: null` and `available: true` (no image/bookings exist yet for a newly created asset). `400` if `categoryId` is missing or unknown.
 
@@ -317,3 +319,4 @@ Confirm the "Browse Equipment" cards render real photos directly from `img` with
 |---------|------|--------|
 | 1.0.0 | 2026-08-06 | Initial SPEC: `/api/equipment` CRUD, base64→data-URI image encoding decision, batched availability/image lookups, delete-conflict handling. Code written; build and manual verification (§8) not yet run. |
 | 1.1.0 | 2026-08-06 | Verified against the frontend's actual `Equipment` type: `img` corrected from `List<String>` to a single `String` (§3.2). Fixed a pre-existing data bug found during review — the seed image for asset id 4 was a PNG mislabeled `.jpg`, re-encoded to a real JPEG (§3.3). Removed CAT 320 Excavator's second seeded photo from `data.sql` per user decision, since the API only ever exposes one photo per asset (§3.2.1). Build verified (`mvnw compile`, exit 0). |
+| 1.1.1 | 2026-08-09 | Added `location` to both `EquipmentRequest`/`EquipmentResponse` examples (§7.1, §7.3) and the `EquipmentRequest` DTO signature — a field added to `Asset`/both DTOs in this same PR that was missing from this spec's contract examples. No behavior change. |

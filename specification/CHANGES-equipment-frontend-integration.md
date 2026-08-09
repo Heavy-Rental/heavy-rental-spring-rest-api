@@ -67,6 +67,9 @@ Previously omitted (equipment cards showed a `—` fallback). Added properly:
 
 No frontend code changes were needed for this — fallbacks already in place in `heavy-rental-react-web-portal` handled a real value correctly once one existed.
 
+### 1.11 Reverted `ddl-auto` from `create-drop` back to `update`
+The last commit on this branch (`ad80def`, "change ddl to update") flips `spring.jpa.hibernate.ddl-auto` back to the value it had before 1.7, with no accompanying explanation in the commit message. **This needs a follow-up note once the reason is known** — 1.7 switched to `create-drop` specifically to stop `update` mode's known failure mode (it never rewrites an existing constraint, so a live DB with the old `bookings_status_check` values would reject the merged `Booking` enum's new rows). Reverting to `update` without a corresponding schema fix risks reintroducing that exact startup failure the next time a checked-out constraint drifts from the entity. §4, §7, §10, and §11.2 of `SPEC-entity-repository.md` have been updated to describe the code as it stands (`update`) rather than the now-superseded 1.7 decision, but that's a documentation-accuracy fix, not a statement that reverting was safe — confirm before merging.
+
 ---
 
 ## 2. What still isn't built
