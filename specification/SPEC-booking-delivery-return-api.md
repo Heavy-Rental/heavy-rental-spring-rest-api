@@ -1,0 +1,335 @@
+# Specification: Booking, Delivery & Return API
+
+| Field | Value |
+|-------|--------|
+| **Feature** | REST API for viewing/updating bookings and driving the delivery/return status workflow |
+| **Status** | Implemented on branch `HR-80-implement-endpoints-for-bookings-deliveries-and-returns`, not yet merged to `develop` |
+| **Module** | `heavy-rental-spring-rest-api` |
+| **Primary paths** | `GET/PUT /api/bookings`, `/api/bookings/{id}`; `GET /api/deliveries`, `PATCH /api/deliveries/{id}/status`; `GET /api/returns`, `PATCH /api/returns/{id}/status` |
+| **Client** | Mobile (per branch author — see [`SPEC-api-index.md`](./SPEC-api-index.md) §2.2) |
+| **Depends on** | [`SPEC-entity-repository.md`](./SPEC-entity-repository.md) (`Booking`, `BookingItem`, `Asset`, `User`), [`SPEC-auth-login-logout.md`](./SPEC-auth-login-logout.md) (access token required to call any route here) |
+| **Environment context** | [`SPEC-project-environment.md`](./SPEC-project-environment.md) (read first) |
+| **Related code** | `controller/BookingController.java`, `controller/DeliveryController.java`, `controller/ReturnController.java`, `service/BookingService.java`, `service/DeliveryService.java`, `service/ReturnService.java`, `mapper/BookingMapper.java`, `dto/BookingResponse.java`, `dto/BookingUpdateRequest.java`, `dto/DeliveryItemResponse.java`, `dto/ReturnItemResponse.java`, `dto/StatusUpdateRequest.java`, `repository/BookingRepository.java`, `repository/BookingItemRepository.java` |
+
+This document is the **single source of truth** for the `/api/bookings`, `/api/deliveries`, and `/api/returns` REST surface: what each route does, the booking-status state machine it enforces, and known gaps against the underlying data model. It does not restate `Booking`/`BookingItem` column-level detail — see `SPEC-entity-repository.md` for that.
+
+When code and this document diverge, update them in the same change set.
+
+---
+
+## 1. Outcomes
+
+When this feature is correct:
+
+1. A mobile client can list every booking, fetch one by id, and update its non-status details (dates, site address, delivery notes).
+2. A mobile client can see "today's deliveries" (bookings starting today that are ready to go out) and "today's returns" (bookings ending today that are ready to come back), each showing customer, site, and equipment.
+3. A booking can only move `CONFIRMED → MOBILISED` via the delivery endpoint, and only `MOBILISED → COMPLETED` via the return endpoint — no other transition is reachable through this API, and status can't be set through the general booking update endpoint at all.
+4. Every route requires an access-tier Bearer token (`ROLE_USER` or `ROLE_ADMIN`), consistent with the rest of the API.
+
+---
+
+## 2. Scope
+
+### 2.1 In scope
+
+- `GET /api/bookings` — list every booking.
+- `GET /api/bookings/{bookingId}` — single booking lookup.
+- `PUT /api/bookings/{bookingId}` — full-replace update of `startDate`/`endDate`/`siteAddress`/`deliveryNotes`. Cannot change `status`.
+- `GET /api/deliveries` — bookings with `startDate == today` and `status IN (CONFIRMED, MOBILISED)`.
+- `PATCH /api/deliveries/{bookingId}/status` — the single legal transition `CONFIRMED → MOBILISED`.
+- `GET /api/returns` — bookings with `endDate == today` and `status IN (MOBILISED, COMPLETED)`.
+- `PATCH /api/returns/{bookingId}/status` — the single legal transition `MOBILISED → COMPLETED`.
+- The "primary asset" selection `BookingMapper` uses to represent a booking's equipment in each response.
+
+### 2.2 Out of scope (not built by this feature; noted here so it isn't assumed to exist)
+
+- **Booking creation.** No `POST /api/bookings` exists. Every booking in this API is seed data (`SPEC-seed-data.md` §6.6) or created directly against the DB.
+- **The rest of the status lifecycle.** Nothing in this API drives `PENDING_DEPOSIT → PENDING_CONFIRMED → CONFIRMED`, and nothing sets `CANCELLED`. Only the two transitions in §2.1 are reachable through these routes; every other `Booking.BookingStatus` value is inert as far as this API is concerned.
+- **`DeliveryRecord`/`ReturnRecord` persistence** (driver, timestamp, photos, signature) — see §6.3.
+- **Role- or ownership-scoped access** beyond the blanket `SecurityConfig` rule shared by every route in the API — see §6.1.
+- **Payments** (`PaymentController`/`PaymentService`) — separate, pre-existing feature, not covered here.
+- **Rental-plan → booking conversion** — `Booking.rentalPlan` is a real FK (some seed bookings reference one), but no endpoint performs the conversion; it's set directly in seed data.
+
+---
+
+## 3. Booking status state machine
+
+```text
+PENDING_DEPOSIT --?--> PENDING_CONFIRMED --?--> CONFIRMED --[PATCH /api/deliveries/{id}/status]--> MOBILISED --[PATCH /api/returns/{id}/status]--> COMPLETED
+
+CANCELLED: reachable from any state in principle; no endpoint sets it today.
+```
+
+`?` = no endpoint in this codebase drives that transition today (see §2.2). The two edges this feature *does* enforce are guarded in `DeliveryService.updateStatus` / `ReturnService.updateStatus`: the booking's current status and the requested status are both checked; any other combination is rejected with `400`, not silently accepted or ignored.
+
+---
+
+## 4. Requirements
+
+### Requirement 1: List and view bookings
+
+**User story:** As a mobile client, I want to list bookings and view one in detail.
+
+1. **GIVEN** a valid access Bearer (`ROLE_USER`/`ROLE_ADMIN`)
+   **WHEN** `GET /api/bookings`
+   **THEN** `200` with a `BookingResponse` array for **every** booking in the system (not filtered by caller — see §6.1).
+2. **GIVEN** an existing `bookingId`
+   **WHEN** `GET /api/bookings/{bookingId}`
+   **THEN** `200` with that booking's `BookingResponse`.
+3. **GIVEN** a `bookingId` that doesn't exist
+   **WHEN** `GET /api/bookings/{bookingId}`
+   **THEN** `404`.
+
+### Requirement 2: Update booking details (not status)
+
+**User story:** As a mobile client, I want to correct a booking's dates, site address, or delivery notes without being able to jump its status.
+
+1. **GIVEN** an existing booking and a `BookingUpdateRequest` body
+   **WHEN** `PUT /api/bookings/{bookingId}`
+   **THEN** `startDate`, `endDate`, `siteAddress`, and `deliveryNotes` are all overwritten with whatever the request body contains — **including `null` for any field the body omits** (this is a full replace, not a partial merge; see §6.5) — and the response is `200` with the updated `BookingResponse`.
+2. **GIVEN** the same request
+   **THEN** `status` is left untouched, because `BookingUpdateRequest` has no `bookingStatus` field to send one — see §7 Key decisions for why.
+3. **GIVEN** a `bookingId` that doesn't exist
+   **WHEN** `PUT /api/bookings/{bookingId}`
+   **THEN** `404`.
+
+### Requirement 3: Today's deliveries
+
+**User story:** As a mobile client (driver-facing), I want to see what needs to go out today.
+
+1. **GIVEN** bookings with `startDate == today` and `status` in `(CONFIRMED, MOBILISED)`
+   **WHEN** `GET /api/deliveries`
+   **THEN** `200` with one `DeliveryItemResponse` per matching booking, each carrying the customer name, site address, one representative asset (§5.3), delivery notes, and current status.
+2. **GIVEN** no bookings match
+   **THEN** `200` with an empty array (never `404`).
+
+### Requirement 4: Advance a delivery
+
+**User story:** As a mobile client, I want to mark a booking as picked up/mobilised, and only that.
+
+1. **GIVEN** `booking.status == CONFIRMED` and a `StatusUpdateRequest{"bookingStatus":"MOBILISED"}` body
+   **WHEN** `PATCH /api/deliveries/{bookingId}/status`
+   **THEN** the booking's status becomes `MOBILISED`, `200` with the updated `DeliveryItemResponse`.
+2. **GIVEN** `booking.status != CONFIRMED`, **OR** the requested status isn't `MOBILISED`
+   **WHEN** `PATCH /api/deliveries/{bookingId}/status`
+   **THEN** `400` — `"Invalid transition: <current> -> <requested> (only CONFIRMED -> MOBILISED is allowed here)"`. No partial/side effect occurs.
+3. **GIVEN** a `bookingStatus` value that isn't a real `BookingStatus` enum constant
+   **WHEN** `PATCH /api/deliveries/{bookingId}/status`
+   **THEN** `400` — `"Invalid bookingStatus: <value>"`.
+4. **GIVEN** a `bookingId` that doesn't exist
+   **THEN** `404`.
+
+### Requirement 5: Today's returns
+
+Mirrors Requirement 3: `GET /api/returns` — bookings with `endDate == today` and `status` in `(MOBILISED, COMPLETED)`, each mapped to a `ReturnItemResponse`.
+
+### Requirement 6: Advance a return
+
+Mirrors Requirement 4: `PATCH /api/returns/{bookingId}/status` only accepts `booking.status == MOBILISED` and requested `COMPLETED`; anything else is `400` with the equivalent message; unknown booking is `404`.
+
+---
+
+## 5. Design
+
+### 5.1 Components
+
+| Concern | Location |
+|---|---|
+| HTTP | `controller/BookingController.java`, `controller/DeliveryController.java`, `controller/ReturnController.java` |
+| Orchestration, transition guards | `service/BookingService.java`, `service/DeliveryService.java`, `service/ReturnService.java` |
+| Status parsing shared by all three services | `BookingService.parseStatusOr400(String)` (package-private static, called from `DeliveryService`/`ReturnService`) |
+| Entity → DTO mapping | `mapper/BookingMapper.java` |
+| DTOs | `dto/BookingResponse`, `dto/BookingUpdateRequest`, `dto/DeliveryItemResponse`, `dto/ReturnItemResponse`, `dto/StatusUpdateRequest` |
+| Data access | `repository/BookingRepository.java` (`findByStartDateAndStatusIn`, `findByEndDateAndStatusIn`, plus standard CRUD), `repository/BookingItemRepository.java` (`findByBookingId`) |
+| Security | `config/SecurityConfig.java` — same blanket `hasAnyAuthority("ROLE_USER","ROLE_ADMIN")` rule as every other business route; no route-specific matcher exists for any path in this spec |
+
+### 5.2 API contracts
+
+#### `GET /api/bookings` / `GET /api/bookings/{bookingId}`
+
+```json
+{
+  "bookingId": 1,
+  "customerName": "Alex Tan",
+  "startDate": "2026-08-09",
+  "endDate": "2026-08-13",
+  "bookingStatus": "CONFIRMED",
+  "siteAddress": "20 Jurong Port Road, Singapore 619094",
+  "assetName": "JLG 460SJ Boom Lift",
+  "serialNumber": "SN-BOOM-460SJ",
+  "deliveryNotes": ""
+}
+```
+
+`GET /api/bookings` returns an array of the above; the single-booking route returns one object. `404` body follows the shared error shape (§5.4).
+
+#### `PUT /api/bookings/{bookingId}`
+
+```http
+PUT /api/bookings/3 HTTP/1.1
+Authorization: Bearer <access-jwt>
+Content-Type: application/json
+
+{
+  "startDate": "2026-08-18",
+  "endDate": "2026-08-21",
+  "siteAddress": "15 Pioneer Sector 1, Singapore 628413",
+  "deliveryNotes": "Access via loading bay B, coordinate with site security"
+}
+```
+
+**DTO:** `BookingUpdateRequest(startDate, endDate, siteAddress, deliveryNotes)` — no `bookingStatus` field exists on this type; it cannot be sent. `200` — updated `BookingResponse`. Every field in the request body is written to the entity unconditionally (see §6.5): a client that wants to change only `deliveryNotes` must still resend the current `startDate`/`endDate`/`siteAddress`, or those fields will be nulled.
+
+#### `GET /api/deliveries`
+
+```json
+[
+  {
+    "bookingId": 1,
+    "customerName": "Alex Tan",
+    "startDate": "2026-08-09",
+    "siteAddress": "20 Jurong Port Road, Singapore 619094",
+    "assetName": "JLG 460SJ Boom Lift",
+    "serialNumber": "SN-BOOM-460SJ",
+    "deliveryNotes": "",
+    "bookingStatus": "CONFIRMED"
+  }
+]
+```
+
+#### `PATCH /api/deliveries/{bookingId}/status`
+
+```http
+PATCH /api/deliveries/1/status HTTP/1.1
+Authorization: Bearer <access-jwt>
+Content-Type: application/json
+
+{ "bookingStatus": "MOBILISED" }
+```
+
+**DTO:** `StatusUpdateRequest(bookingStatus: String)`. `200` — updated `DeliveryItemResponse`. `400` on any transition other than `CONFIRMED → MOBILISED` (§4, Requirement 4.2) or an unparseable status (4.3). `404` if the booking doesn't exist.
+
+#### `GET /api/returns` / `PATCH /api/returns/{bookingId}/status`
+
+Same shapes as the delivery pair, using `ReturnItemResponse` (`endDate` instead of `startDate`) and the `MOBILISED → COMPLETED` transition.
+
+#### 5.4 Shared errors
+
+```json
+{ "error": "<code>", "message": "<reason>" }
+```
+
+| HTTP | Typical `error` |
+|------|-----------------|
+| `400` | `bad_request` (invalid transition, unparseable status) |
+| `401` | `unauthorized` (missing/invalid Bearer) |
+| `404` | `not_found` |
+
+### 5.3 Primary-asset selection
+
+None of the response DTOs carry a list of a booking's assets — each carries a single `assetName`/`serialNumber` pair. `BookingMapper.primaryAsset(List<BookingItem>)` picks that pair via `items.stream().min(Comparator.comparing(BookingItem::getId))` — i.e. the *first-created* `BookingItem` row for the booking, not necessarily any semantically "primary" item. A booking with no items maps to `assetName: ""`, `serialNumber: ""` (not `null`, not omitted).
+
+**This silently drops every other item on a multi-asset booking.** Seed booking id `1` has two `BookingItem` rows (JLG 460SJ Boom Lift, Toyota 8FD25 Forklift); every response shape in this spec that includes that booking shows the boom lift only. See §6.2.
+
+---
+
+## 6. Known issues / gaps
+
+Carried over and expanded from the PR review recorded in `SPEC-api-index.md` §5 (that section now points here as the primary write-up; keep both in sync per this doc's own convention). None of these are fixed as of this version.
+
+### 6.1 No role or ownership checks
+
+No `@PreAuthorize`, `@Secured`, or principal/ownership comparison exists in any controller or service in §5.1 — grepped, zero matches. Authorization is entirely the blanket `SecurityConfig` rule: any `ROLE_USER` or `ROLE_ADMIN` token can call every route in this spec against **any** booking, not just one belonging to the caller. `ROLE_DRIVER` — the role `DeliveryRecord`/`ReturnRecord` exist for — cannot call any of these routes at all (excluded from `SecurityConfig`'s blanket rule; see `SPEC-api-index.md` §4).
+
+**Recommended fix (not applied):** a role check on the delivery/return status routes (`ROLE_ADMIN`/`ROLE_DRIVER`, once `ROLE_DRIVER` is let in — see `SPEC-api-index.md` §4), and an ownership check on `PUT /api/bookings/{id}` (`booking.customer.id == principal`).
+
+### 6.2 Multi-asset bookings lose items in every response
+
+See §5.3. Reproducible today against seed booking id `1` in `GET /api/deliveries`.
+
+**Recommended fix (not applied):** either expose all of a booking's assets (a DTO shape change — `assetName`/`serialNumber` becoming a list, or a separate `items` array), or confirm with the team that single-asset-per-booking is the actual product assumption before leaving it as is — multi-asset bookings are already possible per the schema and already exist in seed data.
+
+### 6.3 `DeliveryRecord`/`ReturnRecord` never created
+
+`DeliveryController`/`ReturnController` flip `Booking.status` only; `DeliveryRecordRepository`/`ReturnRecordRepository` are never referenced by this feature. No driver, timestamp, photo, or signature is ever recorded, despite `DeliveryRecord`/`ReturnRecord` (`SPEC-entity-repository.md` §5.10–5.11) existing specifically for that purpose.
+
+**Status:** scope, not a bug — the status-transition APIs work correctly as far as they go. Suitable as its own follow-up ticket ("persist delivery/return proof records") rather than a fix to this branch.
+
+### 6.4 N+1 queries on the three list/lookup paths
+
+`BookingService.getBookings()`, `DeliveryService.getTodaysDeliveries()`, and `ReturnService.getTodaysReturns()` each run one query to list bookings, then one `bookingItemRepository.findByBookingId(...)` call per booking during mapping, plus a lazy load per distinct `Asset` (`BookingItem.getAsset()`) and per distinct `Booking.customer` the first time each is touched (both `@ManyToOne(FetchType.LAZY)`). Negligible at current seed-data volume (single-digit bookings).
+
+**Status:** fine to defer to an opportunistic fix or a dedicated perf pass.
+
+### 6.5 `PUT /api/bookings/{id}` is a full replace, not a partial merge
+
+`BookingService.updateBooking` calls all four setters unconditionally from the request DTO with no null-check:
+
+```java
+booking.setStartDate(request.startDate());
+booking.setEndDate(request.endDate());
+booking.setSiteAddress(request.siteAddress());
+booking.setDeliveryNotes(request.deliveryNotes());
+```
+
+A client that omits (or sends `null` for) any of `startDate`/`endDate`/`siteAddress`/`deliveryNotes` will overwrite that field to `null` in the database, not leave it unchanged. This is documented as current behavior, not flagged as a bug — full-replace `PUT` semantics are a legitimate, common design choice — but it's easy for a client author to assume partial-update (`PATCH`-like) behavior from a `PUT`, so it's called out explicitly here.
+
+**Status:** as-built behavior; revisit only if a client actually needs partial updates (at which point the fix is either a `PATCH` variant or null-coalescing in the service).
+
+---
+
+## 7. Key decisions
+
+| Decision | Rationale |
+|----------|-----------|
+| `BookingUpdateRequest` has no `bookingStatus` field | The route originally accepted a full `BookingResponse` as its request body, so any client could set an arbitrary `bookingStatus` directly via `PUT` — bypassing the transition guards below entirely. Fixed (commit `c06b2ea`, "Restrict `PUT /api/bookings/{id}` to booking details, remove status field") by introducing a narrower request DTO that structurally cannot carry a status. This is the same category of bug the delivery/return transition guards below exist to prevent, just via the response-DTO-as-request-DTO route instead. |
+| Status changes only via two single-hop, guarded endpoints | `DeliveryService.updateStatus`/`ReturnService.updateStatus` each check *both* the booking's current status and the requested one before writing, rejecting anything else with `400` — makes the delivery/return workflow the only path that can advance a booking's lifecycle through this API, and makes each step auditable to exactly one precondition. |
+| `GET /api/deliveries`/`GET /api/returns` are "today" queries, not "all open" queries | `findByStartDateAndStatusIn`/`findByEndDateAndStatusIn` filter to `LocalDate.now()` — matches a driver's daily worklist use case rather than a general booking browser (that's what `GET /api/bookings` is for). |
+| Primary asset via `min(BookingItem.id)` | Simplest deterministic choice for a single-asset response shape — but incomplete for multi-item bookings; see §6.2. |
+| No automated tests for this feature | Consistent with `SPEC-tests.md`, which only covers `AuthenticationIntegrationTest` and the context-load smoke test today; this feature's state-machine and (once added) authorization logic have no test coverage yet. Recorded as current state, not argued for or against here. |
+
+---
+
+## 8. Verification
+
+### 8.1 Checklist
+
+- [ ] No Bearer → `401` on every route in this spec.
+- [ ] `GET /api/bookings` → `200`, array covering all seeded bookings.
+- [ ] `GET /api/bookings/{id}` on a real id → `200`; on a fake id → `404`.
+- [ ] `PUT /api/bookings/{id}` with all four fields → `200`, values updated; omitting a field → that field nulled (§6.5), not preserved.
+- [ ] `GET /api/deliveries` → only bookings with `startDate == today` and status `CONFIRMED`/`MOBILISED`.
+- [ ] `PATCH /api/deliveries/{id}/status` on a `CONFIRMED` booking with `{"bookingStatus":"MOBILISED"}` → `200`, status now `MOBILISED`.
+- [ ] Same call on a non-`CONFIRMED` booking, or with any status other than `MOBILISED` → `400`.
+- [ ] `GET /api/returns` / `PATCH /api/returns/{id}/status` → mirrored checks against `MOBILISED → COMPLETED`.
+- [ ] Seed booking id `1` (two `BookingItem`s) → confirm `GET /api/deliveries` shows only one asset (§6.2), not an error — documents current behavior rather than a pass/fail gate.
+
+### 8.2 Manual smoke (curl)
+
+```bash
+INTERIM=$(curl -s http://localhost:8080/api/auth/getBearerToken)
+ACCESS=$(curl -s -X POST http://localhost:8080/api/auth/login \
+  -H "Authorization: Bearer $INTERIM" -H "Content-Type: application/json" \
+  -d '{"email":"alex.tan@example.sg","password":"customer123"}' | jq -r .accessToken)
+
+curl -s http://localhost:8080/api/bookings -H "Authorization: Bearer $ACCESS" | jq .
+curl -s http://localhost:8080/api/deliveries -H "Authorization: Bearer $ACCESS" | jq .
+
+# booking 1 is seeded CONFIRMED, start_date = today
+curl -s -X PATCH http://localhost:8080/api/deliveries/1/status \
+  -H "Authorization: Bearer $ACCESS" -H "Content-Type: application/json" \
+  -d '{"bookingStatus":"MOBILISED"}' | jq .
+
+# now booking 1 is MOBILISED; a second call with the same body should 400
+curl -i -X PATCH http://localhost:8080/api/deliveries/1/status \
+  -H "Authorization: Bearer $ACCESS" -H "Content-Type: application/json" \
+  -d '{"bookingStatus":"MOBILISED"}'
+```
+
+---
+
+## 9. Change control
+
+| Version | Date | Notes |
+|---------|------|--------|
+| 1.0.0 | 2026-08-09 | Initial as-built spec: booking read/update, today's-deliveries/returns lists, guarded `CONFIRMED→MOBILISED`/`MOBILISED→COMPLETED` transitions, primary-asset selection, and the known-issues list from PR review (role/ownership checks, multi-asset data loss, missing `DeliveryRecord`/`ReturnRecord` persistence, N+1 queries, full-replace `PUT` semantics). Written per the standalone-spec criterion added to `SPEC-project-environment.md` §9.1: this feature has independently-evolving business logic (a state machine, its own future authz needs) that warrants its own file rather than living in `SPEC-entity-repository.md`/`SPEC-api-index.md`. |
