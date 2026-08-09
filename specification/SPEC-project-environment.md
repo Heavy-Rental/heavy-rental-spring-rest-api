@@ -304,6 +304,15 @@ curl -s -X POST http://localhost:8080/api/auth/logout \
 |------|----------|--------|
 | Environment / constitution | Workspace root | `SPEC-project-environment.md` (this file) |
 | Feature | Workspace root | `SPEC-<feature-kebab-case>.md` |
+| Cross-cutting index | Workspace root | `SPEC-api-index.md` — the full REST route list with client ownership and a pointer to each route's owning spec; not itself a contract |
+
+**When a feature needs its own standalone file:** create `SPEC-<feature-kebab-case>.md` when the feature carries business logic that will keep evolving independently of everything else — a state machine, its own authorization rules, its own request/response contract that changes on its own schedule. Do **not** create one for a trivial route (a stub returning `[]`, a passthrough with no business logic, a one-line CRUD wrapper with no rules of its own) — document those inline in whichever spec already covers their data model, or as a row in `SPEC-api-index.md`.
+
+This repo has hit both failure modes this rule exists to prevent, not hypothetically:
+- **Too few files:** `SPEC-request-bearer-token.md` was deliberately split *out of* a combined auth spec because bundling two independently-evolving contracts (interim mint vs. login/logout) into one document made each harder to keep stable on its own — see that file's own change control, v5.0.0.
+- **One shared file, too many editors:** `SPEC-entity-repository.md`, being the single file every feature's data-model notes landed in, took simultaneous conflicting edits from two sibling feature branches touching the same paragraph — a direct cost of *not* giving those features their own files.
+
+If the concern is too many files to find things in, the fix is a discovery layer (`SPEC-api-index.md`), not fewer files — don't fold contracts back together to solve a findability problem; that trades a search cost for a merge-conflict/ownership cost, which is worse.
 
 ### 9.2 Recommended feature-spec sections
 
@@ -326,6 +335,7 @@ Feature SDDs should include at least:
 3. Align with existing layering, error JSON, and Bearer JWT auth unless the feature SDD explicitly replaces them.
 4. Prefer incremental, independently testable changes.
 5. Keep feature specs as the contract; keep this file as environment truth.
+6. Give a feature its own `SPEC-<feature>.md` per the criterion in §9.1 (independent, evolving logic) rather than folding it into a shared data-model or index doc; skip a standalone file for genuinely trivial routes. Add or update the corresponding row in `SPEC-api-index.md` either way.
 
 ### 9.4 How agents should use these docs
 
@@ -375,5 +385,6 @@ Unless a dedicated SDD says otherwise:
 | 1.3.0 | 2026-08-02 | Multi-step auth inventory: interim getBearerToken → login → logout |
 | 1.3.1 | 2026-08-02 | Split feature SPECs: SPEC-request-bearer-token (mint) + SPEC-auth-login-logout (session) |
 | 1.4.0 | 2026-08-05 | Removed `DefaultUserInitializer` and the `app.security.default-username`/`default-password` properties; `users` (including `admin`) is now seeded entirely by `data.sql` (see SPEC-seed-data §6.0) |
+| 1.5.0 | 2026-08-09 | §9.1/§9.3 codified when a feature needs a standalone spec file vs. inline documentation: independent, evolving logic (state machine, its own authz, its own contract) gets its own `SPEC-<feature>.md`; trivial/stub routes don't. Grounded in two real incidents in this repo: `SPEC-request-bearer-token.md` was split out of a combined file for exactly this reason, and `SPEC-entity-repository.md` — the shared file the rule steers features away from — took a real multi-branch editing conflict as a direct result of not having per-feature files. Added `SPEC-api-index.md` to §9.1 as the discovery layer that makes "too many files" a non-issue. |
 
 When changing stack, database strategy, packaging, default security model, or SDD file locations, bump this table and notify dependent feature specs.
