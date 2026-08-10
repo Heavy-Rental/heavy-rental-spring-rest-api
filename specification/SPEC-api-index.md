@@ -59,7 +59,7 @@ Seven of these eight routes now have a dedicated feature SPEC — [`SPEC-booking
 
 ### 2.3 Web — equipment browse, depots, rental plans
 
-Per branch author: every route in this section is for the **web** client. **None of this section exists in the current working tree** — `EquipmentController`, `DepotController`, and `RentalPlanController` all live only on `origin/HR-72-add-browse-equipment-to-rest-api`, which diverged from `develop` at the same commit `HR-80` did (`584346f`, "HR-66 Populating Data") and has not been merged either direction.
+Per branch author: every route in this section is for the **web** client. `EquipmentController` and `DepotController` still live only on `origin/HR-72-add-browse-equipment-to-rest-api`, which diverged from `develop` at the same commit `HR-80` did (`584346f`, "HR-66 Populating Data") and has not been merged either direction. `RentalPlanController`, however, has since gained a real implementation independent of `HR-72` — see below.
 
 | Method | Path | Roles allowed | Status | Contract |
 |---|---|---|---|---|
@@ -70,7 +70,12 @@ Per branch author: every route in this section is for the **web** client. **None
 | `PATCH` | `/api/equipment/{id}` | `ROLE_USER`, `ROLE_ADMIN` | 🔀 Branch `HR-72` (sibling) | §7.4 |
 | `DELETE` | `/api/equipment/{id}` | `ROLE_USER`, `ROLE_ADMIN` | 🔀 Branch `HR-72` (sibling) | §7.5 |
 | `GET` | `/api/depots` | `ROLE_USER`, `ROLE_ADMIN` | 🧱 Stub, on branch `HR-72` | None — always returns `[]`; no `Depot` entity exists (delivery site fields live on `Booking`/`RentalPlan` directly) |
-| `GET` | `/api/rental-plans` | `ROLE_USER`, `ROLE_ADMIN` | 🧱 Stub, on branch `HR-72` | None — always returns `[]`; `RentalPlan`/`RentalPlanRepository` exist but nothing is wired to them yet |
+| `POST` | `/api/rental-plans` | `ROLE_USER`, `ROLE_ADMIN` | 🔀 Branch `hr-19-request-quote` (this branch) | [`SPEC-rental-plan-quote.md`](./SPEC-rental-plan-quote.md) REQ-1 |
+| `GET` | `/api/rental-plans` | `ROLE_USER`, `ROLE_ADMIN` | 🔀 Branch `hr-19-request-quote` (this branch) | REQ-5 |
+| `GET` | `/api/rental-plans/{id}` | `ROLE_USER`, `ROLE_ADMIN` | 🔀 Branch `hr-19-request-quote` (this branch) | REQ-5 |
+| `POST` | `/api/rental-plans/{id}/items` | `ROLE_USER`, `ROLE_ADMIN` | 🔀 Branch `hr-19-request-quote` (this branch) | [`SPEC-rental-plan-quote.md`](./SPEC-rental-plan-quote.md) REQ-2 |
+| `DELETE` | `/api/rental-plans/{id}/items/{itemId}` | `ROLE_USER`, `ROLE_ADMIN` | 🔀 Branch `hr-19-request-quote` (this branch) | REQ-3 |
+| `POST` | `/api/rental-plans/{id}/quote` | `ROLE_USER`, `ROLE_ADMIN` | 🔀 Branch `hr-19-request-quote` (this branch) | REQ-4 |
 
 ### 2.4 Planned, not started
 
@@ -126,3 +131,5 @@ Moved to [`SPEC-booking-delivery-return-api.md`](./SPEC-booking-delivery-return-
 | 1.0.0 | 2026-08-09 | Initial index: consolidates auth (`develop`), bookings/deliveries/returns/payments (`HR-80`, this branch), and equipment/depots/rental-plans (`HR-72`, unmerged sibling branch) into one endpoint table with client ownership, role gates, and branch status. Documents the web/mobile separation as an open, unresolved question rather than deciding it. Corrects the mistaken premise that `HR-72` includes a separate web auth implementation. |
 | 1.1.0 | 2026-08-09 | Added §5, a verified known-issues backlog for the mobile endpoints from a PR review: no role/ownership checks on booking/delivery/return routes (5.1), silent multi-asset data loss in `GET /api/deliveries`/`GET /api/returns` via `BookingMapper.primaryAsset()` — reproducible today against seed booking id 1 (5.2), `DeliveryRecord`/`ReturnRecord` never persisted, cross-referenced from `SPEC-entity-repository.md` §3.2 (5.3), and N+1 queries on the three list endpoints (5.4). Documentation only — none of these were fixed in this change; each item records its own recommended fix and deferral status. Renumbered old §5/§6 to §6/§7 accordingly. |
 | 1.2.0 | 2026-08-09 | New [`SPEC-booking-delivery-return-api.md`](./SPEC-booking-delivery-return-api.md) written (per the standalone-spec criterion added to `SPEC-project-environment.md` §9.1) to be the actual contract for the seven `HR-80` routes in §2.2, which previously had none. §2.2's `Contract` column now points to it instead of showing `—`. §5's detailed known-issues writeup moved there (that file's §6) and replaced here with a one-line pointer, to avoid maintaining the same findings in two places. |
+| 1.3.0 | 2026-08-10 | `/api/rental-plans` is no longer a stub: `POST /api/rental-plans`, `GET /api/rental-plans`, and `GET /api/rental-plans/{id}` are implemented on `hr-19-request-quote` (REQ-1 of the new [`SPEC-rental-plan-quote.md`](./SPEC-rental-plan-quote.md)), independent of the `HR-72` sibling branch. Added rows for the still-unimplemented REQ-2/3/4 routes (add/remove line items, request quote) so the full eventual surface is visible even though only REQ-1 is done. §2.3's intro corrected to no longer claim `RentalPlanController` only exists on `HR-72`. |
+| 1.4.0 | 2026-08-10 | REQ-2/3/4 of `SPEC-rental-plan-quote.md` are now implemented and manually verified on `hr-19-request-quote`: `POST /api/rental-plans/{id}/items`, `DELETE /api/rental-plans/{id}/items/{itemId}`, `POST /api/rental-plans/{id}/quote`. All six `/api/rental-plans` routes moved from `⏳ Not started` to `🔀 Branch hr-19-request-quote (this branch)` — the full spec (REQ-1 through REQ-5) is now done. |

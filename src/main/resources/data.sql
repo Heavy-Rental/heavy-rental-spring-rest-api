@@ -79,6 +79,10 @@ INSERT INTO rental_plan (id, customer_id, start_date, end_date, total_amount, st
   (6, (SELECT id FROM users WHERE name = 'Alex Tan'), '2026-10-05', '2026-10-09', 2400.00, 'DRAFT',    '5 Tampines Industrial Ave',        'S(528896)', '2026-08-04 09:00:00', '2026-08-04 09:00:00')
 ON CONFLICT (id) DO NOTHING;
 
+-- Sync the rental_plan id sequence to the current max id so nextval() (used when
+-- inserting new rental plans at runtime) won't collide with the explicit ids above.
+SELECT setval(pg_get_serial_sequence('rental_plan', 'id'), COALESCE((SELECT MAX(id) FROM rental_plan), 1));
+
 -- ============================================================
 -- 5. rental_plan_records
 -- ============================================================
@@ -93,6 +97,10 @@ INSERT INTO rental_plan_records (id, rental_plan_id, asset_id, daily_rate, subto
   (8, 6, (SELECT id FROM assets WHERE name = 'Toyota 8FD25 Forklift'),      150.00, 600.00),
   (9, 6, (SELECT id FROM assets WHERE name = 'CAT 320 Excavator'),          450.00, 1800.00)
 ON CONFLICT (id) DO NOTHING;
+
+-- Sync the rental_plan_records id sequence to the current max id so nextval() (used
+-- when adding new line items at runtime, per REQ-2) won't collide with the ids above.
+SELECT setval(pg_get_serial_sequence('rental_plan_records', 'id'), COALESCE((SELECT MAX(id) FROM rental_plan_records), 1));
 
 -- ============================================================
 -- 6. bookings
