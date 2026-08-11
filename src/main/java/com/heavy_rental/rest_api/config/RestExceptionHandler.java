@@ -16,7 +16,7 @@ import org.springframework.web.server.ResponseStatusException;
 public class RestExceptionHandler {
 
 	@ExceptionHandler(ObjectOptimisticLockingFailureException.class)
-	public ResponseEntity<Map<String, String>> handleOptimisticLocking(ObjectOptimisticLockingFailureException ex) {
+	public ResponseEntity<Map<String, String>> handleOptimisticLocking() {
 		return ResponseEntity.status(HttpStatus.CONFLICT)
 				.body(error("conflict", "This record was updated by another request — please retry"));
 	}
