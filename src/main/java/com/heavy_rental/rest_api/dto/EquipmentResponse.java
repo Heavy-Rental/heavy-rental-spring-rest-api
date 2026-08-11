@@ -1,6 +1,7 @@
 package com.heavy_rental.rest_api.dto;
 
 import java.math.BigDecimal;
+import java.util.List;
 
 public record EquipmentResponse(
         Long id,
@@ -16,5 +17,7 @@ public record EquipmentResponse(
         Boolean available,
         String desc,
         String img,
-        String location) {
+        String location,
+        List<String> tags) {
+
 }
