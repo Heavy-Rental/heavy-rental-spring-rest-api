@@ -44,7 +44,7 @@ When this feature is correct:
 
 - `SecurityConfig` changes — the existing catch-all `hasAnyAuthority("ROLE_USER","ROLE_ADMIN")` rule already covers these new routes.
 - Frontend changes — pointing the React portal's `VITE_API_TARGET` at this backend and swapping its mock `issueSession()` for a real `/api/auth/login` call live in the separate `heavy-rental-web-portal` repo.
-- Pagination, thumbnails, or a separate image-only endpoint — every `browse()` call returns full-size images inline for all matching assets (~1.85MB total across the 9 seeded images per `SPEC-seed-data.md`). Acceptable at this project's 8-asset scale; flagged as a future concern if the catalog grows.
+- Pagination, thumbnails, or a separate image-only endpoint — every `browse()` call returns full-size images inline for all matching assets (~1.3MB total across the 8 seeded images per `SPEC-seed-data.md` today; ~4.4MB once the planned 27-asset reseed lands — see `specification/temporary/data-seeding-spec`, still not yet executed as of this note). Acceptable up to that ~28-asset scale; flagged as a future concern if the catalog grows beyond it.
 - An `AssetImage.mimeType` column — see §3.4.
 
 ---
@@ -110,7 +110,7 @@ Set<Long> findAssetIdsWithOverlappingBooking(...);
 
 ### 4.2 Blocking statuses
 
-`PENDING`, `CONFIRMED`, `MOBILISED` count as blocking (the slot is reserved or in progress). `COMPLETED` and `CANCELLED` do not.
+`PENDING_DEPOSIT`, `PENDING_CONFIRMED`, `CONFIRMED`, `MOBILISED` count as blocking (the slot is reserved or in progress) — see `AssetService.ACTIVE_BOOKING_STATUSES`. `COMPLETED` and `CANCELLED` do not.
 
 ### 4.3 Date window defaults
 
@@ -130,7 +130,7 @@ Given `spring.jpa.open-in-view=false` (`application.properties`), every lazy ass
 
 Since transaction boundaries already have to be handled carefully for that reason, `browse()` batches rather than loops per-asset:
 
-- `AssetRepository.findAllWithCategory()` — `JOIN FETCH a.category` for the unfiltered path, avoiding one lazy load per row. Filtered paths (`findByCategoryId`, `findByNameContainingIgnoreCase`, `findByCondition`) still lazy-load `category` per row — acceptable at ≤8-asset scale.
+- `AssetRepository.findAllWithCategory()` — `JOIN FETCH a.category` for the unfiltered path, avoiding one lazy load per row. Filtered paths (`findByCategoryId`, `findByNameContainingIgnoreCase`, `findByCondition`) still lazy-load `category` per row — acceptable at ≤28-asset scale (the planned post-reseed fleet size); worth batching if the catalog grows further.
 - `AssetImageRepository.findByAssetIdIn(assetIds)` — one query for all matching assets' images, collected in-memory into a `Map<assetId, AssetImage>` (each asset now has at most one image row — see §3.2.1).
 - `BookingItemRepository.findAssetIdsWithOverlappingBooking(assetIds, ...)` — one query for the whole result set's availability.
 
@@ -304,7 +304,7 @@ Confirm the "Browse Equipment" cards render real photos directly from `img` with
 | Hardcode `image/jpeg`, no `mimeType` column | Every seeded file is a verified real `.jpg` (checked via magic bytes); adding a column now would be speculative |
 | Fixed the mislabeled PNG (asset id 4) by re-encoding to real JPEG, not by adding per-image MIME tracking | Simpler fix given only one file was wrong; a `mimeType` column is still the right call *if* a non-JPEG asset is ever legitimately added (see §3.4) |
 | Overlap query lives on `BookingItemRepository`, not `BookingRepository` | Only `BookingItem` has an `asset_id` FK |
-| `PENDING`/`CONFIRMED`/`MOBILISED` block availability; `COMPLETED`/`CANCELLED` don't | Matches real-world booking lifecycle — a completed or cancelled booking no longer holds the asset |
+| `PENDING_DEPOSIT`/`PENDING_CONFIRMED`/`CONFIRMED`/`MOBILISED` block availability; `COMPLETED`/`CANCELLED` don't | Matches real-world booking lifecycle — a completed or cancelled booking no longer holds the asset |
 | Default date window to "today" when neither given | Lets the frontend call `GET /api/equipment` with no params and still get a meaningful `available` flag, matching the mock API's always-present field |
 | Batch image/availability lookups instead of per-asset loops | `open-in-view=false` already forces careful transaction-scoped mapping; batching is barely more code and cuts query count from ~17 to 3 |
 | Delete asset's own images first, then catch `DataIntegrityViolationException` | No cascade exists anywhere in this schema; this is the only path to a clean `409` instead of a raw DB error |
@@ -320,3 +320,5 @@ Confirm the "Browse Equipment" cards render real photos directly from `img` with
 | 1.0.0 | 2026-08-06 | Initial SPEC: `/api/equipment` CRUD, base64→data-URI image encoding decision, batched availability/image lookups, delete-conflict handling. Code written; build and manual verification (§8) not yet run. |
 | 1.1.0 | 2026-08-06 | Verified against the frontend's actual `Equipment` type: `img` corrected from `List<String>` to a single `String` (§3.2). Fixed a pre-existing data bug found during review — the seed image for asset id 4 was a PNG mislabeled `.jpg`, re-encoded to a real JPEG (§3.3). Removed CAT 320 Excavator's second seeded photo from `data.sql` per user decision, since the API only ever exposes one photo per asset (§3.2.1). Build verified (`mvnw compile`, exit 0). |
 | 1.1.1 | 2026-08-09 | Added `location` to both `EquipmentRequest`/`EquipmentResponse` examples (§7.1, §7.3) and the `EquipmentRequest` DTO signature — a field added to `Asset`/both DTOs in this same PR that was missing from this spec's contract examples. No behavior change. |
+| 1.2.0 | 2026-08-11 | Doc-only corrections, no code change: (1) §2.2/§5 asset-count scale ceiling updated from 8 to a planned 16-asset fleet, and the stale "9 seeded images / ~1.85MB" figures (left over from before the CAT 320 second-photo removal already reflected in §3.2.1) corrected to the current 8-image/~1.3MB baseline, per review of `specification/temporary/data-seeding-spec` (not yet executed — the live fleet is still 8 assets as of this note). (2) §4.2/§9 corrected stale `PENDING` status wording to the actual `PENDING_DEPOSIT`/`PENDING_CONFIRMED` split from `HR-77` — the code (`AssetService.ACTIVE_BOOKING_STATUSES`) was already correct, only this doc's prose was stale. The §8 QA checklist/curl script's literal "8 seeded assets" text is intentionally left as-is until the reseed actually executes and `SPEC-seed-data.md` is updated to match. |
+| 1.3.0 | 2026-08-11 | `specification/temporary/data-seeding-spec` revised again (still not executed): the planned fleet target grew from 16 to 27 assets, to give every category's spec-band real coverage instead of leaving most bands empty. §2.2/§5 scale-ceiling wording and image-size estimate updated accordingly (16→28-asset ceiling, ~2.6MB→~4.4MB). No other change. |
