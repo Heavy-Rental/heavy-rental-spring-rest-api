@@ -26,7 +26,10 @@ public class BookingMapper {
                 booking.getSiteAddress(),
                 asset != null ? asset.getName() : "",
                 asset != null ? asset.getSerialno() : "",
-                booking.getDeliveryNotes());
+                booking.getDeliveryNotes(),
+                booking.getTotalAmount(),
+                booking.getDepositAmount(),
+                booking.getRemainingBalance());
     }
 
     public DeliveryItemResponse toDeliveryItemResponse(Booking booking, List<BookingItem> items) {
