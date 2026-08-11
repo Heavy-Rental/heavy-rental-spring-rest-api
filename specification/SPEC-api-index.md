@@ -5,7 +5,7 @@
 | **Document type** | Cross-cutting index — not a feature contract itself |
 | **Status** | As-built across `develop` + two unmerged sibling branches (see §2) |
 | **Module** | `heavy-rental-spring-rest-api` |
-| **Related specs** | [`SPEC-request-bearer-token.md`](./SPEC-request-bearer-token.md), [`SPEC-auth-login-logout.md`](./SPEC-auth-login-logout.md), [`SPEC-equipment-browse-api.md`](./SPEC-equipment-browse-api.md), [`SPEC-entity-repository.md`](./SPEC-entity-repository.md) |
+| **Related specs** | [`SPEC-request-bearer-token.md`](./SPEC-request-bearer-token.md), [`SPEC-auth-login-logout.md`](./SPEC-auth-login-logout.md), [`SPEC-equipment-browse-api.md`](./SPEC-equipment-browse-api.md), [`SPEC-entity-repository.md`](./SPEC-entity-repository.md), [`SPEC-spring-proxy-endpoints.md`](./SPEC-spring-proxy-endpoints.md) |
 | **Environment context** | [`SPEC-project-environment.md`](./SPEC-project-environment.md) (read first) |
 
 This document is the **single place to see the entire REST surface** — every route, which client it's for, what branch it lives on, and which feature spec (if any) owns its detailed contract. It does not restate request/response shapes already documented elsewhere; it points to them.
@@ -70,18 +70,20 @@ Per branch author: every route in this section is for the **web** client. `Equip
 | `PATCH` | `/api/equipment/{id}` | `ROLE_USER`, `ROLE_ADMIN` | 🔀 Branch `HR-72` (sibling) | §7.4 |
 | `DELETE` | `/api/equipment/{id}` | `ROLE_USER`, `ROLE_ADMIN` | 🔀 Branch `HR-72` (sibling) | §7.5 |
 | `GET` | `/api/depots` | `ROLE_USER`, `ROLE_ADMIN` | 🧱 Stub, on branch `HR-72` | None — always returns `[]`; no `Depot` entity exists (delivery site fields live on `Booking`/`RentalPlan` directly) |
-| `POST` | `/api/rental-plans` | `ROLE_USER`, `ROLE_ADMIN` | 🔀 Branch `hr-19-request-quote` (this branch) | [`SPEC-rental-plan-quote.md`](./SPEC-rental-plan-quote.md) REQ-1 |
-| `GET` | `/api/rental-plans` | `ROLE_USER`, `ROLE_ADMIN` | 🔀 Branch `hr-19-request-quote` (this branch) | REQ-5 |
-| `GET` | `/api/rental-plans/{id}` | `ROLE_USER`, `ROLE_ADMIN` | 🔀 Branch `hr-19-request-quote` (this branch) | REQ-5 |
-| `POST` | `/api/rental-plans/{id}/items` | `ROLE_USER`, `ROLE_ADMIN` | 🔀 Branch `hr-19-request-quote` (this branch) | [`SPEC-rental-plan-quote.md`](./SPEC-rental-plan-quote.md) REQ-2 |
-| `DELETE` | `/api/rental-plans/{id}/items/{itemId}` | `ROLE_USER`, `ROLE_ADMIN` | 🔀 Branch `hr-19-request-quote` (this branch) | REQ-3 |
-| `POST` | `/api/rental-plans/{id}/quote` | `ROLE_USER`, `ROLE_ADMIN` | 🔀 Branch `hr-19-request-quote` (this branch) | REQ-4 |
+| `POST` | `/api/rentalPlans` | `ROLE_USER`, `ROLE_ADMIN` | 🔀 Branch `hr-19-request-quote` (this branch) | [`SPEC-rental-plan-quote.md`](./SPEC-rental-plan-quote.md) REQ-1 |
+| `GET` | `/api/rentalPlans` | `ROLE_USER`, `ROLE_ADMIN` | 🔀 Branch `hr-19-request-quote` (this branch) | REQ-5 |
+| `GET` | `/api/rentalPlans/{id}` | `ROLE_USER`, `ROLE_ADMIN` | 🔀 Branch `hr-19-request-quote` (this branch) | REQ-5 |
+| `POST` | `/api/rentalPlans/{id}/items` | `ROLE_USER`, `ROLE_ADMIN` | 🔀 Branch `hr-19-request-quote` (this branch) | [`SPEC-rental-plan-quote.md`](./SPEC-rental-plan-quote.md) REQ-2 |
+| `DELETE` | `/api/rentalPlans/{id}/items/{itemId}` | `ROLE_USER`, `ROLE_ADMIN` | 🔀 Branch `hr-19-request-quote` (this branch) | REQ-3 |
+| `POST` | `/api/rentalPlans/{id}/quote` | `ROLE_USER`, `ROLE_ADMIN` | 🔀 Branch `hr-19-request-quote` (this branch) | REQ-4; internals planned to change to a batch FastAPI call — see [`SPEC-spring-proxy-endpoints.md`](./SPEC-spring-proxy-endpoints.md) §1 |
 
 ### 2.4 Planned, not started
 
 | Item | Status | Notes |
 |---|---|---|
 | `platform` attribute on `LoginRequest` | ⏳ Not started | Branch `HR-85-implement-platform-attribute-in-login-request-body` exists but has **zero commits beyond `HR-77`** — it's an unstarted placeholder, not a design that's been written down anywhere yet. Likely the intended mechanism for distinguishing web vs mobile at login (see §4) once work begins. |
+| `POST` `/api/pricing/estimate` | ⏳ Not started | Proxies FastAPI for a pre-cart price preview. Auth is an open decision (likely public, unlike every other route in this table) — see [`SPEC-spring-proxy-endpoints.md`](./SPEC-spring-proxy-endpoints.md) §2. |
+| `POST` `/api/recommendations` | ⏳ Not started | Proxies FastAPI's `from-project-spec` recommendation call. Not a thin passthrough — Spring must authenticate the caller and inject the real customer id itself, since FastAPI trusts an unvalidated `user_id` field. See [`SPEC-spring-proxy-endpoints.md`](./SPEC-spring-proxy-endpoints.md) §3. |
 
 ---
 
@@ -133,3 +135,5 @@ Moved to [`SPEC-booking-delivery-return-api.md`](./SPEC-booking-delivery-return-
 | 1.2.0 | 2026-08-09 | New [`SPEC-booking-delivery-return-api.md`](./SPEC-booking-delivery-return-api.md) written (per the standalone-spec criterion added to `SPEC-project-environment.md` §9.1) to be the actual contract for the seven `HR-80` routes in §2.2, which previously had none. §2.2's `Contract` column now points to it instead of showing `—`. §5's detailed known-issues writeup moved there (that file's §6) and replaced here with a one-line pointer, to avoid maintaining the same findings in two places. |
 | 1.3.0 | 2026-08-10 | `/api/rental-plans` is no longer a stub: `POST /api/rental-plans`, `GET /api/rental-plans`, and `GET /api/rental-plans/{id}` are implemented on `hr-19-request-quote` (REQ-1 of the new [`SPEC-rental-plan-quote.md`](./SPEC-rental-plan-quote.md)), independent of the `HR-72` sibling branch. Added rows for the still-unimplemented REQ-2/3/4 routes (add/remove line items, request quote) so the full eventual surface is visible even though only REQ-1 is done. §2.3's intro corrected to no longer claim `RentalPlanController` only exists on `HR-72`. |
 | 1.4.0 | 2026-08-10 | REQ-2/3/4 of `SPEC-rental-plan-quote.md` are now implemented and manually verified on `hr-19-request-quote`: `POST /api/rental-plans/{id}/items`, `DELETE /api/rental-plans/{id}/items/{itemId}`, `POST /api/rental-plans/{id}/quote`. All six `/api/rental-plans` routes moved from `⏳ Not started` to `🔀 Branch hr-19-request-quote (this branch)` — the full spec (REQ-1 through REQ-5) is now done. |
+| 1.5.0 | 2026-08-11 | All six `/api/rentalPlans` routes renamed from `/api/rental-plans` (PR review comment), matching the camelCase convention. Endpoint table (§2) updated; historical changelog entries above (1.0.0–1.4.0) left as-is since they're records of what was true at each past version, not the current contract. |
+| 1.6.0 | 2026-08-11 | New [`SPEC-spring-proxy-endpoints.md`](./SPEC-spring-proxy-endpoints.md) added to header **Related specs** and wired into §2: (1) the existing `POST /api/rentalPlans/{id}/quote` row (§2.3) now notes its internals are planned to change to a batch FastAPI call; (2) two new not-yet-built routes, `POST /api/pricing/estimate` and `POST /api/recommendations`, added to §2.4 "Planned, not started". |

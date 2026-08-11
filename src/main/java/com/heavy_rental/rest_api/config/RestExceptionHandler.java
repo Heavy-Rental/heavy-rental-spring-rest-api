@@ -5,6 +5,7 @@ import java.util.Map;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -13,6 +14,12 @@ import org.springframework.web.server.ResponseStatusException;
 
 @RestControllerAdvice
 public class RestExceptionHandler {
+
+	@ExceptionHandler(ObjectOptimisticLockingFailureException.class)
+	public ResponseEntity<Map<String, String>> handleOptimisticLocking(ObjectOptimisticLockingFailureException ex) {
+		return ResponseEntity.status(HttpStatus.CONFLICT)
+				.body(error("conflict", "This record was updated by another request — please retry"));
+	}
 
 	@ExceptionHandler(BadCredentialsException.class)
 	public ResponseEntity<Map<String, String>> handleBadCredentials(BadCredentialsException ex) {

@@ -61,7 +61,7 @@ Every table below (except `users`) had no data and no admin UI to create rows th
 
 ## 6. Seed data by table
 
-### 6.0 `users` (4 rows)
+### 6.0 `users` (5 rows)
 
 | id | name | email | role | password (plaintext, dev-only) |
 |---|---|---|---|---|
@@ -69,6 +69,7 @@ Every table below (except `users`) had no data and no admin UI to create rows th
 | 2 | Alex Tan | alex.tan@example.sg | USER | `customer123` |
 | 3 | Ravi Kumar | ravi.kumar@example.sg | ADMIN | `admin123` |
 | 4 | Ah Tan | ah.tan@example.sg | DRIVER | `driver123` |
+| 5 | Mei Lin | mei.lin@example.sg | USER | `customer456` — added to close the `SPEC-rental-plan-quote.md` §6.1 testing gap: a second customer with zero `rental_plan` rows, so "create succeeds with no active plan" is finally exercisable. |
 
 All passwords are stored as `BCryptPasswordEncoder` hashes generated with the same encoder bean the app uses (`config/SecurityConfig.java`), so they verify correctly via the normal login endpoint. Plaintext values are listed here only because this is local/dev seed data — never do this for a real environment.
 
@@ -106,7 +107,7 @@ All 8 files under `mock-images/` are verified real JPEGs (checked via magic byte
 
 ### 6.4 `rental_plan` (6 rows)
 
-All `customer_id` → `'Alex Tan'` (the only seeded non-admin, non-driver user). Statuses span `DRAFT`/`SAVED`/`QUOTEED`/`CONVERTED` (the last is spelled as the literal, misspelled enum constant that exists in code). Sites are Singapore addresses (Tuas, Pioneer, Jurong Port, Marina South, Tampines) with `S(xxxxxx)` postal codes. `total_amount` equals the sum of that plan's `rental_plan_records`.
+All `customer_id` → `'Alex Tan'` (the only seeded non-admin, non-driver user). Statuses span `DRAFT`/`SAVED`/`QUOTED`/`CONVERTED`. Sites are Singapore addresses (Tuas, Pioneer, Jurong Port, Marina South, Tampines) with `S(xxxxxx)` postal codes. `total_amount` equals the sum of that plan's `rental_plan_records`.
 
 ### 6.5 `rental_plan_records` (9 rows)
 
@@ -171,3 +172,4 @@ Only for bookings whose delivery/return has actually happened as of "today": `dr
 | 1.7.0 | 2026-08-08 | Deleted `mock-images/asset1-cat320-excavator-b.jpg`, the leftover source file for CAT 320's second photo removed in 1.6.0. It was unreferenced by any `INSERT` and confirmed unreferenced anywhere else in the codebase before deletion — `mock-images/` now contains exactly the 8 files §6.3/§7 actually use, no orphaned files. |
 | 1.8.0 | 2026-08-09 | §6.6/§6.9-6.10 corrected to match `HR-77` (merged to `develop` before this branch branched off): `Booking.BookingStatus.PENDING` was split into `PENDING_DEPOSIT`/`PENDING_CONFIRMED`, and `Booking.PaidStatus`/`paid_status` was removed from the entity entirely — this doc still described the pre-`HR-77` shape (plain `PENDING`, a `PaidStatus`/`UNPAID` value) despite `data.sql` itself already having been updated by that same change. Documentation-only correction; no seed data changed. |
 | 1.9.0 | 2026-08-09 | Two corrections found in PR review: (1) §6.3 said "All 9 files" and still named the pre-rename `asset5-jlg-2630es-scissorlift.jpg` — a separate, unrelated merge from `develop` (HR-77) renamed every `assetN-*` image file to match its actual asset id (the file for asset 4 is `asset4-jlg-2630es-scissorlift.jpg`) and dropped one now-orphaned old file; corrected to "8 files" and the current name (the 1.6.0/1.7.0 entries above are left as-is — they're accurate for what was true when written, before that rename landed). (2) Added a `location` column to the §6.2 asset table — `Asset.location` was added to the entity/seed data in this same PR but never documented here. |
+| 1.10.0 | 2026-08-11 | Two changes from `SPEC-rental-plan-quote.md`'s PR review (see that doc's 1.1.0/1.1.1 for the full story): (1) §6.4's `rental_plan` insert now sets an explicit `version = 0` per row (`RentalPlan` gained a `@Version` column; raw SQL inserts bypass JPA's automatic version init, so a NOT NULL failure resulted without this). (2) §6.0's `users` table gained a 5th row — Mei Lin (`mei.lin@example.sg`, `USER`, `customer456`) — seeded with zero `rental_plan` rows specifically to close a documented testing gap: previously the only non-admin/non-driver user, Alex Tan, already had 4 active-status plans, making "create succeeds with zero active plans" (BR-06's positive direction) impossible to exercise. Also fixed the stale `QUOTEED` spelling in §6.4's prose (the underlying typo itself was fixed across the codebase in the same PR). |

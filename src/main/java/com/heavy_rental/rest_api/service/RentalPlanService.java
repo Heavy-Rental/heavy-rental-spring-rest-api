@@ -16,7 +16,6 @@ import com.heavy_rental.rest_api.repository.RentalPlanRepository;
 import com.heavy_rental.rest_api.repository.UserRepository;
 
 import java.math.BigDecimal;
-import java.time.temporal.ChronoUnit;
 
 import com.heavy_rental.rest_api.dto.RentalPlanItemRequest;
 import com.heavy_rental.rest_api.entity.Asset;
@@ -29,23 +28,25 @@ import org.springframework.transaction.annotation.Transactional;
 public class RentalPlanService {
 
     private static final List<RentalPlan.PlanStatus> ACTIVE_STATUSES = List.of(RentalPlan.PlanStatus.DRAFT,
-            RentalPlan.PlanStatus.SAVED, RentalPlan.PlanStatus.QUOTEED);
+            RentalPlan.PlanStatus.SAVED, RentalPlan.PlanStatus.QUOTED);
 
     private final RentalPlanRepository rentalPlanRepository;
     private final RentalPlanRecordRepository rentalPlanRecordRepository;
     private final UserRepository userRepository;
     private final AssetRepository assetRepository;
-    
-    
+    private final PricingClient pricingClient;
+
     public RentalPlanService(
             RentalPlanRepository rentalPlanRepository,
             RentalPlanRecordRepository rentalPlanRecordRepository,
             UserRepository userRepository,
-            AssetRepository assetRepository) {
+            AssetRepository assetRepository,
+            PricingClient pricingClient) {
         this.rentalPlanRepository = rentalPlanRepository;
         this.rentalPlanRecordRepository = rentalPlanRecordRepository;
         this.userRepository = userRepository;
         this.assetRepository = assetRepository;
+        this.pricingClient = pricingClient;
     }
 
     @Transactional
@@ -86,22 +87,20 @@ public class RentalPlanService {
     public RentalPlanResponse addItem(Long planId, RentalPlanItemRequest request, String customerEmail) {
         RentalPlan plan = loadOwnedPlan(planId, customerEmail);
 
-        if (plan.getStatus() == RentalPlan.PlanStatus.QUOTEED) {
+        if (plan.getStatus() == RentalPlan.PlanStatus.QUOTED) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Plan is already quoted — items are locked");
         }
 
         Asset asset = assetRepository.findById(request.assetId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown assetId"));
 
-        long days = ChronoUnit.DAYS.between(plan.getStartDate(), plan.getEndDate()) + 1;
-        BigDecimal dailyRate = asset.getBaseDailyRate();
-        BigDecimal subtotal = dailyRate.multiply(BigDecimal.valueOf(days));
+        PricingClient.ItemPrice price = pricingClient.priceItem(asset, plan.getStartDate(), plan.getEndDate());
 
         RentalPlanRecord item = new RentalPlanRecord();
         item.setRentalPlan(plan);
         item.setAsset(asset);
-        item.setDailyRate(dailyRate);
-        item.setSubtotal(subtotal);
+        item.setDailyRate(price.dailyRate());
+        item.setSubtotal(price.subtotal());
         rentalPlanRecordRepository.save(item);
 
         return toResponse(plan);
@@ -111,7 +110,7 @@ public class RentalPlanService {
     public RentalPlanResponse removeItem(Long planId, Long itemId, String customerEmail) {
         RentalPlan plan = loadOwnedPlan(planId, customerEmail);
 
-        if (plan.getStatus() == RentalPlan.PlanStatus.QUOTEED) {
+        if (plan.getStatus() == RentalPlan.PlanStatus.QUOTED) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Plan is already quoted — items are locked");
         }
 
@@ -144,7 +143,7 @@ public class RentalPlanService {
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
         plan.setTotalAmount(total);
-        plan.setStatus(RentalPlan.PlanStatus.QUOTEED);
+        plan.setStatus(RentalPlan.PlanStatus.QUOTED);
         rentalPlanRepository.save(plan);
 
         return toResponse(plan);

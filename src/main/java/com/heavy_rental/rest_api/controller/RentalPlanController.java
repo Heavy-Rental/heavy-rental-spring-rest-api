@@ -14,7 +14,8 @@ import com.heavy_rental.rest_api.service.RentalPlanService;
 import com.heavy_rental.rest_api.dto.RentalPlanItemRequest;
 
 @RestController
-@RequestMapping("/api/rental-plans")
+@RequestMapping("/api/rentalPlans")
+
 public class RentalPlanController {
 
     private final RentalPlanService rentalPlanService;
