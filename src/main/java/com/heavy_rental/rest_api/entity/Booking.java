@@ -6,19 +6,29 @@ import lombok.*;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.List;
 import org.hibernate.annotations.Formula;
 
 @Entity
 @Table(name = "bookings")
-@Getter 
+@Getter
 @Setter
-@NoArgsConstructor 
+@NoArgsConstructor
 @AllArgsConstructor
 public class Booking {
 
     public enum BookingStatus {
         PENDING_DEPOSIT, PENDING_CONFIRMED, CONFIRMED, MOBILISED, COMPLETED, CANCELLED
     }
+
+    /**
+     * Statuses that hold an asset as unavailable for other bookings over its date range —
+     * shared by AssetService's availability check and BookingService's create-time
+     * conflict check so the two can't drift apart on what "already booked" means.
+     */
+    public static final List<BookingStatus> ACTIVE_STATUSES =
+            List.of(BookingStatus.PENDING_DEPOSIT, BookingStatus.PENDING_CONFIRMED,
+                    BookingStatus.CONFIRMED, BookingStatus.MOBILISED);
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

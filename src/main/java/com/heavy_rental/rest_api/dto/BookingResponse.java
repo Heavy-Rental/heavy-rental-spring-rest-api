@@ -1,5 +1,6 @@
 package com.heavy_rental.rest_api.dto;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 
 public record BookingResponse(
@@ -11,5 +12,8 @@ public record BookingResponse(
     String siteAddress,
     String assetName,
     String serialNumber,
-    String deliveryNotes) {
+    String deliveryNotes,
+    BigDecimal totalAmount,
+    BigDecimal depositAmount,
+    BigDecimal remainingBalance) {
 }

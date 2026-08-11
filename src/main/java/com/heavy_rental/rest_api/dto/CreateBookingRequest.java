@@ -9,6 +9,5 @@ public record CreateBookingRequest(
         LocalDate endDate,
         Long rentalPlanId,
         String siteAddress,
-        String sitePostalCode,
         String deliveryNotes) {
 }

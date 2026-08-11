@@ -30,10 +30,6 @@ public class AssetService {
 
     private static final String JPEG_DATA_URI_PREFIX = "data:image/jpeg;base64,";
 
-    private static final List<Booking.BookingStatus> ACTIVE_BOOKING_STATUSES =
-            List.of(Booking.BookingStatus.PENDING_DEPOSIT, Booking.BookingStatus.PENDING_CONFIRMED,
-                    Booking.BookingStatus.CONFIRMED, Booking.BookingStatus.MOBILISED);
-
     private final AssetRepository assetRepository;
     private final AssetCategoryRepository assetCategoryRepository;
     private final AssetImageRepository assetImageRepository;
@@ -226,7 +222,7 @@ public class AssetService {
             return Set.of();
         }
         return bookingItemRepository.findAssetIdsWithOverlappingBooking(
-                assetIds, window[0], window[1], ACTIVE_BOOKING_STATUSES);
+                assetIds, window[0], window[1], Booking.ACTIVE_STATUSES);
     }
 
     private String toDataUri(AssetImage image) {
