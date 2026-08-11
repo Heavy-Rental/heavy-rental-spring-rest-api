@@ -248,6 +248,8 @@ public class AssetService {
                 available,
                 asset.getDescription(),
                 toDataUri(image),
-                asset.getLocation());
+                asset.getLocation(),
+                List.of());
+
     }
 }
