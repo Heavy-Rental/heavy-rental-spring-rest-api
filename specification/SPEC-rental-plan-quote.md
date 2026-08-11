@@ -3,7 +3,7 @@
 | Field | Value |
 |-------|--------|
 | **Feature** | Rental Plan build-and-quote flow (Jira `HR-19` "Request Quote") |
-| **Status** | Implemented on `hr-19-request-quote`, not yet merged to `develop`. REQ-1 through REQ-5 all built and manually verified (Postman) against seeded data. |
+| **Status** | Implemented on `hr-19-request-quote`, not yet merged to `develop`. REQ-1 through REQ-5 all built and manually verified end-to-end (Postman) against seeded data — full §6.1 checklist confirmed 2026-08-11. |
 | **Module** | `heavy-rental-spring-rest-api` |
 | **Primary surface** | REST API for a customer building a Rental Plan (equipment line items + dates) into a priced quote |
 | **Method** | Specification Driven Design (SDD) |
@@ -123,18 +123,18 @@ Left intentionally high-level, per this project's convention of keeping the cont
 
 ### 6.1 Checklist
 
-- [ ] Only one active (`DRAFT`/`SAVED`/`QUOTEED`) plan can exist per customer at a time
-- [ ] Line items snapshot `Asset.baseDailyRate`, never a dynamic/ML rate
-- [ ] Requesting a quote locks line items and freezes `totalAmount`
-- [ ] A customer can never see or modify another customer's plan (`404`, not `403`)
-- [ ] A plan with zero line items cannot be quoted (`400`)
+- [x] Only one active (`DRAFT`/`SAVED`/`QUOTEED`) plan can exist per customer at a time — enforcement verified (`POST /api/rental-plans` → `409` while an active plan exists). The positive direction (creating successfully when zero active plans exist) couldn't be exercised: the only seeded customer, Alex Tan, already starts with 4 active-status plans (ids 1, 2, 3, 6) baked into `data.sql`, and there's no registration endpoint to create a fresh customer to test against.
+- [x] Line items snapshot `Asset.baseDailyRate`, never a dynamic/ML rate — verified (`assetId 1`, `dailyRate: 450.00`, matching `assets.base_daily_rate`, not `min_daily_rate`/`max_daily_rate`)
+- [x] Requesting a quote locks line items and freezes `totalAmount` — verified (`POST .../1/quote` → `200`, `status: QUOTEED`, `totalAmount: 1050.00`; follow-up `POST .../1/items` → `409` once quoted)
+- [x] A customer can never see or modify another customer's plan (`404`, not `403`) — verified (Ravi Kumar, an admin who doesn't own plan 1, gets `404` on `GET /api/rental-plans/1`)
+- [x] A plan with zero line items cannot be quoted (`400`) — verified (plan 6's two items removed, then `POST .../6/quote` → `400`, `"Cannot quote an empty plan"`)
 
 ### 6.2 Manual smoke test
 
-1. Create a plan, add 2 line items, request a quote, and confirm `totalAmount` matches a manual sum of the line items.
-2. Attempt a second `POST /api/rental-plans` while the first plan is still active — confirm `409`.
-3. With a second customer's token, attempt to `GET`/modify the first customer's plan — confirm `404`.
-4. Request a quote on a plan with zero line items — confirm `400`.
+1. ~~Create a plan, add 2 line items, request a quote, and confirm `totalAmount` matches a manual sum of the line items.~~ Adapted: created a plan isn't possible against seeded data (see checklist note above), so this ran against existing seeded plan 1 instead — added 1 item (assetId 1, subtotal 2700.00), removed it, then quoted the plan's original single item and confirmed `totalAmount: 1050.00` matched.
+2. Attempt a second `POST /api/rental-plans` while the first plan is still active — confirm `409`. **Done**, `409`.
+3. With a second customer's token, attempt to `GET`/modify the first customer's plan — confirm `404`. **Done**, `404` (used Ravi Kumar's token against plan 1).
+4. Request a quote on a plan with zero line items — confirm `400`. **Done**, `400` (plan 6, after removing both seeded items).
 
 ---
 
@@ -164,3 +164,4 @@ Matches this project's convention (`SPEC-booking-delivery-return-api.md` §6) of
 |---------|------|--------|
 | 0.1.0 | 2026-08-10 | Initial draft, created collaboratively — REQ-1 through REQ-5 captured; all three open questions (BR-06 scope, daily-rate source, availability hold) resolved and §7 "Known issues / concerns" added. Not yet implemented — `RentalPlanController` still the pre-existing stub. |
 | 1.0.0 | 2026-08-10 | Implemented and manually verified end-to-end (REQ-1 through REQ-5) via Postman against seeded data, on `hr-19-request-quote`. Two pre-existing bugs found and fixed along the way, both unrelated to this spec's own logic: (1) `data.sql` was missing a `setval(...)` sequence fixup for `rental_plan`/`rental_plan_records` — every seeded table except `users` had this same latent gap, only `rental_plan` happened to be the next one to get a real `save()` exercised against it; fixed by adding the same fixup `users` already had. (2) `RentalPlanService` was the only service in the codebase missing `@Transactional`, causing a `LazyInitializationException` on `RentalPlanRecord.asset` the first time a plan with real line items was serialized; fixed by adding `@Transactional`/`@Transactional(readOnly = true)` matching the convention already used in `AssetService`/`BookingService`/`DeliveryService`/`ReturnService`. |
+| 1.0.1 | 2026-08-11 | §6.1 checklist and §6.2 smoke test walked through step-by-step in Postman against a fresh reset of the seeded data (`ddl-auto` temporarily set to `create-drop`, then reverted to `update`) and checked off with actual observed responses. All 5 checklist items pass; one caveat documented inline — the "one active plan per customer" rule's positive direction (create succeeds with zero active plans) isn't exercisable against current seed data, since Alex Tan already starts with 4 active-status plans and there's no registration endpoint to create a fresh customer. |
