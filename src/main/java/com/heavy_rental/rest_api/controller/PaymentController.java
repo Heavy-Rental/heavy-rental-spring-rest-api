@@ -1,13 +1,20 @@
 package com.heavy_rental.rest_api.controller;
 
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
+
+import com.heavy_rental.rest_api.dto.CreateDepositIntentRequest;
+import com.heavy_rental.rest_api.dto.PaymentIntentResponse;
 import com.heavy_rental.rest_api.service.PaymentService;
 import com.stripe.exception.StripeException;
 import com.stripe.model.PaymentIntent;
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
-
-import java.math.BigDecimal;
-import java.util.Map;
 
 @RestController
 @RequestMapping("/api/payments")
@@ -19,25 +26,15 @@ public class PaymentController {
         this.paymentService = paymentService;
     }
 
-    // DTO for JSON request body
-    public record CreatePaymentIntentRequest(BigDecimal amount, Integer bookingId) {}
-
-    @PostMapping("/create-payment-intent")
-    public ResponseEntity<Map<String, String>> createPaymentIntent(
-            @RequestBody CreatePaymentIntentRequest request) {
+    @PostMapping("/deposit-intent")
+    public ResponseEntity<PaymentIntentResponse> createDepositIntent(
+            @AuthenticationPrincipal Jwt jwt,
+            @RequestBody CreateDepositIntentRequest request) {
         try {
-            // Fixed: pass 2 arguments (amount, bookingId) matching your updated service signature
-            PaymentIntent intent = paymentService.createPaymentIntent(
-                    request.amount(), 
-                    request.bookingId()
-            );
-
-            return ResponseEntity.ok(Map.of(
-                    "clientSecret", intent.getClientSecret(),
-                    "paymentIntentId", intent.getId()
-            ));
+            PaymentIntent intent = paymentService.createDepositPaymentIntent(jwt, request.bookingId());
+            return ResponseEntity.ok(new PaymentIntentResponse(intent.getClientSecret(), intent.getId()));
         } catch (StripeException e) {
-            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Stripe error: " + e.getMessage());
         }
     }
 }
