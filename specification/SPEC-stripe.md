@@ -3,13 +3,13 @@
 | Field | Value |
 |-------|--------|
 | **Feature** | 30% deposit (client-initiated) + 70% balance (system-initiated, off-session, 1 day before rental start) |
-| **Status** | As-built (implemented on branch); **not yet runtime-verified** against a live Postgres + Stripe sandbox — see §11 |
+| **Status** | As-built, now rebased onto `develop` (branch `hr-27-payment-checkout`, local, not pushed as of 2026-08-11). `./mvnw compile`/`test` pass against a live Postgres. **Payment-state tracking is partially deferred** — `Booking.paidStatus` was removed during the rebase and several transitions this feature used to perform no longer happen; see §10. Not yet verified against a real Stripe sandbox — see §11 |
 | **Module** | `heavy-rental-spring-rest-api` |
 | **Endpoints** | `POST /api/payments/deposit-intent`, `POST /api/payments/webhook` |
-| **Depends on** | [`SPEC-entity-repository.md`](./SPEC-entity-repository.md) (`Booking`, `Payment`, `User`) · [`SPEC-auth-login-logout.md`](./SPEC-auth-login-logout.md) (JWT principal) · a Booking module (`BookingController`/`BookingService`) to create the `Booking` a deposit attaches to — not itself documented by a SPEC file yet |
-| **Environment context** | [`SPEC-project-environment.md`](./SPEC-project-environment.md) (read first) |
+| **Depends on** | [`SPEC-entity-repository.md`](./SPEC-entity-repository.md) (`Booking`, `Payment`, `User`) · [`SPEC-auth-login-logout.md`](./SPEC-auth-login-logout.md) (JWT principal) · a Booking module (`BookingController`/`BookingService`) to create the `Booking` a deposit attaches to — **exists on `develop` but is read/update-only, no create endpoint; see §10** |
+| **Environment context** | [`SPEC-project-environment.md`](./SPEC-project-environment.md) (read first) · [`SPEC-api-index.md`](./SPEC-api-index.md) §2.2/§2.4 (this feature's routes in the full endpoint surface, plus the CORS blocker that applies to this feature too) |
 | **Related code** | `PaymentController`, `PaymentService`, `StripeWebhookController`, `PaymentWebhookService`, `BalanceChargeSchedulerService`, `CurrentUserService`, `StripeConfig`, `SecurityConfig`, entities `Booking`/`Payment`/`User`, DTOs `CreateDepositIntentRequest`/`PaymentIntentResponse` |
-| **Related docs** | [`FRONTEND_CHANGES.md`](../FRONTEND_CHANGES.md) (React integration handoff) · [`STRIPE_WEBHOOK_TESTING.md`](../STRIPE_WEBHOOK_TESTING.md) (`stripe listen` walkthrough) |
+| **Related docs** | §12 below (frontend integration guidance, written in-file rather than as a separate handoff doc — see that section's note) · [`STRIPE_WEBHOOK_TESTING.md`](../STRIPE_WEBHOOK_TESTING.md) (`stripe listen` walkthrough — referenced but was never actually committed to this repo; treat as not existing until someone writes it) |
 
 This document is the **single source of truth** for the Stripe payment integration: deposit PaymentIntent creation, the webhook that confirms payment outcomes, and the daily cron that auto-charges the remaining balance off-session.
 
@@ -381,11 +381,17 @@ The two `boolean` columns use an explicit `columnDefinition` with a `default fal
 
 ## 10. Known gaps / not yet built
 
-1. **No runtime verification.** Everything above has been verified by `mvnw compile` (types/wiring are structurally sound) but never executed against a live Postgres instance or the real Stripe sandbox — no Docker/DB was available in the environment this was built in. Follow [`STRIPE_WEBHOOK_TESTING.md`](../STRIPE_WEBHOOK_TESTING.md) before relying on this.
+1. **Runtime-verified only up to compile/test, not a real payment.** `./mvnw compile` and `./mvnw test` both pass against a live Postgres as of the 2026-08-11 rebase onto `develop` — an improvement over the original "no Docker/DB available" state — but nothing here has been exercised against the real Stripe sandbox yet (no `stripe listen`, no real `PaymentIntent` confirmed). `STRIPE_WEBHOOK_TESTING.md`, referenced throughout this doc, was never actually committed to this repo — treat it as a walkthrough that still needs writing, not a resource that exists.
 2. **No automated tests** for this feature (contrast with `AuthenticationIntegrationTest`, referenced from `SPEC-auth-login-logout.md` §8.2). `SPEC-tests.md` should be updated once tests exist.
 3. **`data.sql` payment rows are placeholder Stripe IDs** (`cus_AlexTan001`, `pm_AlexTan001card`, etc.) — they exercise the DB-lookup code paths (e.g. `chargeBalanceOffSession`'s deposit-payment lookup) but will not work against the real Stripe API, since they aren't real Stripe objects. Genuine off-session testing requires running the real deposit flow first to mint real `cus_`/`pm_` IDs.
-4. **No Booking SPEC file yet** — the Booking module (`BookingController`/`BookingService`/`CurrentUserService`) that this feature depends on for a pre-existing `Booking` row isn't documented as its own SDD; §7.4/§7.5 here partially cover it for the fields/queries this feature added, but the create/read/list endpoints themselves aren't specced.
-5. **React frontend not implemented** — only documented as a handoff spec in `FRONTEND_CHANGES.md`. The frontend's simulated auth (never validated server-side) also blocks real end-to-end browser testing until real login is wired up.
+4. **No Booking SPEC file yet, and no create endpoint at all.** The Booking module this feature depends on for a pre-existing `Booking` row is now `develop`'s (not this branch's own) — `BookingController`/`BookingService` are read/update-only (`GET /api/bookings`, `GET /api/bookings/{id}`, `PUT /api/bookings/{id}`; see [`SPEC-api-index.md`](./SPEC-api-index.md) §2.2 and [`SPEC-booking-delivery-return-api.md`](./SPEC-booking-delivery-return-api.md)). **There is no `POST /api/bookings`.** This means there is currently no real way to obtain a `bookingId` to pass to `POST /api/payments/deposit-intent` outside of the rows already seeded in `data.sql` — the entire deposit flow is blocked end-to-end on this gap, independent of anything else in this document.
+5. **`Booking.paidStatus` was removed, and this feature's code hasn't been reconciled with what replaced it.** During the 2026-08-11 rebase onto `develop`, it surfaced that a `develop` commit (`8bdf067`, "remove paidStatus, amend bookingStatus") had already deleted the separate `Booking.PaidStatus` field (`UNPAID`/`DEPOSIT`/`FULL`) this feature was built against, folding payment state into `BookingStatus` instead (`PENDING_DEPOSIT` → `PENDING_CONFIRMED` → `CONFIRMED` → ...). Per explicit direction, `develop`'s model won and this feature's `paidStatus` usages were deleted rather than the field being reinstated — each removal is marked `// TODO(stripe-refactor)` in code. Concretely, as of this rebase:
+   - **`createDepositPaymentIntent` has no re-initiation guard.** Requirement 1.2's `409 Conflict` on an already-paid booking (`PaymentService.java`, previously `if (booking.getPaidStatus() != UNPAID)`) is gone. Calling `deposit-intent` repeatedly on the same booking will create duplicate `PaymentIntent`s and `Payment` rows today.
+   - **A successful payment no longer updates the booking.** Requirement 2.2's `Booking.paidStatus → DEPOSIT`/`→ FULL` transitions (`PaymentWebhookService.applySucceeded`) and Requirement 3.2's equivalent in `PaymentService.chargeBalanceOffSession` are both gone. A paid deposit updates the `Payment` row only; the `Booking` row's status is untouched.
+   - **The daily balance-charge cron (§2.3, Requirement 3) is disabled.** `BalanceChargeSchedulerService.chargeBalancesDueTomorrow()`'s sweep query depended on the same removed field (`findByStartDateAndPaidStatusAndStatusNot`, itself deleted from `BookingRepository`); the method is stubbed to always find zero bookings. `processOne(bookingId)` still runs and still does the actual off-session charge if invoked directly (its own `paidStatus` guard was also removed, not replaced), so manual/test invocation per §11.1 still exercises the charge logic — it just never fires automatically.
+   - **Follow-up work, not done here:** rebuild these three behaviors against `Booking.BookingStatus` instead of a separate `paidStatus` (e.g., guard on `status == PENDING_DEPOSIT`, transition to `PENDING_CONFIRMED`/`CONFIRMED` on success, requery the cron's sweep off `BookingStatus`) — this was deliberately deferred rather than done as part of reconciling the rebase, so it hasn't happened yet.
+6. **React frontend not implemented** — see §12 for exactly what needs to change and why it's currently blocked on gap #4 above. The frontend's simulated auth (never validated server-side against this backend) also blocks real end-to-end browser testing until real login is exercised against a running instance of this API.
+7. **CORS is not configured** on this backend at all (no `CorsConfigurationSource` bean anywhere) — blocks browser-based frontend calls to *any* route, not just payments. See [`SPEC-api-index.md`](./SPEC-api-index.md) §2.4 for the full note; repeated here because it directly blocks §12's frontend work.
 
 ---
 
@@ -393,15 +399,17 @@ The two `boolean` columns use an explicit `columnDefinition` with a `default fal
 
 ### 11.1 Checklist
 
-- [ ] `./mvnw clean compile` from `heavy-rental-spring-rest-api/` builds clean
-- [ ] Deposit: create a booking, call `POST /api/payments/deposit-intent`, confirm with Stripe test card `4242 4242 4242 4242` via Stripe.js, confirm `Payment.status → SUCCESS` and `Booking.paidStatus → DEPOSIT` after the webhook fires
-- [ ] Deposit re-call after success → `409`
+**Updated 2026-08-11 — three items below are struck through and replaced.** They asserted behavior against the now-removed `Booking.paidStatus` field (§10 item 5) and can no longer pass as originally written; each has a note on what to check instead until the deferred refactor happens.
+
+- [x] `./mvnw clean compile` from `heavy-rental-spring-rest-api/` builds clean — verified 2026-08-11 post-rebase, plus `./mvnw test` (existing `AuthenticationIntegrationTest`/`RestApiApplicationTests`) against a live Postgres
+- [ ] Deposit: create a booking, call `POST /api/payments/deposit-intent`, confirm with Stripe test card `4242 4242 4242 4242` via Stripe.js, confirm `Payment.status → SUCCESS` ~~and `Booking.paidStatus → DEPOSIT`~~ after the webhook fires. *(Updated: only the `Payment` row transition is checkable today — the `Booking` side no-ops, see §10 item 5.)*
+- [ ] ~~Deposit re-call after success → `409`~~ *(Updated: this guard was removed, not replaced — re-calling `deposit-intent` on an already-paid booking today creates a duplicate `PaymentIntent`/`Payment` instead of a `409`. Blocked until §10 item 5's refactor.)*
 - [ ] Deposit call by a non-owner, non-admin → `403`
 - [ ] Webhook with a bad/missing signature → `400`, no state change
 - [ ] Webhook redelivery of an already-applied event → no-op, confirmed via unchanged `updated`/`paidAt` timestamps
-- [ ] Cron: set a booking's `start_date` to tomorrow, `paid_status` to `DEPOSIT` with a real saved payment method, trigger `chargeBalancesDueTomorrow()` manually, confirm the balance charge succeeds and `Booking.paidStatus → FULL`
-- [ ] Cron failure path: use a Stripe off-session-decline test payment method, confirm `Payment.requiresManualFollowUp` / `Booking.needsManualFollowUp` are set and a second manual invocation does **not** retry
-- [ ] Cron double-run: invoke `chargeBalancesDueTomorrow()` twice in a row for the same booking, confirm no duplicate `BALANCE` `Payment` row is created
+- [ ] ~~Cron: set a booking's `start_date` to tomorrow, `paid_status` to `DEPOSIT` with a real saved payment method, trigger `chargeBalancesDueTomorrow()` manually, confirm the balance charge succeeds and `Booking.paidStatus → FULL`~~ *(Updated: `chargeBalancesDueTomorrow()`'s sweep query is stubbed to always find zero bookings — see §10 item 5. To exercise the actual charge logic today, call `BalanceChargeSchedulerService.processOne(bookingId)` directly instead of the cron entry point; the `Booking.remainingBalance → 0` transition still works, `paidStatus → FULL` does not, since that field no longer exists.)*
+- [ ] Cron failure path: use a Stripe off-session-decline test payment method, confirm `Payment.requiresManualFollowUp` / `Booking.needsManualFollowUp` are set and a second manual invocation does **not** retry (still applies to `processOne` directly)
+- [ ] Cron double-run: invoke `processOne(bookingId)` twice in a row for the same booking, confirm no duplicate `BALANCE` `Payment` row is created
 
 ### 11.2 Automated tests
 
@@ -422,8 +430,42 @@ curl -s -X POST http://localhost:8080/api/payments/deposit-intent \
 
 ---
 
-## 12. Change control
+## 12. Frontend integration (`heavy-rental-react-web-portal`)
+
+This section replaces the `FRONTEND_CHANGES.md` handoff doc referenced by earlier versions of this spec's header table, which was written but never actually committed to this repo. Written in-file instead, since that's the only copy that's ever existed.
+
+### 12.1 Current state — checkout is 100% client-simulated
+
+Nothing in the frontend's checkout flow calls this backend today:
+
+- `src/features/checkout/payment.ts` — `SimulatedPayment` and `generateFakePaymentIntentId()` fabricate a fake `pi_...` id entirely client-side, explicitly as "a client-side-only stand-in... never sent anywhere" per that file's own comment.
+- `src/features/checkout/DepositCheckout.tsx` — `handlePay()` uses `setTimeout` to fake a processing delay, and a hardcoded test-decline card number (`4000000000000002`) to simulate a failure, mirroring Stripe's own `4000...0002` convention without calling Stripe at all.
+
+The frontend's auth flow, by contrast, **is** already wired for real (§12.2) — it's specifically the payment step that remains simulated.
+
+### 12.2 What's already correct and needs no change
+
+`src/app/api.ts`'s `login()` already implements this spec's exact interim → login sequence (`GET /api/auth/getBearerToken` as plain text → `POST /api/auth/login` with that as Bearer → `LoginResponse`), and `request()` already injects `Authorization: Bearer <token>` on every call once `setAuthToken()` has been called after login. Any new `paymentApi.*` call added per §12.3 gets this for free — no new auth plumbing needed.
+
+### 12.3 What needs to change, concretely
+
+1. **`src/app/api.ts`** — add a `paymentApi.createDepositIntent(bookingId)` calling `POST /api/payments/deposit-intent` (via the existing `request()` helper), returning `{ clientSecret, paymentIntentId }` per §6.1.
+2. **`src/features/checkout/payment.ts`** — once §10 item 4 (booking creation) exists and returns a real `bookingId`, replace `generateFakePaymentIntentId()` with the real call from (1), and use the real `paymentIntentId`/`clientSecret` it returns instead of a fabricated one.
+3. **`src/features/checkout/DepositCheckout.tsx`** — replace `handlePay()`'s `setTimeout`-based fake processing and hardcoded decline card with actual Stripe.js: load `@stripe/stripe-js`, call `stripe.confirmPayment(clientSecret)` (or `confirmCardPayment`, depending on which Stripe.js integration pattern is chosen) against the real `clientSecret` from (1)/(2), and drive the existing `summary`/`payment`/`processing`/`failed` step states off Stripe's actual response instead of a timer.
+4. **Stripe publishable key** — `stripe.publishable.key` exists in this backend's `application.properties` (driven by `STRIPE_PUBLISHABLE_KEY`) but is **not consumed server-side at all** (§4.1) — it exists purely so this value can be read into the frontend's own build config. The frontend needs its own env var (e.g. `VITE_STRIPE_PUBLISHABLE_KEY`) carrying the same value; nothing currently wires this across the two repos, it has to be set independently in each.
+
+### 12.4 What blocks this today
+
+Two blockers, both outside this spec's own code, both already flagged in §10:
+
+- **No booking-creation endpoint (§10 item 4).** There is no way to turn a cart into a real `bookingId` via the API today. Until `POST /api/bookings` (or equivalent) exists on `develop`'s booking model, steps (2)/(3) above have no real booking to pay a deposit against outside of `data.sql`'s seeded rows.
+- **CORS is not configured (§10 item 7).** Once the above is unblocked, a browser calling this API cross-origin will still be rejected client-side with no `Access-Control-Allow-Origin` header until a `CorsConfigurationSource` bean is added — see [`SPEC-api-index.md`](./SPEC-api-index.md) §2.4.
+
+---
+
+## 13. Change control
 
 | Version | Date | Notes |
 |---------|------|--------|
 | 1.0.0 | 2026-08-06 | Initial as-built SPEC: deposit PaymentIntent creation, webhook (succeeded/failed), daily off-session balance-charge cron (02:00 Asia/Singapore, single-attempt failure policy, in-app-flag-only follow-up). Documents `PaymentService`, `PaymentWebhookService`, `BalanceChargeSchedulerService`, `StripeWebhookController`, `CurrentUserService`, and the `User`/`Payment`/`Booking` field additions. Not yet runtime-verified (§10). |
+| 1.1.0 | 2026-08-11 | Rebased branch `hr-27-payment-checkout` onto `develop` locally (not pushed). Per explicit direction, `develop`'s already-merged `Booking`/booking-endpoint model won every conflict; this feature's `Booking.paidStatus` usages were deleted (not reinstated) across `PaymentService`/`PaymentWebhookService`/`BalanceChargeSchedulerService`/`BookingRepository`, each marked `// TODO(stripe-refactor)` — see new §10 item 5 for the three concrete behavior changes this causes (no re-init guard, no booking-status transition on success, cron disabled). §10 items renumbered/expanded (booking-creation gap promoted to its own item 4; CORS gap added as item 7). §11.1 checklist updated to strike through and annotate the three assertions that depended on the removed field. New §12 added (frontend integration guidance, replacing the never-committed `FRONTEND_CHANGES.md` reference in the header table) covering current state, what's already correct, concrete required changes, and the two blockers (booking creation, CORS) preventing any of it from working end-to-end yet. Header table's `Status`/`Depends on`/`Environment context`/`Related docs` rows updated to match. Change control renumbered §12 → §13 accordingly. |
