@@ -44,7 +44,7 @@ When this feature is correct:
 
 - `SecurityConfig` changes — the existing catch-all `hasAnyAuthority("ROLE_USER","ROLE_ADMIN")` rule already covers these new routes.
 - Frontend changes — pointing the React portal's `VITE_API_TARGET` at this backend and swapping its mock `issueSession()` for a real `/api/auth/login` call live in the separate `heavy-rental-web-portal` repo.
-- Pagination, thumbnails, or a separate image-only endpoint — every `browse()` call returns full-size images inline for all matching assets (~1.3MB total across the 8 seeded images per `SPEC-seed-data.md` today; ~4.4MB once the planned 27-asset reseed lands — see `specification/temporary/data-seeding-spec`, still not yet executed as of this note). Acceptable up to that ~28-asset scale; flagged as a future concern if the catalog grows beyond it.
+- Pagination, thumbnails, or a separate image-only endpoint — every `browse()` call returns full-size images inline for all matching assets (~4.6MB total across the 27 seeded images per `SPEC-seed-data.md` §6.3, as of that spec's 2.0.0 reseed). Acceptable at this scale; flagged as a future concern if the catalog grows further.
 - An `AssetImage.mimeType` column — see §3.4.
 
 ---
@@ -130,7 +130,7 @@ Given `spring.jpa.open-in-view=false` (`application.properties`), every lazy ass
 
 Since transaction boundaries already have to be handled carefully for that reason, `browse()` batches rather than loops per-asset:
 
-- `AssetRepository.findAllWithCategory()` — `JOIN FETCH a.category` for the unfiltered path, avoiding one lazy load per row. Filtered paths (`findByCategoryId`, `findByNameContainingIgnoreCase`, `findByCondition`) still lazy-load `category` per row — acceptable at ≤28-asset scale (the planned post-reseed fleet size); worth batching if the catalog grows further.
+- `AssetRepository.findAllWithCategory()` — `JOIN FETCH a.category` for the unfiltered path, avoiding one lazy load per row. Filtered paths (`findByCategoryId`, `findByNameContainingIgnoreCase`, `findByCondition`) still lazy-load `category` per row — acceptable at the current 27-asset fleet size; worth batching if the catalog grows further.
 - `AssetImageRepository.findByAssetIdIn(assetIds)` — one query for all matching assets' images, collected in-memory into a `Map<assetId, AssetImage>` (each asset now has at most one image row — see §3.2.1).
 - `BookingItemRepository.findAssetIdsWithOverlappingBooking(assetIds, ...)` — one query for the whole result set's availability.
 
@@ -249,7 +249,7 @@ Same `EquipmentRequest` body. `PUT` replaces every field unconditionally; `PATCH
 
 - [ ] `./mvnw compile` (or `spring-boot:run`) builds with no errors.
 - [ ] No Bearer → `401` on every route.
-- [ ] `GET /api/equipment` with valid access token → `200`, 8 seeded assets, each `img` value starts with `data:image/jpeg;base64,`.
+- [ ] `GET /api/equipment` with valid access token → `200`, 27 seeded assets, each `img` value starts with `data:image/jpeg;base64,`.
 - [ ] An `img` value, base64-decoded after stripping the prefix, is a valid JPEG (including asset id 4 — previously the mislabeled PNG).
 - [ ] `GET /api/equipment/{id}?startDate=...&endDate=...` reflects real booking overlap (seeded `booking_items`/`bookings` data — see `SPEC-seed-data.md` §6.6/§6.7 — should show `available:false` for an asset/date window matching an active seeded booking).
 - [ ] `category=<unknown>` → `400`.
@@ -272,7 +272,7 @@ ACCESS=$(curl -s -X POST http://localhost:8080/api/auth/login \
   -H "Authorization: Bearer $INTERIM" -H "Content-Type: application/json" \
   -d '{"email":"alex.tan@example.sg","password":"customer123"}' | jq -r .accessToken)
 
-# browse -> confirm 8 assets, each img value starts with "data:image/jpeg;base64,"
+# browse -> confirm 27 assets, each img value starts with "data:image/jpeg;base64,"
 curl -s http://localhost:8080/api/equipment -H "Authorization: Bearer $ACCESS" | jq '.[0]'
 
 # confirm an image actually decodes to a real JPEG
@@ -322,3 +322,4 @@ Confirm the "Browse Equipment" cards render real photos directly from `img` with
 | 1.1.1 | 2026-08-09 | Added `location` to both `EquipmentRequest`/`EquipmentResponse` examples (§7.1, §7.3) and the `EquipmentRequest` DTO signature — a field added to `Asset`/both DTOs in this same PR that was missing from this spec's contract examples. No behavior change. |
 | 1.2.0 | 2026-08-11 | Doc-only corrections, no code change: (1) §2.2/§5 asset-count scale ceiling updated from 8 to a planned 16-asset fleet, and the stale "9 seeded images / ~1.85MB" figures (left over from before the CAT 320 second-photo removal already reflected in §3.2.1) corrected to the current 8-image/~1.3MB baseline, per review of `specification/temporary/data-seeding-spec` (not yet executed — the live fleet is still 8 assets as of this note). (2) §4.2/§9 corrected stale `PENDING` status wording to the actual `PENDING_DEPOSIT`/`PENDING_CONFIRMED` split from `HR-77` — the code (`AssetService.ACTIVE_BOOKING_STATUSES`) was already correct, only this doc's prose was stale. The §8 QA checklist/curl script's literal "8 seeded assets" text is intentionally left as-is until the reseed actually executes and `SPEC-seed-data.md` is updated to match. |
 | 1.3.0 | 2026-08-11 | `specification/temporary/data-seeding-spec` revised again (still not executed): the planned fleet target grew from 16 to 27 assets, to give every category's spec-band real coverage instead of leaving most bands empty. §2.2/§5 scale-ceiling wording and image-size estimate updated accordingly (16→28-asset ceiling, ~2.6MB→~4.4MB). No other change. |
+| 1.4.0 | 2026-08-11 | The planned reseed executed: `data.sql` now seeds 27 assets (up from 8), per `SPEC-seed-data.md` 2.0.0. §2.2/§5 updated from planned/ceiling language to the actual current numbers (27 assets, ~4.6MB embedded images). §8 QA checklist and curl script's "8 seeded assets" updated to 27 — no longer deferred, since the fleet this doc describes is now real. `specification/temporary/data-seeding-spec`/`design.md` removed as part of the same change (their content is now durably captured in `SPEC-seed-data.md`). No code change. |
