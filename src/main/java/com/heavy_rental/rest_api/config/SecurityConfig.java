@@ -74,7 +74,9 @@ public class SecurityConfig {
 				.requestMatchers(HttpMethod.POST, "/api/auth/logout")
 					.hasAnyAuthority("ROLE_USER", "ROLE_ADMIN")
 				.requestMatchers("/error").permitAll()
-				.requestMatchers("/actuator/health", "/actuator/info").permitAll()
+						.requestMatchers("/actuator/health", "/actuator/info").permitAll()
+						.requestMatchers("/api/monthly-utilization").hasAuthority("ROLE_ADMIN")
+
 				.anyRequest().hasAnyAuthority("ROLE_USER", "ROLE_ADMIN"))
 			.oauth2ResourceServer(oauth2 -> oauth2
 				.jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter()))
