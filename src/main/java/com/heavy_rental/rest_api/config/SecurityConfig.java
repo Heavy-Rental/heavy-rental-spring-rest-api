@@ -3,6 +3,7 @@ package com.heavy_rental.rest_api.config;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import javax.crypto.SecretKey;
@@ -14,7 +15,6 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.security.authentication.AuthenticationManager;
-import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
@@ -37,6 +37,9 @@ import org.springframework.security.oauth2.server.resource.authentication.JwtGra
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.AccessDeniedHandler;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 import com.heavy_rental.rest_api.security.TokenDenylist;
 
@@ -45,19 +48,22 @@ import tools.jackson.databind.ObjectMapper;
 
 @Configuration
 @EnableWebSecurity
-@EnableConfigurationProperties(JwtProperties.class)
+@EnableConfigurationProperties({JwtProperties.class, CorsProperties.class})
 public class SecurityConfig {
 
 	private final ObjectMapper objectMapper;
 	private final JwtProperties jwtProperties;
+	private final CorsProperties corsProperties;
 	private final TokenDenylist tokenDenylist;
 
 	public SecurityConfig(
 			ObjectMapper objectMapper,
 			JwtProperties jwtProperties,
+			CorsProperties corsProperties,
 			TokenDenylist tokenDenylist) {
 		this.objectMapper = objectMapper;
 		this.jwtProperties = jwtProperties;
+		this.corsProperties = corsProperties;
 		this.tokenDenylist = tokenDenylist;
 	}
 
@@ -65,7 +71,7 @@ public class SecurityConfig {
 	SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
 		http
 			.csrf(csrf -> csrf.disable())
-			.cors(Customizer.withDefaults())
+			.cors(cors -> cors.configurationSource(corsConfigurationSource()))
 			.sessionManagement(session -> session
 				.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
 			.authorizeHttpRequests(auth -> auth
@@ -87,6 +93,22 @@ public class SecurityConfig {
 				.accessDeniedHandler(restAccessDeniedHandler()));
 
 		return http.build();
+	}
+
+	@Bean
+	CorsConfigurationSource corsConfigurationSource() {
+		CorsConfiguration configuration = new CorsConfiguration();
+		// No wildcard origin: this API takes Authorization-header Bearer tokens, and an
+		// explicit origin list (not "*") is required the moment a request needs anything
+		// beyond a fully public, unauthenticated GET. See app.cors.allowed-origins.
+		configuration.setAllowedOrigins(corsProperties.allowedOrigins());
+		configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
+		configuration.setAllowedHeaders(List.of("Authorization", "Content-Type"));
+		configuration.setMaxAge(3600L);
+
+		UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+		source.registerCorsConfiguration("/api/**", configuration);
+		return source;
 	}
 
 	@Bean
