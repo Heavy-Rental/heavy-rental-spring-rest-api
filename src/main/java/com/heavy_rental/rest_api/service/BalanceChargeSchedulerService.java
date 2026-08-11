@@ -1,5 +1,6 @@
 package com.heavy_rental.rest_api.service;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -32,15 +33,11 @@ public class BalanceChargeSchedulerService {
         this.paymentService = paymentService;
     }
 
-    // TODO(stripe-refactor): the sweep query this relied on (bookings starting tomorrow,
-    // deposit paid, not cancelled) was built on the now-removed Booking.paidStatus field
-    // (develop folded payment state into BookingStatus instead — see 8bdf067). Disabled
-    // until this is rebuilt against Booking.BookingStatus; processOne() below is kept
-    // (with its own paidStatus guard removed) for manual invocation/testing in the
-    // meantime, per SPEC-stripe.md's verification checklist.
     @Scheduled(cron = "0 0 2 * * *", zone = "Asia/Singapore")
     public void chargeBalancesDueTomorrow() {
-        List<Booking> due = List.of();
+        LocalDate tomorrow = LocalDate.now().plusDays(1);
+        List<Booking> due = bookingRepository.findByStartDateAndStatusIn(
+                tomorrow, List.of(Booking.BookingStatus.PENDING_CONFIRMED));
 
         // Each booking is its own transaction (see processOne) so one failure can't abort the batch.
         for (Booking booking : due) {

@@ -65,12 +65,11 @@ public class PaymentWebhookService {
         payment.setStripeChargeId(intent.getLatestCharge());
         paymentRepository.save(payment);
 
-        // TODO(stripe-refactor): this used to set the now-removed Booking.paidStatus to
-        // DEPOSIT/FULL here (develop folded payment state into BookingStatus instead — see
-        // 8bdf067). Transition Booking.status to its develop-model equivalent once this
-        // flow is reconciled with that model.
         Booking booking = payment.getBooking();
-        if (payment.getPaymentType() == Payment.PaymentType.BALANCE) {
+        if (payment.getPaymentType() == Payment.PaymentType.DEPOSIT) {
+            booking.setStatus(Booking.BookingStatus.PENDING_CONFIRMED);
+        } else if (payment.getPaymentType() == Payment.PaymentType.BALANCE) {
+            booking.setStatus(Booking.BookingStatus.CONFIRMED);
             booking.setRemainingBalance(BigDecimal.ZERO);
         }
         bookingRepository.save(booking);

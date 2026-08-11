@@ -55,10 +55,13 @@ public class PaymentService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Booking not found"));
         currentUserService.assertOwnerOrAdmin(jwt, booking.getCustomer());
 
-        // TODO(stripe-refactor): this used to guard against re-initiating an already-paid
-        // deposit via the now-removed Booking.paidStatus field (develop folded payment state
-        // into BookingStatus instead — see 8bdf067). Re-add an equivalent guard against
-        // Booking.BookingStatus once this flow is reconciled with that model.
+        boolean depositAlreadyInitiatedOrPaid = paymentRepository.findByBookingId(bookingId).stream()
+                .anyMatch(p -> p.getPaymentType() == Payment.PaymentType.DEPOSIT
+                        && p.getStatus() != Payment.PaymentStatus.FAIL);
+        if (depositAlreadyInitiatedOrPaid) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Booking deposit has already been initiated or paid");
+        }
 
         String stripeCustomerId = resolveOrCreateStripeCustomer(booking.getCustomer());
 
@@ -138,9 +141,7 @@ public class PaymentService {
             if ("succeeded".equals(intent.getStatus())) {
                 balancePayment.setStatus(Payment.PaymentStatus.SUCCESS);
                 balancePayment.setPaidAt(LocalDateTime.now());
-                // TODO(stripe-refactor): used to also set the now-removed Booking.paidStatus
-                // to FULL here. Transition Booking.status to its develop-model equivalent
-                // once this flow is reconciled with BookingStatus (see 8bdf067).
+                booking.setStatus(Booking.BookingStatus.CONFIRMED);
                 booking.setRemainingBalance(BigDecimal.ZERO);
                 bookingRepository.save(booking);
             }
