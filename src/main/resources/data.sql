@@ -18,7 +18,8 @@ INSERT INTO users (id, name, password, email, company, role, enabled, created_at
   (3, 'Ravi Kumar', '$2a$10$2b9rJGeTNNaTx3Qo0YFuJO0ax4fCAwgzvATjztZTg/HNJCI9//dfO', 'ravi.kumar@example.sg', NULL,               'ADMIN',  true, '2026-01-05 09:00:00'),
   (4, 'Ah Tan',     '$2a$10$/Hrb7byw5a9ya.54mddREu1UuPWQ0gIS/gjci/pSyJmYHqT6S.fpK', 'ah.tan@example.sg',     NULL,               'DRIVER', true, '2026-01-05 09:00:00'),
   (5, 'Mei Ling',   '$2a$10$Iv73UJNt6A4WyteXiqlfROtFFKPrOIZCvQjc6jQ.ubA1Itj1vjuoS', 'mei.ling@example.sg',   'Ling Builders',    'USER',   true, '2026-08-11 09:00:00'),
-  (6, 'Farid Rahman','$2a$10$on8F4.i73nPbHVYmJMWSgORgommvMQAFAEXw8d4IQ95.C7DMy4DEa','farid.rahman@example.sg', NULL,              'USER',   true, '2026-08-11 09:00:00')
+  (6, 'Farid Rahman','$2a$10$on8F4.i73nPbHVYmJMWSgORgommvMQAFAEXw8d4IQ95.C7DMy4DEa','farid.rahman@example.sg', NULL,              'USER',   true, '2026-08-11 09:00:00'),
+  (7, 'Mei Lin',    '$2a$10$TM3IZGiEkuUTq/VJKWod7OHUb/sqRI3GWUvCcfeQr6u7fkpONI5dm', 'mei.lin@example.sg',   'Lin Builders',      'USER',   true, '2026-01-05 09:00:00')
 ON CONFLICT (id) DO UPDATE SET
   name = EXCLUDED.name,
   password = EXCLUDED.password,
@@ -135,13 +136,13 @@ SELECT setval(pg_get_serial_sequence('asset_images', 'id'), COALESCE((SELECT MAX
 -- ============================================================
 -- 4. rental_plan
 -- ============================================================
-INSERT INTO rental_plan (id, customer_id, start_date, end_date, total_amount, status, site_address, site_postal_code, created_at, updated_at) VALUES
-  (1, (SELECT id FROM users WHERE name = 'Alex Tan'), '2026-08-20', '2026-08-25', 1050.00, 'DRAFT',    '88 Tuas South Ave 3',              'S(637311)', '2026-08-01 09:00:00', '2026-08-01 09:00:00'),
-  (2, (SELECT id FROM users WHERE name = 'Alex Tan'), '2026-08-18', '2026-08-22', 480.00,  'SAVED',    '15 Pioneer Sector 1',              'S(628413)', '2026-08-02 10:00:00', '2026-08-02 10:00:00'),
-  (3, (SELECT id FROM users WHERE name = 'Alex Tan'), '2026-09-01', '2026-09-05', 1440.00, 'QUOTEED',  '20 Jurong Port Road',              'S(619094)', '2026-08-03 11:00:00', '2026-08-03 15:00:00'),
-  (4, (SELECT id FROM users WHERE name = 'Alex Tan'), '2026-07-20', '2026-07-22', 900.00,  'CONVERTED','12 Commercial Avenue, Marina South','S(018982)', '2026-07-15 10:30:00', '2026-07-15 10:30:00'),
-  (5, (SELECT id FROM users WHERE name = 'Alex Tan'), '2026-08-10', '2026-08-14', 1440.00, 'CONVERTED','20 Jurong Port Road',              'S(619094)', '2026-08-01 09:00:00', '2026-08-01 09:00:00'),
-  (6, (SELECT id FROM users WHERE name = 'Alex Tan'), '2026-10-05', '2026-10-09', 2400.00, 'DRAFT',    '5 Tampines Industrial Ave',        'S(528896)', '2026-08-04 09:00:00', '2026-08-04 09:00:00')
+INSERT INTO rental_plan (id, customer_id, start_date, end_date, total_amount, status, site_address, site_postal_code, created_at, updated_at, version) VALUES
+  (1, (SELECT id FROM users WHERE name = 'Alex Tan'), '2026-08-20', '2026-08-25', 1050.00, 'DRAFT',    '88 Tuas South Ave 3',              'S(637311)', '2026-08-01 09:00:00', '2026-08-01 09:00:00', 0),
+  (2, (SELECT id FROM users WHERE name = 'Alex Tan'), '2026-08-18', '2026-08-22', 480.00,  'SAVED',    '15 Pioneer Sector 1',              'S(628413)', '2026-08-02 10:00:00', '2026-08-02 10:00:00', 0),
+  (3, (SELECT id FROM users WHERE name = 'Alex Tan'), '2026-09-01', '2026-09-05', 1440.00, 'QUOTED',   '20 Jurong Port Road',              'S(619094)', '2026-08-03 11:00:00', '2026-08-03 15:00:00', 0),
+  (4, (SELECT id FROM users WHERE name = 'Alex Tan'), '2026-07-20', '2026-07-22', 900.00,  'CONVERTED','12 Commercial Avenue, Marina South','S(018982)', '2026-07-15 10:30:00', '2026-07-15 10:30:00', 0),
+  (5, (SELECT id FROM users WHERE name = 'Alex Tan'), '2026-08-10', '2026-08-14', 1440.00, 'CONVERTED','20 Jurong Port Road',              'S(619094)', '2026-08-01 09:00:00', '2026-08-01 09:00:00', 0),
+  (6, (SELECT id FROM users WHERE name = 'Alex Tan'), '2026-10-05', '2026-10-09', 2400.00, 'DRAFT',    '5 Tampines Industrial Ave',        'S(528896)', '2026-08-04 09:00:00', '2026-08-04 09:00:00', 0)
 ON CONFLICT (id) DO NOTHING;
 
 -- Sync sequence so runtime inserts don't collide with the explicit ids above

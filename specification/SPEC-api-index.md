@@ -5,7 +5,7 @@
 | **Document type** | Cross-cutting index — not a feature contract itself |
 | **Status** | As-built across `develop` (which now includes both former `HR-72` and `HR-80` work — see §3.1) + two branches merged in locally: `hr-27-payment-checkout` (§2.5) and `hr-40-equipment-utilization-tracker` (§2.4, this branch) |
 | **Module** | `heavy-rental-spring-rest-api` |
-| **Related specs** | [`SPEC-request-bearer-token.md`](./SPEC-request-bearer-token.md), [`SPEC-auth-login-logout.md`](./SPEC-auth-login-logout.md), [`SPEC-equipment-browse-api.md`](./SPEC-equipment-browse-api.md), [`SPEC-entity-repository.md`](./SPEC-entity-repository.md), [`SPEC-stripe.md`](./SPEC-stripe.md) |
+| **Related specs** | [`SPEC-request-bearer-token.md`](./SPEC-request-bearer-token.md), [`SPEC-auth-login-logout.md`](./SPEC-auth-login-logout.md), [`SPEC-equipment-browse-api.md`](./SPEC-equipment-browse-api.md), [`SPEC-entity-repository.md`](./SPEC-entity-repository.md) |
 | **Environment context** | [`SPEC-project-environment.md`](./SPEC-project-environment.md) (read first) |
 
 This document is the **single place to see the entire REST surface** — every route, which client it's for, what branch it lives on, and which feature spec (if any) owns its detailed contract. It does not restate request/response shapes already documented elsewhere; it points to them.
@@ -83,7 +83,7 @@ Server-side behavior, in order:
 
 ### 2.3 Web — equipment browse, depots, rental plans
 
-Per branch author: every route in this section is for the **web** client. **Corrected 2026-08-11:** this section previously said none of these routes existed in the working tree and that they lived only on `origin/HR-72-add-browse-equipment-to-rest-api`, unmerged. That was already stale when written — `HR-72`'s work merged into `develop` via commit `692ece6` ("include the relevant class to link browse equipment to the web portal", PR #12), *before* `HR-80` (`c081ee1`) landed on top of it. `EquipmentController`, `DepotController`, and `RentalPlanController` are all live on `develop` today, confirmed directly against the tree.
+Per branch author: every route in this section is for the **web** client. **None of this section exists in the current working tree** — `EquipmentController`, `DepotController`, and `RentalPlanController` all live only on `origin/HR-72-add-browse-equipment-to-rest-api`, which diverged from `develop` at the same commit `HR-80` did (`584346f`, "HR-66 Populating Data") and has not been merged either direction.
 
 | Method | Path | Roles allowed | Status | Contract |
 |---|---|---|---|---|
@@ -98,28 +98,20 @@ Per branch author: every route in this section is for the **web** client. **Corr
 
 No per-route restriction distinguishes admin-only write access on the equipment routes — any authenticated `ROLE_USER` or `ROLE_ADMIN` can create/edit/delete equipment, not just admins. Same blanket-rule caveat as everywhere else in this index (see §4).
 
-### 2.4 Admin — operations dashboard
-
-Per branch author: this route is for the **admin operations portal** (Overview tab). No other admin routes exist in the current working tree — the Users tab (`UserController`) is separate, unmerged work on a teammate's branch, not covered by this index yet.
-
-| Method | Path | Client | Roles allowed | Status | Contract |
-|---|---|---|---|---|---|
-| `GET` | `/api/monthly-utilization` | Admin | `ROLE_ADMIN` only (not `ROLE_USER`) | 🔀 Branch `hr-40-equipment-utilization-tracker` (this branch) | None — no dedicated feature spec yet; see [`CHANGES-monthly-utilization.md`](./CHANGES-monthly-utilization.md) for design and verification detail |
-
-Returns trailing 6 calendar months (oldest → newest) of `{id, month, utilization, revenue}` for the Overview tab's revenue chart and utilization stat. Verified accurate against raw `Payment`/`BookingItem`/`Asset` data (independent recomputation, all 6 months matched exactly) and confirmed end-to-end through the real web portal. Not yet committed as of this writing.
-
-### 2.5 Local, unpushed — `hr-27-payment-checkout`
+### 2.4 Local, unpushed — `hr-27-payment-checkout`
 
 This branch (see §2.2's payments rows) exists only on the machine it was rebased on as of 2026-08-11 — 8 commits ahead of `origin/hr-27-payment-checkout`, not pushed, not merged. It carries `develop`'s full route set (§2.1–§2.3) unchanged, plus the two payments routes and one fix made directly on this branch (CORS, below), not on `develop`. Two things worth knowing before treating this as equivalent to a `develop` merge:
 
 - **CORS fixed 2026-08-11.** `SecurityConfig` now wires a real `CorsConfigurationSource` bean (`.cors(cors -> cors.configurationSource(corsConfigurationSource()))`, replacing the previous no-op `.cors(Customizer.withDefaults())`), scoped to `/api/**`, allowing `GET/POST/PUT/PATCH/DELETE/OPTIONS` and the `Authorization`/`Content-Type` headers. Allowed origins are configurable via `app.cors.allowed-origins` / `APP_CORS_ALLOWED_ORIGINS` (new `CorsProperties` record, comma-separated), defaulting to `http://localhost:5173,http://localhost:4173` (Vite dev/preview) for local development. **Deliberately no wildcard origin default** — deployment must set `APP_CORS_ALLOWED_ORIGINS` to the real deployed frontend origin(s); nothing here guesses that value. Verified directly against a running instance: a preflight `OPTIONS /api/equipment` from an allowed origin returns `200` with `Access-Control-Allow-Origin` set; from a disallowed origin it returns a flat `403 Invalid CORS request`, rejected by the CORS filter before Spring Security's auth layer even runs.
 - `Booking.paidStatus` was deleted from this branch during the rebase (a `develop` commit, `8bdf067`, had already removed it and folded payment state into `BookingStatus` instead — this branch's Stripe code hadn't caught up). Payment endpoints in §2.2 work, but several state transitions they used to perform no longer happen — see [`SPEC-stripe.md`](./SPEC-stripe.md) §10 for the specifics.
 
-### 2.6 Planned, not started
+### 2.5 Planned, not started
 
 | Item | Status | Notes |
 |---|---|---|
 | `platform` attribute on `LoginRequest` | ⏳ Not started | Branch `HR-85-implement-platform-attribute-in-login-request-body` exists but has **zero commits beyond `HR-77`** — it's an unstarted placeholder, not a design that's been written down anywhere yet. Likely the intended mechanism for distinguishing web vs mobile at login (see §4) once work begins. |
+| `POST` `/api/pricing/estimate` | ⏳ Not started | Proxies FastAPI for a pre-cart price preview. Auth is an open decision (likely public, unlike every other route in this table) — see [`SPEC-spring-proxy-endpoints.md`](./SPEC-spring-proxy-endpoints.md) §2. |
+| `POST` `/api/recommendations` | ⏳ Not started | Proxies FastAPI's `from-project-spec` recommendation call. Not a thin passthrough — Spring must authenticate the caller and inject the real customer id itself, since FastAPI trusts an unvalidated `user_id` field. See [`SPEC-spring-proxy-endpoints.md`](./SPEC-spring-proxy-endpoints.md) §3. |
 
 ---
 
@@ -178,4 +170,3 @@ Moved to [`SPEC-booking-delivery-return-api.md`](./SPEC-booking-delivery-return-
 | 1.3.0 | 2026-08-11 | `hr-27-payment-checkout` rebased onto `develop` locally (§2.4, new). Corrected two stale claims found in the process (§3.2, new): `HR-72` and `HR-80` are both already merged into `develop` (§2.2/§2.3 status columns updated from `🔀 Branch HR-80`/`🔀 Branch HR-72` to `✅ Merged → develop` throughout), not the unmerged sibling branches this index previously described. §2.2's payments row replaced: `POST /api/payments/create-payment-intent` (`HR-60`, client-supplied amount, no owning spec) no longer exists anywhere in the codebase as of this rebase — replaced by `POST /api/payments/deposit-intent` and `POST /api/payments/webhook`, now documented in full by [`SPEC-stripe.md`](./SPEC-stripe.md) (added to `Related specs` above; this index previously didn't reference it at all). Added the CORS-not-configured blocker and the booking-creation gap, both cross-cutting concerns affecting the whole route surface rather than one feature, so they belong here rather than only in `SPEC-stripe.md`. |
 | 1.4.0 | 2026-08-11 | **CORS blocker (§2.4) fixed on this branch.** Added `CorsProperties` (`config/CorsProperties.java`, `app.cors.allowed-origins`/`APP_CORS_ALLOWED_ORIGINS`, comma-separated, default `http://localhost:5173,http://localhost:4173`) and a real `CorsConfigurationSource` bean in `SecurityConfig`, replacing the previous no-op `.cors(Customizer.withDefaults())`. Scoped to `/api/**`; allows `GET/POST/PUT/PATCH/DELETE/OPTIONS` and `Authorization`/`Content-Type` headers; no wildcard origin. Verified against a running instance, not just compiled: allowed-origin preflight returns `200` with `Access-Control-Allow-Origin`, disallowed-origin preflight returns `403`. §2.4's CORS bullet updated from "not configured" to describe the fix; the paidStatus gap in the same section is unaffected and still open. |
 | 1.5.0 | 2026-08-11 | **Booking-creation gap (§2.2) closed.** `POST /api/bookings` implemented — new §2.2.1 documents the full contract (request/response shapes, server-side validation order, availability-conflict check reusing `AssetService`'s own `Booking.ACTIVE_STATUSES` — promoted from a private `AssetService` constant to a shared field on `Booking` so the two can't drift — and the 30%/70% deposit split `SPEC-stripe.md` §4.3 already assumed lived here). `BookingResponse` extended with `totalAmount`/`depositAmount`/`remainingBalance` (additive, non-breaking for existing `GET`/`PUT` consumers). Verified end-to-end against a running instance: created a real booking, fed its real `bookingId` into `POST /api/payments/deposit-intent`, confirmed every layer up to the actual Stripe API call is correctly wired (fails only on the placeholder API key). Also found and fixed, while verifying: `data.sql` seeds 12 of 13 tables with explicit primary keys and no matching `setval(...)` sequence sync (only `users` had one) — the first runtime `IDENTITY`-generated insert on any of those tables collided with an already-seeded row. This silently broke `POST /api/equipment` too (§2.3, already merged to `develop`), confirmed by reproducing the failure on both endpoints before the fix and re-testing both after. |
-| 1.6.0 | 2026-08-11 | Merged `develop` (which had picked up 1.3.0–1.5.0 above via `HR-27 Payment Checkout`, PR #21) into `hr-40-equipment-utilization-tracker`. Both branches had independently added their own new "§2.4" — reconciled by keeping this branch's "Admin — operations dashboard" (`GET /api/monthly-utilization`) as §2.4, shifting `hr-27-payment-checkout`'s "Local, unpushed" section to §2.5, and "Planned, not started" to §2.6. Fixed two now-stale `§2.4` cross-references (header table, §3.2) to point to §2.5. Section-number references inside the 1.3.0–1.5.0 entries above still say `§2.4`, referring to what was §2.4 at the time each was written — left as historical record, not rewritten, consistent with how this table already treats past renumbering (see 1.1.0/1.2.0). |

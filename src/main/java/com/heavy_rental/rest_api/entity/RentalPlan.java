@@ -16,12 +16,15 @@ import java.time.LocalDateTime;
 public class RentalPlan {
   
   public enum PlanStatus {
-    DRAFT, SAVED, QUOTEED, CONVERTED
+    DRAFT, SAVED, QUOTED, CONVERTED
   }
 
   @Id
   @GeneratedValue(strategy = GenerationType.IDENTITY)
   private Long id;
+
+  @Version
+  private Long version;
 
   @ManyToOne(fetch = FetchType.LAZY)
   @JoinColumn(name = "customer_id", nullable = false)

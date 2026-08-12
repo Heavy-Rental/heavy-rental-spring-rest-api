@@ -63,7 +63,7 @@ Every table below (except `users`) had no data and no admin UI to create rows th
 
 ## 6. Seed data by table
 
-### 6.0 `users` (6 rows)
+### 6.0 `users` (7 rows)
 
 | id | name | email | role | password (plaintext, dev-only) |
 |---|---|---|---|---|
@@ -73,6 +73,7 @@ Every table below (except `users`) had no data and no admin UI to create rows th
 | 4 | Ah Tan | ah.tan@example.sg | DRIVER | `driver123` |
 | 5 | Mei Ling | mei.ling@example.sg | USER | `customer234` (added 2.0.0 — new bookings needed more than one customer) |
 | 6 | Farid Rahman | farid.rahman@example.sg | USER | `customer345` (added 2.0.0) |
+| 7 | Mei Lin | mei.lin@example.sg | USER | `customer456` — added to close the `SPEC-rental-plan-quote.md` §6.1 testing gap: a second customer with zero `rental_plan` rows, so "create succeeds with no active plan" is finally exercisable. |
 
 All passwords are stored as `BCryptPasswordEncoder` hashes generated with the same encoder bean the app uses (`config/SecurityConfig.java`), so they verify correctly via the normal login endpoint. Plaintext values are listed here only because this is local/dev seed data — never do this for a real environment.
 
@@ -133,7 +134,7 @@ All 8 source files under `mock-images/` are still verified real JPEGs (checked v
 
 ### 6.4 `rental_plan` (6 rows — unchanged)
 
-All `customer_id` → `'Alex Tan'` (the only seeded non-admin, non-driver, non-`Mei Ling`/`Farid Rahman` user at the time this table was originally seeded — not revisited in 2.0.0, since `rental_plan` was out of scope for the reseed). Statuses span `DRAFT`/`SAVED`/`QUOTEED`/`CONVERTED` (the last is spelled as the literal, misspelled enum constant that exists in code). Sites are Singapore addresses (Tuas, Pioneer, Jurong Port, Marina South, Tampines) with `S(xxxxxx)` postal codes. `total_amount` equals the sum of that plan's `rental_plan_records`.
+All `customer_id` → `'Alex Tan'` (the only seeded non-admin, non-driver, non-`Mei Ling`/`Farid Rahman` user at the time this table was originally seeded — not revisited in 2.0.0, since `rental_plan` was out of scope for the reseed). Statuses span `DRAFT`/`SAVED`/`QUOTED`/`CONVERTED`. Sites are Singapore addresses (Tuas, Pioneer, Jurong Port, Marina South, Tampines) with `S(xxxxxx)` postal codes. `total_amount` equals the sum of that plan's `rental_plan_records`.
 
 ### 6.5 `rental_plan_records` (9 rows — unchanged)
 
@@ -240,6 +241,7 @@ Now populated for **every** `MOBILISED`/`COMPLETED` booking (`delivery_records`)
 | 1.7.0 | 2026-08-08 | Deleted `mock-images/asset1-cat320-excavator-b.jpg`, the leftover source file for CAT 320's second photo removed in 1.6.0. It was unreferenced by any `INSERT` and confirmed unreferenced anywhere else in the codebase before deletion — `mock-images/` now contains exactly the 8 files §6.3/§7 actually use, no orphaned files. |
 | 1.8.0 | 2026-08-09 | §6.6/§6.9-6.10 corrected to match `HR-77` (merged to `develop` before this branch branched off): `Booking.BookingStatus.PENDING` was split into `PENDING_DEPOSIT`/`PENDING_CONFIRMED`, and `Booking.PaidStatus`/`paid_status` was removed from the entity entirely — this doc still described the pre-`HR-77` shape (plain `PENDING`, a `PaidStatus`/`UNPAID` value) despite `data.sql` itself already having been updated by that same change. Documentation-only correction; no seed data changed. |
 | 1.9.0 | 2026-08-09 | Two corrections found in PR review: (1) §6.3 said "All 9 files" and still named the pre-rename `asset5-jlg-2630es-scissorlift.jpg` — a separate, unrelated merge from `develop` (HR-77) renamed every `assetN-*` image file to match its actual asset id (the file for asset 4 is `asset4-jlg-2630es-scissorlift.jpg`) and dropped one now-orphaned old file; corrected to "8 files" and the current name (the 1.6.0/1.7.0 entries above are left as-is — they're accurate for what was true when written, before that rename landed). (2) Added a `location` column to the §6.2 asset table — `Asset.location` was added to the entity/seed data in this same PR but never documented here. |
+| 1.10.0 | 2026-08-11 | Two changes from `SPEC-rental-plan-quote.md`'s PR review (see that doc's 1.1.0/1.1.1 for the full story): (1) §6.4's `rental_plan` insert now sets an explicit `version = 0` per row (`RentalPlan` gained a `@Version` column; raw SQL inserts bypass JPA's automatic version init, so a NOT NULL failure resulted without this). (2) §6.0's `users` table gained a 5th row — Mei Lin (`mei.lin@example.sg`, `USER`, `customer456`) — seeded with zero `rental_plan` rows specifically to close a documented testing gap: previously the only non-admin/non-driver user, Alex Tan, already had 4 active-status plans, making "create succeeds with zero active plans" (BR-06's positive direction) impossible to exercise. Also fixed the stale `QUOTEED` spelling in §6.4's prose (the underlying typo itself was fixed across the codebase in the same PR). |
 | 2.0.0 | 2026-08-11 | Executed the reseed planned in `specification/temporary/data-seeding-spec`/`design.md` (Haystack-authored requirements for their `period_utilization` ML feature; both files removed after this executed). Fleet grown from 8 to 27 assets (§6.2) — every category reshaped around one 4-asset spec-band plus a 1-asset filler in every other band, backfilling `capacity`/`platform_height` on the 6 pre-existing assets that lacked it (or had it duplicated). 19 new `asset_images` rows added by reusing an existing same-brand asset's base64 verbatim — zero new photo files (§6.3). Bookings grown from 20 to 90 (§6.6): the original 20 are untouched except three `status` corrections found while auditing the table (ids 2, 6, 7 — see §6.6) and a $0.01 `total_amount` adjustment on ids 15/20 (see §6.7 — their fixed 3-day duration couldn't reconcile the original total to any cent-precision rate at all); 70 new bookings bring in all 6 `BookingStatus` values (`PENDING_DEPOSIT`/`CANCELLED` previously absent) and 2 new `USER`-role customers (`Mei Ling`, `Farid Rahman`, §6.0). `booking_items`/`payments`/`delivery_records`/`return_records` completeness extended to **every** booking, including the 10 that were previously orphaned (§6.7–§6.10), with zero cent-level reconciliation gaps anywhere in the table — closing a gap that predates this reseed. All counts in §8 updated accordingly. |
 
 **Design / execution runbook:** (was `specification/temporary/data-seeding-design`, removed after this version executed — see 2.0.0 above)
