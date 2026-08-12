@@ -351,7 +351,7 @@ public class HaystackRecommenderClient {
 				}
 			}
 		} catch (Exception ignored) {
-			if (body != null && !body.isBlank()) {
+			if (!body.isBlank()) {
 				message = body;
 			}
 		}
