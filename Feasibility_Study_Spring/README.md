@@ -2,88 +2,70 @@
 
 | Field | Value |
 |-------|--------|
-| **Document type** | Handoff package for the Spring Boot REST API team |
-| **Scope** | Phase 2 / **S2b** — Resilience C1 (client half) |
-| **Audience** | Spring Boot engineers integrating with `haystack-fast-api` |
-| **Status** | Docs only — not Spring runtime code |
-| **Version** | **1.0.0** |
+| **Version** | **2.1.0** |
 | **Date** | 2026-08-12 |
-| **Source repo** | Published from `haystack-fast-api`; copy this entire folder into the Spring Boot project |
+| **Audience** | Spring Boot engineers integrating with `haystack-fast-api` |
+| **S2b Spring status** | **As-built** in this repo (client, saga, portal REST, WireMock) |
 
-**Behaviour source of truth** for HTTP shapes remains in the haystack repo OpenSpec (`openspec/specs/indexing/`, `openspec/specs/knowledge-graph/`). This package is the **Spring-facing** feasibility + implementation pack for C1.
+**Behaviour SoT:** haystack OpenSpec + this package for Spring orchestration; living Spring contract: `specification/SPEC-haystack-recommender-client.md`.
 
----
+### Aligned with haystack `Feasibility_Study/` (Call numbering)
 
-## Architecture principles (Spring seat)
+| Call | Path | Role |
+|------|------|------|
+| **1** | `.../submitprojectspecification` | Ingest |
+| **2** | `.../project-knowledge/getassetrecommendations` | **Recommend / quote** |
+| **3** | `.../project-knowledge/query` | **Chatbot Q&A** |
 
-| Principle | Detail |
-|-----------|--------|
-| **Spring owns** | Portal/domain SoT, auth, booking/session persistence, **multi-call saga** orchestration |
-| **FastAPI owns** | Indexing, KG-1, project-knowledge Q&A, (later) multi-agent recommend / C/W/D roles |
-| **Protocol** | **REST** multipart/JSON for Call 1; JSON for Call 2; **not** SSE for file upload |
-| **Resilience** | Timeouts, circuit breaker, bulkhead, correlation, **idempotent ingest retries** live mainly on **Spring** |
-| **S2a (haystack)** | **As-built:** process-local `Idempotency-Key` store + `X-Correlation-Id` echo — **required before production ingest retry** |
-| **C2 jobs** | 202 + poll/SSE is **out of scope** for S2b (Phase 9 if gateway kills long POSTs) |
+| Topic | Haystack | This package |
+|-------|----------|--------------|
+| Portal saga | `implementation-plan.md` §1.2.0 (v3.5+) | [`portal-to-haystack-mapping.md`](./portal-to-haystack-mapping.md) **2.0** |
+| Call 2 recommend | OpenSpec recommend contract | [`wire-contract-call1-call2.md`](./wire-contract-call1-call2.md) **2.0** |
+| Call 3 Q&A | KG contract `project-knowledge-query.md` | Same wire doc § Call 3 |
+| S2a | `phase2-s2a-*.md` v1.1.2 | [`s2a-haystack-dependency.md`](./s2a-haystack-dependency.md) |
+| S2b | pointer | [`phase2-s2b-spring-implementation-plan.md`](./phase2-s2b-spring-implementation-plan.md) **2.1** |
 
 ```text
-Portal / user
-    │
-    ▼
-Spring Boot REST API     ← THIS PACKAGE
-    │  Call 1: ingest (+ Idempotency-Key, X-Correlation-Id)
-    │  Call 2: Q&A 0..N (reuse ingest_id; never re-ingest on Q&A fail)
-    │  Call 3: recommend (later; stub OK)
-    ▼
-haystack-fast-api
+React  POST /api/recommendations/project-spec
+  → Call 1 ingest → Call 2 recommend quote → React
+  → optional Call 3 chatbot Q&A  (POST .../knowledge-query)
 ```
-
----
 
 ## Reading order
 
-1. [`wire-contract-call1-call2.md`](./wire-contract-call1-call2.md) — live paths, headers, errors  
-2. [`call1-ingest-response-for-spring.md`](./call1-ingest-response-for-spring.md) — what to persist from Call 1  
-3. [`s2a-haystack-dependency.md`](./s2a-haystack-dependency.md) — FastAPI S2a as-built + join gate  
-4. [`spring-boot-fastapi-integration-resilience.md`](./spring-boot-fastapi-integration-resilience.md) — study / verdicts  
-5. [`phase2-s2b-spring-implementation-plan.md`](./phase2-s2b-spring-implementation-plan.md) — implement + **test runbook**  
-6. [`HANDOFF.md`](./HANDOFF.md) — copy into Spring repo and open tickets  
-
----
+1. [`portal-to-haystack-mapping.md`](./portal-to-haystack-mapping.md)  
+2. [`wire-contract-call1-call2.md`](./wire-contract-call1-call2.md)  
+3. [`call1-ingest-response-for-spring.md`](./call1-ingest-response-for-spring.md)  
+4. [`s2a-haystack-dependency.md`](./s2a-haystack-dependency.md)  
+5. [`phase2-s2b-spring-implementation-plan.md`](./phase2-s2b-spring-implementation-plan.md)  
+6. [`HANDOFF.md`](./HANDOFF.md)  
 
 ## Documents
 
-| Document | Topic | Version |
-|----------|--------|---------|
-| [`wire-contract-call1-call2.md`](./wire-contract-call1-call2.md) | Normative HTTP: health, Call 1, Call 2, headers, errors | **1.0.0** |
-| [`call1-ingest-response-for-spring.md`](./call1-ingest-response-for-spring.md) | Lean FR-IX-023 body Spring must handle | **1.0.0** |
-| [`s2a-haystack-dependency.md`](./s2a-haystack-dependency.md) | FastAPI S2a (FR-IX-024/025); retry join gate | **1.0.0** |
-| [`spring-boot-fastapi-integration-resilience.md`](./spring-boot-fastapi-integration-resilience.md) | Integration feasibility (Spring-primary) | **2.0.0** |
-| [`phase2-s2b-spring-implementation-plan.md`](./phase2-s2b-spring-implementation-plan.md) | **S2b** implementer plan + WireMock test runbook | **1.1.0** |
-| [`HANDOFF.md`](./HANDOFF.md) | Copy checklist into Spring Boot project | **1.0.0** |
+| Document | Version |
+|----------|---------|
+| portal-to-haystack-mapping.md | **2.0.0** |
+| wire-contract-call1-call2.md | **2.0.0** |
+| call1-ingest-response-for-spring.md | **2.0.0** |
+| phase2-s2b-spring-implementation-plan.md | **2.1.0** |
+| spring-boot-fastapi-integration-resilience.md | **2.2.2** |
+| s2a-haystack-dependency.md | **1.2.0** |
+| HANDOFF.md | **2.1.0** |
 
----
+## Spring as-built map (this repo)
 
-## How to copy into the Spring Boot repo
+| Feasibility step | Spring artifact |
+|------------------|-----------------|
+| B1–B2 client + timeouts | `client.haystack.HaystackRecommenderClient`, `HaystackProperties` |
+| B3 Resilience4j | CB `haystack`; bulkheads ingest/recommend/qa; retry |
+| B4 headers | `Idempotency-Key` (Call 1), `X-Correlation-Id` (all) |
+| B5 saga | `RecommenderSagaService` + `RecommendationController` |
+| B6 runbook | Living SPEC §12 + this package |
+
+Specs: OpenSpec `openspec/specs/haystack-recommender/`, Spec-Kit `specification/features/s2b-haystack-recommender-client/`, SPDD `spdd/prompt/S2b-resilient-haystack-recommender-client.md`.
+
+## Copy into Spring repo
 
 ```bash
-# From haystack-fast-api (or a clone that has this package):
-cp -R Feasibility_Study_Spring /path/to/spring-boot-project/docs/Feasibility_Study
-# or:
-cp -R Feasibility_Study_Spring /path/to/spring-boot-project/Feasibility_Study
+cp -R Feasibility_Study_Spring /path/to/spring-boot/docs/Feasibility_Study
 ```
-
-Then open PRs for **S2b-1…S2b-5** per the implementation plan. See [`HANDOFF.md`](./HANDOFF.md).
-
----
-
-## Related (optional; lives only in haystack repo)
-
-Not required to implement S2b. Useful context if you have a clone of `haystack-fast-api`:
-
-| Topic | Path in haystack |
-|-------|------------------|
-| Full stage catalog | `Feasibility_Study/implementation-plan.md` |
-| S2a haystack plan + pytest runbook | `Feasibility_Study/phase2-s2a-haystack-implementation-plan.md` |
-| Dual-plane / fleet sync | `Feasibility_Study/postgres-haystack-neo4j-realtime-sync.md` |
-| C/W/D multi-agent (FastAPI-internal) | `Feasibility_Study/multi-agent-coordinator-worker-delegator.md` |
-| OpenSpec ingest contract | `openspec/specs/indexing/contracts/ingest-from-project-spec.md` |

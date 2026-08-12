@@ -6,12 +6,13 @@
 | **Stage** | **S2b** — Resilience C1, Spring Boot client half |
 | **Repo** | Spring Boot REST API (portal / domain SoT) |
 | **Phase** | Phase 2 (main plan) · Track **C1** (resilience study) |
-| **Version** | **1.1.0** |
+| **Version** | **2.1.1** |
 | **Date** | 2026-08-12 |
-| **Status** | **Ready to implement** |
+| **Status** | **As-built** in Spring repo — plan §7 WireMock pack complete |
 | **Sibling** | S2a haystack — **as-built** (see [`s2a-haystack-dependency.md`](./s2a-haystack-dependency.md)) |
 | **Study** | [`spring-boot-fastapi-integration-resilience.md`](./spring-boot-fastapi-integration-resilience.md) |
 | **Wire** | [`wire-contract-call1-call2.md`](./wire-contract-call1-call2.md) |
+| **Portal saga** | [`portal-to-haystack-mapping.md`](./portal-to-haystack-mapping.md) |
 | **Standards** | TDD/BDD · WireMock · Resilience4j · stage PR template |
 | **Package** | Spring export under `Feasibility_Study_Spring/` |
 
@@ -21,11 +22,11 @@
 
 Harden Spring as the **orchestrating client** of haystack-fast-api:
 
-- Per-operation **timeouts** (ingest ≫ Q&A ≫ health)
+- Per-operation **timeouts** (ingest ≫ recommend ≫ Q&A ≫ health)
 - **Circuit breaker + bulkhead** (Resilience4j)
 - **Idempotent** ingest retries (`Idempotency-Key`)
 - **Correlation** headers on every call
-- **Saga** that never re-ingests on Q&A failure
+- **Portal project-spec saga:** React `POST /api/recommendations/project-spec` → **Call 1 then Call 2 recommend** → return **Call 2 quote** to React; optional Call 3 chatbot Q&A; never re-ingest on Call 2 failure
 
 Spring does **not** implement C/W/D multi-agent roles — those stay inside FastAPI.
 
@@ -36,7 +37,8 @@ Spring does **not** implement C/W/D multi-agent roles — those stay inside Fast
 | Item | Convention |
 |------|------------|
 | Ingest | `POST /internal/v1/recommendations/submitprojectspecification` |
-| Q&A | `POST /internal/v1/recommendations/project-knowledge/getassetrecommendations` |
+| Call 2 recommend | `POST /internal/v1/recommendations/project-knowledge/getassetrecommendations` |
+| Call 3 chatbot | `POST /internal/v1/recommendations/project-knowledge/query` |
 | Health | `GET /health` |
 | Idempotency header | `Idempotency-Key` (UUID per logical ingest) |
 | Correlation | `X-Correlation-Id` and/or W3C `traceparent` |
@@ -51,7 +53,7 @@ Full tables: [`wire-contract-call1-call2.md`](./wire-contract-call1-call2.md).
 
 | FastAPI today | Implication for Spring |
 |---------------|------------------------|
-| Unary REST ingest + Q&A | Blocking WebClient / RestClient OK for C1 |
+| Unary REST Call 1 ingest + Call 2 recommend + Call 3 Q&A | Blocking WebClient / RestClient OK for C1 |
 | No 202 / job API yet | Long **read timeout** on ingest; measure p95 → may force C2 later |
 | Process-local sessions (InMemory) | Sticky session **or** single FastAPI instance for Call 1→2 until Pgvector |
 | Error `{"error","message"}` | Map to domain exceptions; distinguish **4xx** vs **5xx** |
@@ -69,7 +71,7 @@ Full tables: [`wire-contract-call1-call2.md`](./wire-contract-call1-call2.md).
 | **2.2** | Resilience4j **circuit breaker + bulkhead** | **P0** |
 | **2.3 (Spring half)** | Generate/send `Idempotency-Key`; retry only with same key | **P0** |
 | **2.4 (Spring half)** | Propagate `X-Correlation-Id` / `traceparent` | **P0** |
-| **2.5** | Saga: ingest → persist `ingest_id` → Q&A (0..N) → (later recommend stub) | **P1** |
+| **2.5** | Saga: Call 1 → persist → Call 2 recommend → React; optional Call 3 chatbot | **P1** |
 | **2.6 (Spring half)** | Ops runbook: timeouts, max file size, p95, CB thresholds | **P1** |
 
 ### Out of scope
@@ -77,7 +79,7 @@ Full tables: [`wire-contract-call1-call2.md`](./wire-contract-call1-call2.md).
 - FastAPI idempotency store → **S2a** (already shipped)  
 - 202 + poll / SSE (C2 / Phase 9)  
 - C/W/D roles inside Spring  
-- Full Call 3 recommend product (wire stub OK)  
+- Full multi-agent Call 2 enrich beyond MVP (S7.x; wire stub OK)
 - gRPC / queues (C3)  
 
 ---
@@ -85,30 +87,35 @@ Full tables: [`wire-contract-call1-call2.md`](./wire-contract-call1-call2.md).
 ## 5. Architecture
 
 ```text
-Portal
+React  POST /api/recommendations/project-spec
   │
   ▼
 RecommenderSaga / ApplicationService
   │  correlationId = UUID (or from inbound request)
+  │  idempotencyKey = UUID per logical portal submit
   │
   ├─1─ HaystackRecommenderClient.ingest(file|text, userId, idempotencyKey)
-  │       WebClient + timeout(ingest)
+  │       RestClient/WebClient + timeout(ingest)
+  │       POST .../submitprojectspecification
   │       headers: Idempotency-Key, X-Correlation-Id, traceparent
   │       Resilience4j: CB + bulkhead (+ retry only if idempotent)
   │       → persist ingestId on booking/session entity
   │
-  ├─2─ client.qa(userId, ingestId, query)  × 0..N
-  │       timeout(qa); retry transient 5xx; NEVER call ingest again
+  ├─2─ client.recommend(userId, ingestId, query?)   // required portal hop
+  │       POST .../project-knowledge/getassetrecommendations
+  │       timeout(recommend); retry transient 5xx; NEVER re-ingest
+  │       → map Call 2 quote body to React
   │
-  └─3─ client.recommend(...)  // later / no-op stub
+  └─3─ client.chatQa(userId, ingestId, query)  × 0..N  // Call 3 optional
+          POST .../project-knowledge/query
 ```
 
 ### Design rules
 
 1. **One `Idempotency-Key` per logical portal “submit project-spec”** — generate at saga start; **reuse on timeout retry**.  
 2. **Retry ingest only with the same key**; do not rotate the key on retry.  
-3. **Q&A failure ≠ re-ingest** — saga holds `ingest_id` from step 1.  
-4. **Timeouts** are config properties (health short; Q&A medium; ingest long).  
+3. **Call 2/3 failure ≠ re-ingest** — saga holds `ingest_id` from step 1.  
+4. **Timeouts** are config properties (health short; Q&A medium; recommend medium–long; ingest long).  
 5. **Bulkhead** caps concurrent haystack calls.  
 6. **CB open** → fail fast to portal (“recommender unavailable”) — no silent wrong equipment.  
 7. **4xx** → do not retry as success path.  
@@ -135,7 +142,7 @@ RecommenderSaga / ApplicationService
 |----------|--------|
 | `HaystackProperties` | baseUrl, timeouts (connect/read per op), CB/bulkhead names, max file size |
 | `HaystackRecommenderClient` | `health()`, `ingest(...)`, `queryProjectKnowledge(...)` |
-| DTOs | Lean ingest response + Q&A response; error DTO `{error,message}` |
+| DTOs | Lean Call 1 ingest + Call 2 quote + Call 3 Q&A; error DTO `{error,message}` |
 | WebClient bean | Codec max in-memory size ≥ max upload |
 
 ### B2 — Timeouts (2.1)
@@ -144,7 +151,8 @@ RecommenderSaga / ApplicationService
 |-----------|----------------------------------|
 | Connect | 2–5s |
 | Health read | 2–5s |
-| Q&A read | 30–60s |
+| Recommend (Call 2) read | 60–120s |
+| Q&A (Call 3) read | 30–60s |
 | Ingest read | 120–300s+ (measure p95) |
 
 Exit: values in `application.yml` + runbook.
@@ -167,7 +175,7 @@ haystack:
 | Pattern | Guidance |
 |---------|----------|
 | CircuitBreaker | On haystack client; open on error rate / slow calls |
-| Bulkhead | Prefer separate limits for ingest vs Q&A |
+| Bulkhead | Prefer separate limits for ingest vs recommend vs Q&A |
 | Retry | Exponential backoff + jitter; **ingest only with Idempotency-Key**; limited attempts |
 | TimeLimiter | Align with read timeouts if reactive |
 
@@ -181,13 +189,17 @@ haystack:
 
 ### B5 — Saga orchestrator (2.5)
 
+Portal entrypoint: **`POST /api/recommendations/project-spec`** (React).  
+Haystack hops: Call 1 then Call 2 — see [`portal-to-haystack-mapping.md`](./portal-to-haystack-mapping.md).
+
 ```text
-Given portal submits project-spec
+Given React posts project-spec to Spring
 When  saga runs
-Then  ingest once (or idempotent retry) and store ingest_id
-And   Q&A uses stored ingest_id
-And   Q&A 5xx does not trigger a second ingest
-And   later recommend uses same identity (stub OK)
+Then  Call 1 ingest once (or idempotent retry) and store ingest_id
+And   Call 2 recommend uses stored user_id + ingest_id (+ optional query)
+And   the portal response body is primarily the Call 2 quote payload
+And   Call 2 5xx does not trigger a second ingest
+And   optional Call 3 chatbot Q&A uses same identity
 ```
 
 Persist `ingest_id` (+ `user_id`, correlation id) on Spring-side session/booking aggregate.
@@ -213,24 +225,33 @@ Document:
 | 1 | Delayed ingest > timeout | Client times out; retry uses **same** `Idempotency-Key` |
 | 2 | N× 500 on ingest | CB opens; subsequent calls fail fast |
 | 3 | Excess concurrent calls | Bulkhead rejects / queues per config |
-| 4 | Saga: ingest 200 then Q&A 500 | `ingest_id` persisted; **no second ingest** recorded |
+| 4 | Saga: ingest 200 then Call 2 recommend 500 | `ingest_id` persisted; **no second ingest** |
 | 5 | Idempotent retry | WireMock sees same key header on retry |
-| 6 | Correlation | Outbound requests include `X-Correlation-Id` |
+| 6 | Correlation | Outbound requests include `X-Correlation-Id` on Call 1 **and** Call 2 |
 | 7 | 400 from FastAPI | Mapped; not retried as success |
+| 8 | **Portal dual-hop happy path** | `POST /api/recommendations/project-spec` → 1× Call 1 + 1× Call 2 recommend; **portal body** has `quoteRef` / `items`; WireMock path `.../getassetrecommendations` |
+| 9 | **Call 3 chatbot** | Optional `.../project-knowledge/query` returns `answer` (not quote) |
 
 ### BDD sketches
 
 ```text
-Scenario: Saga does not re-ingest on Q&A failure
+Scenario: Saga does not re-ingest on Call 2 recommend failure
   Given ingest succeeded and ingest_id was persisted
-  When  Q&A returns HTTP 500
-  Then  the saga surfaces a retryable Q&A error
+  When  Call 2 recommend returns HTTP 500
+  Then  the saga surfaces a retryable recommend error
   And   WireMock records exactly one ingest request
 
 Scenario: Ingest retry reuses Idempotency-Key
   Given ingest times out once
   When  the client retries
   Then  both attempts send the same Idempotency-Key header
+
+Scenario: Portal project-spec dual-hop returns Call 2 recommend quote
+  Given React posts to POST /api/recommendations/project-spec
+  When  the saga completes successfully
+  Then  WireMock records one submitprojectspecification and one getassetrecommendations
+  And   the HTTP response to React is mapped from the Call 2 quote (quoteRef / items)
+  And   Call 2 request includes user_id and ingest_id from Call 1
 ```
 
 ### How to test this stage (runbook)
@@ -257,7 +278,7 @@ mvn -Dtest=HaystackRecommenderClientTest,RecommenderSagaTest test
 | `HaystackRetryIdempotencyTest` | Same `Idempotency-Key` on retry; WireMock `verify(2, …)` with same header |
 | `HaystackCircuitBreakerTest` | N× 500 → open; fail-fast |
 | `HaystackBulkheadTest` | Concurrent limit |
-| `RecommenderSagaTest` | Ingest once + Q&A fail → no second ingest |
+| `RecommenderSagaTest` | Ingest once + Call 2 fail → no second ingest; happy path quote body |
 
 **WireMock sketch — delayed ingest + same key on retry:**
 
@@ -277,12 +298,12 @@ verify: both requests had header X-Correlation-Id
 
 ```text
 stub ingest → 200 { ingest_id: "ing_1", user_id: "u", ... }
-stub Q&A    → 500 { error: "internal_error", message: "..." }
+stub Call 2 getassetrecommendations → 500 { error: "internal_error", message: "..." }
 
 saga.submit(projectSpec)
-assert exception is retryable Q&A failure
+assert exception is retryable recommend failure
 verify ingest count == 1
-verify Q&A count >= 1
+verify Call 2 count >= 1
 assert repository.savedIngestId == "ing_1"
 ```
 
@@ -294,7 +315,7 @@ No live FastAPI required for default Spring CI. Prefer fixed JSON fixtures for l
 2. Confirm S2a: double POST same `Idempotency-Key` → same `ingest_id` (see [`s2a-haystack-dependency.md`](./s2a-haystack-dependency.md)).  
 3. Point Spring `haystack.base-url` at `http://localhost:8000`.  
 4. Trigger portal “submit project-spec” twice with same logical submit (or force client timeout + retry).  
-5. Check: one logical `ingest_id`; logs share `X-Correlation-Id`; Q&A works with stored ids.  
+5. Check: one logical `ingest_id`; Call 2 returns `quoteRef`/`items`; logs share `X-Correlation-Id`; optional Call 3 Q&A works with stored ids.  
 
 #### 7.3 Expected results
 
@@ -302,9 +323,9 @@ No live FastAPI required for default Spring CI. Prefer fixed JSON fixtures for l
 |----------|--------|
 | Ingest timeout retry | Same `Idempotency-Key` on every attempt |
 | CB open | Fast failure to portal; no invented equipment |
-| Saga Q&A 500 | Stored `ingest_id`; **one** ingest on WireMock |
+| Saga Call 2 500 | Stored `ingest_id`; **one** ingest on WireMock |
 | FastAPI 400 | Mapped domain error; **no** success retry loop |
-| Correlation | Outbound `X-Correlation-Id` on health, ingest, Q&A |
+| Correlation | Outbound `X-Correlation-Id` on health, Call 1, Call 2, Call 3 |
 
 #### 7.4 Config checklist for tests
 
@@ -332,10 +353,10 @@ Not required for either CI, but useful once both land:
 | **S2b-1** | Client + properties + timeouts + DTOs + WireMock happy path (2.1) |
 | **S2b-2** | Resilience4j CB + bulkhead + retry-with-key (2.2 + 2.3 headers) |
 | **S2b-3** | Correlation propagation (2.4) — may fold into S2b-1 |
-| **S2b-4** | Saga + persist `ingest_id` (2.5) |
+| **S2b-4** | Portal `project-spec` saga: Call 1 → Call 2 quote → React; optional Call 3 (2.5) |
 | **S2b-5** | Runbook + config docs (2.6) |
 
-**Minimum combine:** S2b-1 + S2b-2 + headers in one PR; saga second; docs third.
+**Minimum combine:** S2b-1 + S2b-2 + headers in one PR; dual-hop saga second; docs third.
 
 Use stage PR body: **What & Why** + **Key Changes**; link haystack S2a under Dependent PRs.
 
@@ -343,13 +364,31 @@ Use stage PR body: **What & Why** + **Key Changes**; link haystack S2a under Dep
 
 ## 9. Exit criteria
 
-- [ ] Per-op timeouts configured and tested  
-- [ ] CB opens on forced 5xx and recovers  
-- [ ] Bulkhead limits concurrency  
-- [ ] Ingest always sends `Idempotency-Key`; retries reuse key  
-- [ ] Correlation on every call  
-- [ ] Saga does not re-ingest after Q&A failure  
-- [ ] Runbook published; WireMock suite green  
+- [x] Per-op timeouts configured and tested *(health / qa / recommend / ingest)*  
+- [x] CB opens on forced 5xx and recovers  
+- [x] Bulkhead limits concurrency  
+- [x] Ingest always sends `Idempotency-Key`; retries reuse key  
+- [x] Correlation on every call  
+- [x] Saga does not re-ingest after Call 2 recommend failure  
+- [x] Runbook published; WireMock suite green  
+
+### 9.1 Spring as-built map (this repository)
+
+| Plan step | Implementation |
+|-----------|----------------|
+| B1–B2 | `HaystackProperties`, `HaystackClientConfig`, `HaystackRecommenderClient`, DTOs |
+| B3 | Programmatic Resilience4j: CB `haystack`; bulkheads ingest/recommend/qa; retries |
+| B4 | Headers on ingest + all ops; prod `haystack.retry.ingest-enabled=false` |
+| B5 | `RecommenderSagaService` + `RecommendationController`; portal quote body; Call 3 on `/knowledge-query` |
+| B6 | `specification/SPEC-haystack-recommender-client.md` §12 |
+
+**Tests:** `HaystackRecommenderClientTest`, `HaystackRetryIdempotencyTest`, `HaystackTimeoutRetryTest` (§7 #1), `HaystackCircuitBreakerTest`, `HaystackBulkheadTest`, `RecommenderSagaServiceTest`, `RecommenderSagaWireMockTest` (§7 #4/#6/#8 dual-hop paths + correlation + quote).
+
+**Plan §7 pack:** scenarios 1–9 covered by the suite above (CI, no live FastAPI).
+
+**Deferred (documented):** writing `recommendation_items` from Call 2 (post-S2b product); joint Spring+live haystack CI; `traceparent` (no OTel required).
+
+**Closed in S2b:** multipart project-file submit; `RecommendationControllerIntegrationTest` (MockMvc + WireMock).
 
 ---
 
@@ -397,5 +436,11 @@ If gateway idle timeout kills long blocking ingest POSTs in production measureme
 
 | Version | Date | Notes |
 |---------|------|--------|
+| **2.1.1** | 2026-08-12 | §7 residual: timeout-retry + dual-hop WireMock saga; exponential backoff |
+| **2.1.0** | 2026-08-12 | Status → As-built; §9 exit criteria checked; Spring artifact map |
+| **2.0.1** | 2026-08-12 | S2b tests/timeouts use Call 2 recommend (not Q&A as second hop) |
+| **2.0.0** | 2026-08-12 | Call 2 recommend quote; Call 3 chatbot Q&A |
+| **1.2.1** | 2026-08-12 | Dual-hop WireMock/BDD case; align Call 2 path with Feasibility_Study |
+| **1.2.0** | 2026-08-12 | Portal project-spec: Call 1 then Call 2; React receives Call 2 body |
 | **1.1.0** | 2026-08-12 | Spring export: §7 test runbook; S2a as-built; package cross-links |
 | **1.0.0** | 2026-08-11 | Initial S2b plan split from Phase 2 (haystack Feasibility_Study) |
