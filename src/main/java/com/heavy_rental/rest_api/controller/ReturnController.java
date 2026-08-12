@@ -10,7 +10,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.heavy_rental.rest_api.dto.ReturnItemResponse;
-import com.heavy_rental.rest_api.dto.StatusUpdateRequest;
+import com.heavy_rental.rest_api.dto.ReturnStatusUpdateRequest;
 import com.heavy_rental.rest_api.service.ReturnService;
 
 @RestController
@@ -29,7 +29,7 @@ public class ReturnController {
     }
 
     @PatchMapping("/{bookingId}/status")
-    public ReturnItemResponse updateStatus(@PathVariable Long bookingId, @RequestBody StatusUpdateRequest request) {
-        return returnService.updateStatus(bookingId, request.bookingStatus());
+    public ReturnItemResponse updateStatus(@PathVariable Long bookingId, @RequestBody ReturnStatusUpdateRequest request) {
+        return returnService.updateStatus(bookingId, request.bookingStatus(), request.returnNotes());
     }
 }
