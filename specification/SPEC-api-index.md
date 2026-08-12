@@ -3,9 +3,9 @@
 | Field | Value |
 |-------|--------|
 | **Document type** | Cross-cutting index — not a feature contract itself |
-| **Status** | As-built across `develop` (which now includes both former `HR-72` and `HR-80` work — see §3.1) + one locally-rebased branch (`hr-27-payment-checkout`, not yet pushed — see §2.4) |
+| **Status** | As-built across `develop` (which now includes both former `HR-72` and `HR-80` work — see §3.1) + two branches merged in locally: `hr-27-payment-checkout` (§2.5) and `hr-40-equipment-utilization-tracker` (§2.4, this branch) |
 | **Module** | `heavy-rental-spring-rest-api` |
-| **Related specs** | [`SPEC-request-bearer-token.md`](./SPEC-request-bearer-token.md), [`SPEC-auth-login-logout.md`](./SPEC-auth-login-logout.md), [`SPEC-equipment-browse-api.md`](./SPEC-equipment-browse-api.md), [`SPEC-entity-repository.md`](./SPEC-entity-repository.md), [`SPEC-stripe.md`](./SPEC-stripe.md) |
+| **Related specs** | [`SPEC-request-bearer-token.md`](./SPEC-request-bearer-token.md), [`SPEC-auth-login-logout.md`](./SPEC-auth-login-logout.md), [`SPEC-equipment-browse-api.md`](./SPEC-equipment-browse-api.md), [`SPEC-entity-repository.md`](./SPEC-entity-repository.md) |
 | **Environment context** | [`SPEC-project-environment.md`](./SPEC-project-environment.md) (read first) |
 
 This document is the **single place to see the entire REST surface** — every route, which client it's for, what branch it lives on, and which feature spec (if any) owns its detailed contract. It does not restate request/response shapes already documented elsewhere; it points to them.
@@ -83,7 +83,7 @@ Server-side behavior, in order:
 
 ### 2.3 Web — equipment browse, depots, rental plans
 
-Per branch author: every route in this section is for the **web** client. **Corrected 2026-08-11:** this section previously said none of these routes existed in the working tree and that they lived only on `origin/HR-72-add-browse-equipment-to-rest-api`, unmerged. That was already stale when written — `HR-72`'s work merged into `develop` via commit `692ece6` ("include the relevant class to link browse equipment to the web portal", PR #12), *before* `HR-80` (`c081ee1`) landed on top of it. `EquipmentController`, `DepotController`, and `RentalPlanController` are all live on `develop` today, confirmed directly against the tree.
+Per branch author: every route in this section is for the **web** client. **None of this section exists in the current working tree** — `EquipmentController`, `DepotController`, and `RentalPlanController` all live only on `origin/HR-72-add-browse-equipment-to-rest-api`, which diverged from `develop` at the same commit `HR-80` did (`584346f`, "HR-66 Populating Data") and has not been merged either direction.
 
 | Method | Path | Roles allowed | Status | Contract |
 |---|---|---|---|---|
@@ -110,6 +110,8 @@ This branch (see §2.2's payments rows) exists only on the machine it was rebase
 | Item | Status | Notes |
 |---|---|---|
 | `platform` attribute on `LoginRequest` | ⏳ Not started | Branch `HR-85-implement-platform-attribute-in-login-request-body` exists but has **zero commits beyond `HR-77`** — it's an unstarted placeholder, not a design that's been written down anywhere yet. Likely the intended mechanism for distinguishing web vs mobile at login (see §4) once work begins. |
+| `POST` `/api/pricing/estimate` | ⏳ Not started | Proxies FastAPI for a pre-cart price preview. Auth is an open decision (likely public, unlike every other route in this table) — see [`SPEC-spring-proxy-endpoints.md`](./SPEC-spring-proxy-endpoints.md) §2. |
+| `POST` `/api/recommendations` | ⏳ Not started | Proxies FastAPI's `from-project-spec` recommendation call. Not a thin passthrough — Spring must authenticate the caller and inject the real customer id itself, since FastAPI trusts an unvalidated `user_id` field. See [`SPEC-spring-proxy-endpoints.md`](./SPEC-spring-proxy-endpoints.md) §3. |
 
 ---
 
@@ -121,7 +123,7 @@ Before drafting this file, the working assumption was that **web auth was alread
 
 ### 3.2 `HR-72` and `HR-80` are both merged into `develop` — §2.2/§2.3 previously said otherwise
 
-This index originally (1.0.0–1.2.0) described `HR-80` and `HR-72` as two independent, unmerged sibling branches, each diverging from the same commit (`584346f`) and never reconciled with each other. That was already inaccurate by the time it was written: `HR-72`'s equipment/depot/rental-plan work merged into `develop` via `692ece6` ("include the relevant class to link browse equipment to the web portal", PR #12) *before* `HR-80` (`c081ee1`) landed on top of it — so `develop` today (and everything built on top of it, including `hr-27-payment-checkout` in §2.4) already has both. §2.2 and §2.3's status columns are corrected accordingly as of 2026-08-11. No route was lost or needs reconciling between these two — they never actually competed for the same files.
+This index originally (1.0.0–1.2.0) described `HR-80` and `HR-72` as two independent, unmerged sibling branches, each diverging from the same commit (`584346f`) and never reconciled with each other. That was already inaccurate by the time it was written: `HR-72`'s equipment/depot/rental-plan work merged into `develop` via `692ece6` ("include the relevant class to link browse equipment to the web portal", PR #12) *before* `HR-80` (`c081ee1`) landed on top of it — so `develop` today (and everything built on top of it, including `hr-27-payment-checkout` in §2.5) already has both. §2.2 and §2.3's status columns are corrected accordingly as of 2026-08-11. No route was lost or needs reconciling between these two — they never actually competed for the same files.
 
 ---
 
