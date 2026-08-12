@@ -5,7 +5,7 @@
 | **Purpose** | Plain-language log of the backend changes made on `hr-40-equipment-utilization-tracker` to add `GET /api/monthly-utilization` (trailing 6-month utilization/revenue for the admin Overview screen) |
 | **Scope** | Backend only (`heavy-rental-spring-rest-api`, this repo) |
 | **Branch** | `hr-40-equipment-utilization-tracker` |
-| **Status** | Working tree only — **not yet `git add`/committed** as of this writing |
+| **Status** | Committed — `8227447 "utilization"`, merged into `b037fbb "update md files"` on `hr-40-equipment-utilization-tracker` |
 
 ---
 
@@ -48,6 +48,6 @@ No automated test coverage remains for this endpoint (the accuracy test above wa
 
 - Current month's utilization denominator uses the full month length (e.g. 31 days for August), not days elapsed so far — consistent across all 6 months but worth confirming against what the Overview chart is meant to show.
 - `BigDecimal.ZERO` revenue serializes as `0` instead of `0.00` (cosmetic JSON inconsistency vs. months with real payment sums).
-- Not yet committed — `git status` still shows `SecurityConfig.java` and `BookingItemRepository.java` as modified, and the three new files as untracked.
+- ~~Not yet committed~~ — confirmed committed in `8227447 "utilization"` (`git status` now shows a clean working tree).
 - `GET /api/users` 404s in the browser when testing against this branch — expected, not a bug: `UserController` is the teammate's separate Feature 1 work, not merged into `hr-40-equipment-utilization-tracker`.
 - Frontend-side observation (not this backend's scope, but worth flagging to whoever owns the portal): a single Overview page load fetches `equipment` 3×, and `bookings`/`rental-plans`/`monthly-utilization` 2× each — `equipment` alone is ~4.7MB per call, so that's several MB of redundant traffic per load.
