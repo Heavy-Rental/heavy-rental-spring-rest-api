@@ -240,6 +240,8 @@ Proof of return for a `Booking`, mirroring `DeliveryRecord`.
 
 An AI-generated asset recommendation for a `User`; supports a revision chain via a self-reference.
 
+**As-built columns** (entity on disk, including S2b 2026-08-12):
+
 | Field | Column | Type | Constraints |
 |---|---|---|---|
 | `id` | `id` | `Long` | PK, identity |
@@ -249,8 +251,21 @@ An AI-generated asset recommendation for a `User`; supports a revision chain via
 | `previousRecommendation` | `previous_recommendation_id` | → `AIRecommendation` (self-referencing) | `@ManyToOne` LAZY, nullable FK |
 | `rawProjectPrompt` | `raw_project_prompt` | `TEXT` | nullable |
 | `documentUrl` | `document_url` | `String` | nullable |
-| `aiReasoningSummary` | `ai_reasoning_summary` | `TEXT` | nullable |
+| `aiReasoningSummary` | `ai_reasoning_summary` | `TEXT` | nullable (Call 1 `user_requirement_summary`) |
 | `createdAt` | `created_at` | `LocalDateTime` | `NOT NULL` |
+| `ingestId` | `ingest_id` | `String` | S2b — Call 2 recommend / Call 3 Q&A handle |
+| `haystackUserId` | `haystack_user_id` | `String` | S2b — `String.valueOf(user.id)` sent to FastAPI |
+| `idempotencyKey` | `idempotency_key` | `String` | S2b — audit |
+| `correlationId` | `correlation_id` | `String` | S2b — audit / log join |
+| `tentativeStartDate` | `tentative_start_date` | `LocalDate` | S2b optional |
+| `tentativeEndDate` | `tentative_end_date` | `LocalDate` | S2b optional |
+| `expectedBudgetAmount` | `expected_budget_amount` | `BigDecimal(19,2)` | S2b optional |
+| `expectedBudgetCurrency` | `expected_budget_currency` | `String` | S2b optional |
+| `expectedBudgetSource` | `expected_budget_source` | `String` | S2b optional |
+| `warnings` | `warnings` | `TEXT` | S2b optional (newline-joined) |
+| `confidenceScore` | `confidence_score` | `BigDecimal` | May store Call 2 recommend score when present |
+
+**S2b wiring (as-built):** `RecommendationController` + `RecommenderSagaService` + `client.haystack.HaystackRecommenderClient`. Portal submit = Call 1 + Call 2 **recommend quote** (mapped to portal JSON; `recommendation_items` rows **not** written in S2b). Call 3 chatbot answers returned on knowledge-query only (not persisted). Full contract: [`SPEC-haystack-recommender-client.md`](./SPEC-haystack-recommender-client.md).
 
 ### 5.13 `RecommendationItem` → table `recommendation_items`
 
@@ -376,7 +391,7 @@ No other table declares a unique or composite-unique constraint (e.g. nothing pr
 4. **`RentalPlan.PlanStatus.QUOTEED`** is the literal enum constant in code (likely meant "QUOTED"). Any future DTO/API mapping to this enum should use the value as spelled unless a dedicated change renames it.
 5. **`AssetCategoryRepository.findByName` breaks the `Optional` convention** used everywhere else in this codebase (e.g. `UserRepository.findByEmail`); callers must null-check instead of using `Optional` idioms.
 6. **Schema updates in place, and data persists across restarts.** `ddl-auto=update` means Hibernate creates missing tables/columns from these annotations at startup but never drops, alters, or truncates existing ones — schema drift (a stale column left over from an entity change) has to be fixed manually, and rows survive across app/test-context restarts against the same Postgres instance. See [`SPEC-project-environment.md`](./SPEC-project-environment.md) §5.2, and [`SPEC-seed-data.md`](./SPEC-seed-data.md) §7 for a schema-drift case. This data persistence is also why `data.sql` needs `ON CONFLICT` upserts: it reruns against a database that already has last run's rows in it, not a fresh one.
-7. **`User`, `Asset`, `Payment`, and `Booking` are wired to a controller today; the rest are not.** `Asset` has a full CRUD API (`EquipmentController`/`AssetService`/`EquipmentResponse`/`EquipmentRequest`) backed by its own repository — see [`SPEC-equipment-browse-api.md`](./SPEC-equipment-browse-api.md). `Payment` has a controller/service pair too, but it talks to Stripe directly and never touches `PaymentRepository`. `Booking` has a full contract in [`SPEC-booking-delivery-return-api.md`](./SPEC-booking-delivery-return-api.md), including why it doesn't fully exercise its own data model (`DeliveryRecord`/`ReturnRecord` never created — that spec's §6.3). `RentalPlan` has a stub controller (empty list, no repository call). `AssetCategory`, `AssetImage`, `RentalPlanRecord`, `AIRecommendation`, and `RecommendationItem` remain a data-model foundation for future feature SDDs, not yet a working API surface on this branch.
+7. **`User`, `Asset`, `Payment`, `Booking`, and `AIRecommendation` are wired to a controller today; the rest are not.** `Asset` has a full CRUD API — see [`SPEC-equipment-browse-api.md`](./SPEC-equipment-browse-api.md). `Payment` has a controller/service pair (Stripe). `Booking` — see [`SPEC-booking-delivery-return-api.md`](./SPEC-booking-delivery-return-api.md). **`AIRecommendation` is wired via S2b** (`RecommendationController` / `RecommenderSagaService` / `HaystackRecommenderClient`) — [`SPEC-haystack-recommender-client.md`](./SPEC-haystack-recommender-client.md). `RentalPlan` remains a stub controller. `AssetCategory`, `AssetImage`, `RentalPlanRecord`, and `RecommendationItem` remain data-model-only.
 
 ---
 
@@ -424,3 +439,5 @@ Or read the Hibernate DDL directly from build/test output (`spring.jpa.show-sql=
 | 1.1.0 | 2026-08-08 | Corrected 4 claims left stale by the equipment feature (`SPEC-equipment-browse-api.md`), caught in PR review: §3.2 no longer says there's zero CRUD API (`Asset` now has one); §8's repository catalog now lists `AssetRepository.findAllWithCategory`, `AssetImageRepository.findByAssetIdIn`, and `BookingItemRepository.findAssetIdsWithOverlappingBooking`, and its "no repository uses `@Query`" claim is corrected; §10 notes #2 and #7 now reflect that cascade-delete handling and controller/service/DTO wiring exist for `Asset`. No entity/repository/relationship content changed — this is a documentation-only correction to keep this doc in sync with a dependent feature's changes, per this doc's own stated convention ("When this document and the codebase diverge, update them in the same change set"). |
 | 1.2.0 | 2026-08-09 | Corrected further claims left stale by two more changes: (1) `HR-77` (merged to `develop`) split `Booking.BookingStatus.PENDING` into `PENDING_DEPOSIT`/`PENDING_CONFIRMED`, removed `Booking.PaidStatus`/`paidStatus` entirely, and changed `sitePostalCode` to a computed `@Formula` — §5.7/§6.2/§8 updated to match. (2) `HR-80` wired `Booking` to `BookingController`/`DeliveryController`/`ReturnController`, confirmed `Payment` was already wired via `PaymentController` since `HR-60` without this doc ever reflecting it, and confirmed `RentalPlanController`/`DepotController` are stub controllers with no repository — §3.2/§8/§10 updated, gaps in both flows (no `Payment`/`DeliveryRecord`/`ReturnRecord` persistence, no customer-scoping on `BookingController`'s reads) called out inline. Also fixed a long-standing, unrelated error: this doc said `ddl-auto=create-drop` in four places; the project has run `ddl-auto=update` since `SPEC-seed-data.md` was written (confirmed against `application.properties`) — §4/§7/§10/§11.2 corrected. §5.3 added the `location` column on `Asset`, previously undocumented. Header/§3.1 repository count corrected from 12 to 13 (pre-existing miscount). New companion index: [`SPEC-api-index.md`](./SPEC-api-index.md), listing every route with client ownership and branch status. No entity/repository/relationship content changed beyond what's listed above. |
 | 1.3.0 | 2026-08-09 | Trimmed the `Booking`/`Payment` REST-layer commentary added in 1.2.0 (§3.2, §8's `BookingRepository`/`DeliveryRecordRepository`/`ReturnRecordRepository` rows, §10.7) down to short pointers now that [`SPEC-booking-delivery-return-api.md`](./SPEC-booking-delivery-return-api.md) exists as the actual contract for those routes — full behavioral detail lives there now, not here. This doc's job stays data-model reference only, per its own stated scope. No entity/repository/relationship facts changed. |
+| 1.4.0 | 2026-08-12 | **S2b planned columns on `AIRecommendation`.** §5.12 lists planned haystack session fields (`ingest_id`, `haystack_user_id`, idempotency/correlation keys, budget/dates/warnings); §10.7 notes planned controller wiring via [`SPEC-haystack-recommender-client.md`](./SPEC-haystack-recommender-client.md). Entity source not changed yet. |
+| 1.5.0 | 2026-08-12 | **S2b as-built.** §5.12 columns present on entity; §10.7 controller wiring live. |

@@ -6,12 +6,13 @@
 | **Document type** | Architecture / integration feasibility study |
 | **Status** | Complete (study) — Spring-primary export adaptation |
 | **Date** | 2026-08-12 |
-| **Version** | **2.0.0** |
+| **Version** | **2.2.2** |
 | **Application (caller)** | Spring Boot REST API (portal / domain system of record) |
 | **Dependency** | `haystack-fast-api` (recommender / project-knowledge feature) |
 | **Package** | [`README.md`](./README.md) |
 | **Implementer plan** | [`phase2-s2b-spring-implementation-plan.md`](./phase2-s2b-spring-implementation-plan.md) |
 | **Wire contract** | [`wire-contract-call1-call2.md`](./wire-contract-call1-call2.md) |
+| **Portal mapping** | [`portal-to-haystack-mapping.md`](./portal-to-haystack-mapping.md) |
 | **Upstream study** | Adapted from haystack `Feasibility_Study/spring-boot-fastapi-integration-resilience.md` v1.3.1 |
 
 ---
@@ -20,7 +21,7 @@
 
 ### Problem
 
-Spring Boot will invoke haystack-fast-api **multiple times** per recommender journey (project-spec **ingest**, multi-agent **Q&A**, later **rank/price recommend**). Work on FastAPI can be **long-running** (indexing, KG, agents, LLM). The connection must be:
+Spring Boot will invoke haystack-fast-api **multiple times** per recommender journey (project-spec **ingest**, **Call 2 recommend/quote**, optional **Call 3 chatbot Q&A**). Work on FastAPI can be **long-running** (indexing, KG, agents, LLM). The connection must be:
 
 - **Robust** — correct contracts, multi-call orchestration, correlation  
 - **Resilient** — timeouts, retries, circuit breaking, backpressure  
@@ -44,29 +45,33 @@ Use **REST multipart/JSON** for uploads and recommender RPCs; orchestrate **mult
 | Stage | Owner | Status |
 |-------|--------|--------|
 | **S2a** | haystack-fast-api | **As-built** — server `Idempotency-Key` + correlation ([`s2a-haystack-dependency.md`](./s2a-haystack-dependency.md)) |
-| **S2b** | Spring Boot | **Ready to implement** — client timeouts, Resilience4j, saga, headers |
+| **S2b** | Spring Boot | **As-built** (this repo) — client timeouts, Resilience4j, saga Call 1→2 quote, Call 3 Q&A, headers |
 
 ---
 
 ## 2. Multi-call journey
 
+**Portal project-spec submit** (normative product path):
+
 ```text
-Portal / user
+React  POST /api/recommendations/project-spec
     │
     ▼
 Spring Boot REST API          (auth, booking SoT, orchestration)  ← YOU
-    │  Call 1: ingest project file/text
-    │  Call 2: project-knowledge Q&A (0..N)
-    │  Call 3: recommend / rank+price (later)
+    │  Call 1: ingest  (submitprojectspecification)
+    │  Call 2: RECOMMEND quote  (getassetrecommendations) → React primary
+    │  Call 3: CHATBOT Q&A  (project-knowledge/query) optional
     ▼
-haystack-fast-api             (Haystack pipelines, agents, stores)
+haystack-fast-api
 ```
+
+See [`portal-to-haystack-mapping.md`](./portal-to-haystack-mapping.md).
 
 | Call | Path | Latency profile |
 |------|------|-----------------|
-| **Ingest** | `POST /internal/v1/recommendations/submitprojectspecification` | Seconds–tens of seconds |
-| **Q&A** | `POST /internal/v1/recommendations/project-knowledge/getassetrecommendations` | Seconds if LLM; fast if stub |
-| **Recommend** | Future HTTP / service | Seconds–tens (later) |
+| **1 Ingest** | `POST /internal/v1/recommendations/submitprojectspecification` | Seconds–tens of seconds |
+| **2 Recommend** | `POST /internal/v1/recommendations/project-knowledge/getassetrecommendations` | Seconds (fleet + price MVP) |
+| **3 Chatbot Q&A** | `POST /internal/v1/recommendations/project-knowledge/query` | Seconds if LLM; fast if stub |
 | **Health** | `GET /health` | Milliseconds |
 
 ### FastAPI-internal (out of Spring scope)
@@ -101,10 +106,10 @@ After a request arrives, FastAPI may run indexing gate, multi-agent Workers, and
 
 | Pattern | Guidance |
 |---------|----------|
-| **Timeouts** | Connect vs read separate; **ingest ≫ Q&A ≫ health**; never infinite |
+| **Timeouts** | Connect vs read separate; **ingest ≫ recommend ≫ Q&A ≫ health**; never infinite |
 | **Retry** | Exponential backoff + jitter; **ingest only with same `Idempotency-Key`**; limited attempts |
 | **Circuit breaker** | Open on error rate / slow calls; fail fast to portal |
-| **Bulkhead** | Cap concurrent haystack calls (prefer separate ingest vs Q&A limits) |
+| **Bulkhead** | Cap concurrent haystack calls (prefer separate ingest vs recommend vs Q&A limits) |
 | **Fallback** | “Recommender unavailable / delayed” — never invent equipment |
 | **Connection pool** | Tune max connections per host |
 
@@ -120,18 +125,22 @@ Without S2a + same key, **retry after timeout may double-index**.
 
 ### 5.3 Saga in Spring
 
+Triggered by React **`POST /api/recommendations/project-spec`**:
+
 ```text
-1. INGEST
-   - POST with Idempotency-Key + correlation
-   - Long read timeout (or later C2: 202 + poll)
+1. INGEST (Call 1)
+   - POST .../submitprojectspecification with Idempotency-Key + correlation
    - Persist ingest_id on booking/session
 
-2. Q&A (0..N)
-   - POST user_id + ingest_id + query
-   - Retry transient 5xx; NEVER re-ingest on Q&A failure
+2. RECOMMEND (Call 2) — required hop for portal submit UX
+   - POST .../project-knowledge/getassetrecommendations
+   - user_id + ingest_id + optional query
+   - Returns quote / items[]; map to React as primary response
+   - Retry transient 5xx; NEVER re-ingest on Call 2 failure
 
-3. RECOMMEND (later)
-   - Same identity; stub OK in S2b
+3. CHATBOT Q&A (Call 3) — optional follow-ups
+   - POST .../project-knowledge/query
+   - user_id + ingest_id + query required
 ```
 
 ### 5.4 FastAPI side (context only)
@@ -180,7 +189,7 @@ Threadpool offload, stable `{"error","message"}`, process-local sessions until P
 1. WebClient multipart ingest; measure p50/p95; break with short timeout → motivates retry + C2.  
 2. Same `Idempotency-Key` twice against haystack with S2a → one `ingest_id`.  
 3. Resilience4j: kill FastAPI mid-call; CB opens and recovers.  
-4. Saga: ingest OK, Q&A 500 → WireMock shows **one** ingest only.  
+4. Saga: ingest OK, Call 2 recommend 500 → WireMock shows **one** ingest only.  
 
 ---
 
@@ -199,5 +208,9 @@ Threadpool offload, stable `{"error","message"}`, process-local sessions until P
 
 | Version | Date | Notes |
 |---------|------|--------|
+| **2.2.2** | 2026-08-12 | S2b marked as-built in Spring export package |
+| **2.2.1** | 2026-08-12 | Timeouts/bulkhead/saga wording: recommend not Q&A as second hop |
+| **2.2.0** | 2026-08-12 | Call 2 recommend + Call 3 chatbot Q&A |
+| **2.1.0** | 2026-08-12 | Portal dual-hop (Call 2 was Q&A; superseded) |
 | **2.0.0** | 2026-08-12 | Spring export package; S2a as-built; internal routes; C1 = S2a+S2b |
 | **1.3.1** | 2026-08-10 | Upstream haystack-centric study (source) |

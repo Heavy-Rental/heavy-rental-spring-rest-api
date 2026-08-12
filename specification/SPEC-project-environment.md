@@ -14,6 +14,14 @@
 Related feature specs:
 
 - [`SPEC-request-bearer-token.md`](./SPEC-request-bearer-token.md) — login / Bearer JWT issuance and usage
+- [`SPEC-haystack-recommender-client.md`](./SPEC-haystack-recommender-client.md) — S2b resilient haystack client (as-built: Call 1/2/3)
+- [`SPEC-api-index.md`](./SPEC-api-index.md) — full REST surface index
+
+Hybrid SDD for larger capabilities (e.g. S2b):
+
+- OpenSpec: `openspec/` (living specs + change deltas)
+- Spec-Kit-style pack: `specification/features/<feature>/` (`spec.md`, `plan.md`, `tasks.md`, `checklist.md`)
+- SPDD REASONS canvas: `spdd/prompt/`
 
 ---
 
@@ -96,6 +104,7 @@ heavy-rental-rest-api/                         # workspace root
 | Observability | Spring Boot Actuator |
 | Build | Maven Wrapper (`./mvnw`) |
 | Utilities | Lombok (optional), DevTools (runtime optional) |
+| Resilience (S2b) | Resilience4j 2.3.0 (circuitbreaker, bulkhead, retry) — programmatic decorators on haystack RestClient |
 | Embedded container (dev) | Tomcat (starter provided scope for WAR) |
 
 ### 4.1 Key Maven dependencies
@@ -191,7 +200,8 @@ Full auth contracts live in feature specs; this is the environment-level model:
 |---------|----------------|
 | `config` | `SecurityConfig`, `JwtProperties`, `RestExceptionHandler` |
 | `controller` | HTTP mappings only (thin) |
-| `service` | Business logic and orchestration (`AuthService`, `CustomUserDetailsService`) |
+| `service` | Business logic and orchestration (`AuthService`, `CustomUserDetailsService`, planned `RecommenderSagaService`) |
+| `client.haystack` | **S2b as-built** — RestClient to haystack-fast-api, DTOs, timeouts, Resilience4j decoration |
 | `security` | JWT generation helpers, token denylist |
 | `dto` | API request/response types (prefer Java **records**, camelCase JSON) |
 | `entity` | JPA entities (e.g. `User` → table `users`) |
@@ -204,6 +214,8 @@ Full auth contracts live in feature specs; this is the environment-level model:
 3. New **public** endpoints require an explicit `permitAll` entry in `SecurityConfig`.
 4. New **protected** endpoints rely on existing JWT resource-server configuration; do not invent a second auth filter chain without an SDD.
 5. Prefer reusing existing DTOs and error codes (`bad_request`, `unauthorized`, `invalid_credentials`, `conflict`, `forbidden`, …).
+6. **Outbound integrations** (e.g. haystack, Stripe) belong in `client.*` or dedicated services — controllers must not call external HTTP clients directly.
+7. Haystack recommender config uses `haystack.*` properties (base URL, per-op timeouts, retry flags, max body size) — see [`SPEC-haystack-recommender-client.md`](./SPEC-haystack-recommender-client.md) §7. Resilience4j is the planned library for circuit breaker / bulkhead / retry on that client.
 
 ---
 
@@ -302,9 +314,12 @@ curl -s -X POST http://localhost:8080/api/auth/logout \
 
 | Kind | Location | Naming |
 |------|----------|--------|
-| Environment / constitution | Workspace root | `SPEC-project-environment.md` (this file) |
-| Feature | Workspace root | `SPEC-<feature-kebab-case>.md` |
-| Cross-cutting index | Workspace root | `SPEC-api-index.md` — the full REST route list with client ownership and a pointer to each route's owning spec; not itself a contract |
+| Environment / constitution | `specification/` | `SPEC-project-environment.md` (this file) |
+| Feature | `specification/` | `SPEC-<feature-kebab-case>.md` |
+| Cross-cutting index | `specification/` | `SPEC-api-index.md` — the full REST route list with client ownership and a pointer to each route's owning spec; not itself a contract |
+| Spec-Kit feature pack | `specification/features/<feature>/` | `spec.md`, `plan.md`, `tasks.md`, `checklist.md` — Specify → Plan → Tasks before implement |
+| OpenSpec SoT / changes | `openspec/` | Living `specs/<domain>/spec.md` + `changes/<change-id>/` deltas (ADDED/MODIFIED/REMOVED) |
+| SPDD structured prompt | `spdd/prompt/` | REASONS canvas; version with code; fix prompt before code when behaviour diverges |
 
 **When a feature needs its own standalone file:** create `SPEC-<feature-kebab-case>.md` when the feature carries business logic that will keep evolving independently of everything else — a state machine, its own authorization rules, its own request/response contract that changes on its own schedule. Do **not** create one for a trivial route (a stub returning `[]`, a passthrough with no business logic, a one-line CRUD wrapper with no rules of its own) — document those inline in whichever spec already covers their data model, or as a row in `SPEC-api-index.md`.
 
@@ -386,5 +401,7 @@ Unless a dedicated SDD says otherwise:
 | 1.3.1 | 2026-08-02 | Split feature SPECs: SPEC-request-bearer-token (mint) + SPEC-auth-login-logout (session) |
 | 1.4.0 | 2026-08-05 | Removed `DefaultUserInitializer` and the `app.security.default-username`/`default-password` properties; `users` (including `admin`) is now seeded entirely by `data.sql` (see SPEC-seed-data §6.0) |
 | 1.5.0 | 2026-08-09 | §9.1/§9.3 codified when a feature needs a standalone spec file vs. inline documentation: independent, evolving logic (state machine, its own authz, its own contract) gets its own `SPEC-<feature>.md`; trivial/stub routes don't. Grounded in two real incidents in this repo: `SPEC-request-bearer-token.md` was split out of a combined file for exactly this reason, and `SPEC-entity-repository.md` — the shared file the rule steers features away from — took a real multi-branch editing conflict as a direct result of not having per-feature files. Added `SPEC-api-index.md` to §9.1 as the discovery layer that makes "too many files" a non-issue. |
+| 1.6.0 | 2026-08-12 | **S2b hybrid SDD.** §9.1 documents Spec-Kit feature packs, OpenSpec, and SPDD paths alongside living `SPEC-*.md`. §6 adds planned `client.haystack` package; §6.1 layering: no direct external HTTP from controllers; `haystack.*` + Resilience4j planned for recommender client. Links [`SPEC-haystack-recommender-client.md`](./SPEC-haystack-recommender-client.md). Docs only — no runtime dependency added yet. |
+| 1.7.0 | 2026-08-12 | **S2b as-built.** Stack lists Resilience4j 2.3.0; `client.haystack` package live. |
 
 When changing stack, database strategy, packaging, default security model, or SDD file locations, bump this table and notify dependent feature specs.

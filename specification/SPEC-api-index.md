@@ -5,7 +5,7 @@
 | **Document type** | Cross-cutting index — not a feature contract itself |
 | **Status** | As-built across `develop` (which now includes both former `HR-72` and `HR-80` work — see §3.1) + one locally-rebased branch (`hr-27-payment-checkout`, not yet pushed — see §2.4) |
 | **Module** | `heavy-rental-spring-rest-api` |
-| **Related specs** | [`SPEC-request-bearer-token.md`](./SPEC-request-bearer-token.md), [`SPEC-auth-login-logout.md`](./SPEC-auth-login-logout.md), [`SPEC-equipment-browse-api.md`](./SPEC-equipment-browse-api.md), [`SPEC-entity-repository.md`](./SPEC-entity-repository.md), [`SPEC-stripe.md`](./SPEC-stripe.md) |
+| **Related specs** | [`SPEC-request-bearer-token.md`](./SPEC-request-bearer-token.md), [`SPEC-auth-login-logout.md`](./SPEC-auth-login-logout.md), [`SPEC-equipment-browse-api.md`](./SPEC-equipment-browse-api.md), [`SPEC-entity-repository.md`](./SPEC-entity-repository.md), [`SPEC-stripe.md`](./SPEC-stripe.md), [`SPEC-haystack-recommender-client.md`](./SPEC-haystack-recommender-client.md) |
 | **Environment context** | [`SPEC-project-environment.md`](./SPEC-project-environment.md) (read first) |
 
 This document is the **single place to see the entire REST surface** — every route, which client it's for, what branch it lives on, and which feature spec (if any) owns its detailed contract. It does not restate request/response shapes already documented elsewhere; it points to them.
@@ -111,6 +111,23 @@ This branch (see §2.2's payments rows) exists only on the machine it was rebase
 |---|---|---|
 | `platform` attribute on `LoginRequest` | ⏳ Not started | Branch `HR-85-implement-platform-attribute-in-login-request-body` exists but has **zero commits beyond `HR-77`** — it's an unstarted placeholder, not a design that's been written down anywhere yet. Likely the intended mechanism for distinguishing web vs mobile at login (see §4) once work begins. |
 
+### 2.6 Web — recommender (S2b as-built)
+
+Phase 2 / **S2b**: resilient Spring client for `haystack-fast-api`, saga, and thin portal REST. **As-built 2026-08-12** (Feasibility v2 Call 1/2/3) — see [`SPEC-haystack-recommender-client.md`](./SPEC-haystack-recommender-client.md).
+
+| Method | Path | Client | Roles allowed | Status | Contract |
+|---|---|---|---|---|---|
+| `POST` | `/api/recommendations/project-spec` | Web | `ROLE_USER`, `ROLE_ADMIN` | ✅ Implemented (S2b) | §5.1 — **Call 1 then Call 2 recommend**; portal body includes `quoteRef` / `items` |
+| `POST` | `/api/recommendations/{recommendationId}/knowledge-query` | Web | Owner or `ROLE_ADMIN` | ✅ Implemented (S2b) | §5.2 — **Call 3** chatbot Q&A only |
+| `GET` | `/api/recommendations/{recommendationId}` | Web | Owner or `ROLE_ADMIN` | ✅ Implemented (S2b) | §5.3 — DB session only |
+
+**Haystack orchestration on submit:**  
+`POST /api/recommendations/project-spec` →  
+1. Call 1 `POST /internal/v1/recommendations/submitprojectspecification`  
+2. Call 2 `POST /internal/v1/recommendations/project-knowledge/getassetrecommendations`  
+then returns session handles + **Call 2 quote**.  
+Follow-up chatbot: Call 3 `POST .../project-knowledge/query` via knowledge-query. Also `GET /health` on the client.
+
 ---
 
 ## 3. Correcting assumptions this index was built to check
@@ -168,3 +185,7 @@ Moved to [`SPEC-booking-delivery-return-api.md`](./SPEC-booking-delivery-return-
 | 1.3.0 | 2026-08-11 | `hr-27-payment-checkout` rebased onto `develop` locally (§2.4, new). Corrected two stale claims found in the process (§3.2, new): `HR-72` and `HR-80` are both already merged into `develop` (§2.2/§2.3 status columns updated from `🔀 Branch HR-80`/`🔀 Branch HR-72` to `✅ Merged → develop` throughout), not the unmerged sibling branches this index previously described. §2.2's payments row replaced: `POST /api/payments/create-payment-intent` (`HR-60`, client-supplied amount, no owning spec) no longer exists anywhere in the codebase as of this rebase — replaced by `POST /api/payments/deposit-intent` and `POST /api/payments/webhook`, now documented in full by [`SPEC-stripe.md`](./SPEC-stripe.md) (added to `Related specs` above; this index previously didn't reference it at all). Added the CORS-not-configured blocker and the booking-creation gap, both cross-cutting concerns affecting the whole route surface rather than one feature, so they belong here rather than only in `SPEC-stripe.md`. |
 | 1.4.0 | 2026-08-11 | **CORS blocker (§2.4) fixed on this branch.** Added `CorsProperties` (`config/CorsProperties.java`, `app.cors.allowed-origins`/`APP_CORS_ALLOWED_ORIGINS`, comma-separated, default `http://localhost:5173,http://localhost:4173`) and a real `CorsConfigurationSource` bean in `SecurityConfig`, replacing the previous no-op `.cors(Customizer.withDefaults())`. Scoped to `/api/**`; allows `GET/POST/PUT/PATCH/DELETE/OPTIONS` and `Authorization`/`Content-Type` headers; no wildcard origin. Verified against a running instance, not just compiled: allowed-origin preflight returns `200` with `Access-Control-Allow-Origin`, disallowed-origin preflight returns `403`. §2.4's CORS bullet updated from "not configured" to describe the fix; the paidStatus gap in the same section is unaffected and still open. |
 | 1.5.0 | 2026-08-11 | **Booking-creation gap (§2.2) closed.** `POST /api/bookings` implemented — new §2.2.1 documents the full contract (request/response shapes, server-side validation order, availability-conflict check reusing `AssetService`'s own `Booking.ACTIVE_STATUSES` — promoted from a private `AssetService` constant to a shared field on `Booking` so the two can't drift — and the 30%/70% deposit split `SPEC-stripe.md` §4.3 already assumed lived here). `BookingResponse` extended with `totalAmount`/`depositAmount`/`remainingBalance` (additive, non-breaking for existing `GET`/`PUT` consumers). Verified end-to-end against a running instance: created a real booking, fed its real `bookingId` into `POST /api/payments/deposit-intent`, confirmed every layer up to the actual Stripe API call is correctly wired (fails only on the placeholder API key). Also found and fixed, while verifying: `data.sql` seeds 12 of 13 tables with explicit primary keys and no matching `setval(...)` sequence sync (only `users` had one) — the first runtime `IDENTITY`-generated insert on any of those tables collided with an already-seeded row. This silently broke `POST /api/equipment` too (§2.3, already merged to `develop`), confirmed by reproducing the failure on both endpoints before the fix and re-testing both after. |
+| 1.6.0 | 2026-08-12 | **S2b recommender routes planned.** New §2.6 lists portal `POST /api/recommendations/project-spec`, `POST .../knowledge-query`, `GET .../{id}` as ⏳ Not started with contract [`SPEC-haystack-recommender-client.md`](./SPEC-haystack-recommender-client.md). Related specs header updated. No runtime code in this change. |
+| 1.7.0 | 2026-08-12 | **S2b implemented.** §2.6 routes marked ✅ Implemented; contract status As-built. |
+| 1.8.0 | 2026-08-12 | §2.6: project-spec runs Call 1 then Call 2 (`getassetrecommendations`); response carries Call 2 answer. |
+| 2.0.0 | 2026-08-12 | §2.6 Feasibility v2: Call 2 = recommend quote (`quoteRef`/`items`); knowledge-query = Call 3 `.../query` chatbot. |

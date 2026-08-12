@@ -3,40 +3,60 @@
 | Field | Value |
 |-------|--------|
 | **Document type** | SDD test reference (as-built) |
-| **Status** | Implemented |
+| **Status** | Implemented (auth + S2b WireMock/unit) |
 | **Module** | `heavy-rental-spring-rest-api` |
-| **Related code** | `src/test/java/com/heavy_rental/rest_api/RestApiApplicationTests.java`; `src/test/java/com/heavy_rental/rest_api/controller/AuthenticationIntegrationTest.java` |
-| **Environment context** | [`SPEC-project-environment.md`](./SPEC-project-environment.md), [`SPEC-auth-login-logout.md`](./SPEC-auth-login-logout.md), [`SPEC-request-bearer-token.md`](./SPEC-request-bearer-token.md) |
+| **Related code** | `RestApiApplicationTests`; `AuthenticationIntegrationTest`; S2b: `HaystackRecommenderClientTest`, `HaystackRetryIdempotencyTest`, `HaystackCircuitBreakerTest`, `HaystackBulkheadTest`, `RecommenderSagaServiceTest` |
+| **Environment context** | [`SPEC-project-environment.md`](./SPEC-project-environment.md), auth SPECs, [`SPEC-haystack-recommender-client.md`](./SPEC-haystack-recommender-client.md) |
 
 ---
 
 ## 1. Test classes
 
-- **`RestApiApplicationTests`** — `@SpringBootTest` smoke test, `contextLoads()` only. Confirms the Spring context wires up (beans, JPA, security config) with no assertions beyond that.
-- **`AuthenticationIntegrationTest`** — `@SpringBootTest @AutoConfigureMockMvc`, 11 tests driving the full interim-token → login → access-token → logout flow through `MockMvc` against real controllers/security filters.
+### 1.1 Auth / context (Postgres)
+
+- **`RestApiApplicationTests`** — `@SpringBootTest` smoke test, `contextLoads()` only.
+- **`AuthenticationIntegrationTest`** — `@SpringBootTest @AutoConfigureMockMvc`, interim-token → login → access-token → logout via MockMvc against real security filters. `@Transactional` rollback isolation.
+
+### 1.2 S2b haystack recommender (as-built)
+
+Contract: [`SPEC-haystack-recommender-client.md`](./SPEC-haystack-recommender-client.md) §11. **WireMock** / pure unit tests — no live FastAPI required.
+
+| Class | Asserts |
+|-------|---------|
+| `HaystackRecommenderClientTest` | Happy path ingest / Call 2 recommend quote / Call 3 Q&A / health; headers; 4xx/5xx |
+| `HaystackRetryIdempotencyTest` | Same `Idempotency-Key` on 5xx retry when ingest retry enabled |
+| `HaystackTimeoutRetryTest` | Delay &gt; read timeout → retry same key; timeout maps to `recommender_timeout` |
+| `HaystackCircuitBreakerTest` | N× 500 → open → fail-fast without further HTTP |
+| `HaystackBulkheadTest` | Concurrent limit rejects when full |
+| `RecommenderSagaServiceTest` | Dual-hop quote body (Mockito); Call 2 fail → **no** re-ingest; Call 3 knowledge-query only |
+| `RecommenderSagaWireMockTest` | Real client dual-hop: WireMock Call 1+2 paths, shared `X-Correlation-Id`, `quoteRef`/`items`, no re-ingest |
+| `RecommendationControllerIntegrationTest` | MockMvc + JWT + WireMock: JSON/multipart submit, GET session, knowledge-query, 401 |
+
+```bash
+./mvnw -Dtest=HaystackRecommenderClientTest,HaystackRetryIdempotencyTest,HaystackCircuitBreakerTest,HaystackBulkheadTest,RecommenderSagaServiceTest test
+./mvnw test
+```
 
 ## 2. Database target
 
-Both classes run with no test profile, no `@DataJpaTest`, no Testcontainers/H2 — they use the same `application.properties` as `spring-boot:run`, i.e. the same Postgres instance (`POSTGRES_HOSTNAME`) as local dev. There is no separate test database in this project today.
+Auth/context tests use the same Postgres as `spring-boot:run` (`POSTGRES_HOSTNAME`). S2b client/resilience/saga tests do **not** require Postgres (WireMock + Mockito).
 
 ## 3. Test isolation
 
-`AuthenticationIntegrationTest.createUser()` (`@BeforeEach`) inserts a throwaway `User` via `userRepository.save(...)` for each test to log in as. The class is annotated `@Transactional`, so that insert and everything each test does through `MockMvc` in the same thread share one transaction that rolls back at test end — no row is ever committed to the shared Postgres instance.
-
-This was added after the class ran without `@Transactional`: every `mvn test` run left a permanent `Test User <uuid>` row in `users`, which accumulated over repeated runs and polluted the `data.sql`-seeded rows (see [`SPEC-seed-data.md`](./SPEC-seed-data.md) §6.0) with junk visible through any query or the API.
+`AuthenticationIntegrationTest` uses `@Transactional` so per-test users roll back.
 
 ## 4. `AuthenticationIntegrationTest` flow
 
-Per-test setup mints a fresh user (`email`, `password` fields) via `createUser()`. Tests cover:
+Per-test setup mints a fresh user via `createUser()`. Coverage: interim JWT, login success/failure, role gates, logout denylist, protected path 401.
 
-1. `getBearerTokenReturnsInterimJwt` — `GET /api/auth/getBearerToken` returns a plain-text interim JWT (`ROLE_INTERIM`, no `ROLE_USER`) with a valid `generatedAt` claim.
-2. `interimTokenCannotCallLogout` / `interimTokenCannotCallProtectedBusinessPath` — interim tokens are rejected (403) on non-login endpoints.
-3. `loginWithoutBearerReturns401` — `POST /api/auth/login` without an interim token is rejected.
-4. `loginWithInterimAndBadPasswordReturns401` — wrong password with a valid interim token → 401 `invalid_credentials`.
-5. `loginWithInterimAndValidCredentialsReturnsAccessToken` — correct credentials + interim token → `ROLE_USER` access token.
-6. `loginWithAccessTokenReturns403` — an access token can't be replayed against `/login`.
-7. `interimTokenCannotBeReusedAfterLogin` — an interim token is single-use.
-8. `logoutRevokesAccessToken` — `POST /api/auth/logout` revokes the access token; reuse after logout → 401.
-9. `protectedEndpointWithoutTokenReturns401` — no token on a protected endpoint → 401.
+Helpers: `mintInterim()`, `loginAndGetAccessToken()`.
 
-Helpers `mintInterim()` and `loginAndGetAccessToken()` factor out the common interim-token and full-login steps used across tests.
+---
+
+## 5. Change control
+
+| Version | Date | Notes |
+|---------|------|--------|
+| 1.0.0 | (prior) | As-built: context smoke + `AuthenticationIntegrationTest` |
+| 1.1.0 | 2026-08-12 | Planned S2b WireMock classes documented |
+| 1.2.0 | 2026-08-12 | **S2b tests as-built** — five classes green; full `./mvnw test` green |
