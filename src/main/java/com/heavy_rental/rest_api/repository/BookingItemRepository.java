@@ -30,4 +30,12 @@ public interface BookingItemRepository extends JpaRepository<BookingItem, Long> 
       @Param("startDate") LocalDate startDate,
       @Param("endDate") LocalDate endDate,
       @Param("activeStatuses") Collection<Booking.BookingStatus> activeStatuses);
+
+  @Query("""
+      SELECT bi
+      FROM BookingItem bi
+      JOIN FETCH bi.booking b
+      WHERE b.status IN :activeStatuses
+      """)
+  List<BookingItem> findByBookingStatusIn(@Param("activeStatuses") Collection<Booking.BookingStatus> activeStatuses);
 }
