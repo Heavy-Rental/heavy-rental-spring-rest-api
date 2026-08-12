@@ -184,7 +184,7 @@ INSERT INTO bookings (id, customer_id, rental_plan_id, start_date, end_date, sta
   (8,  (SELECT id FROM users WHERE name = 'Alex Tan'), 2, CURRENT_DATE - 2, CURRENT_DATE, 'COMPLETED', 630.00,  189.00, 0.00, '22 Kranji Way, Singapore 739450',                      '',                                                         '2026-05-01 09:00:00'),
   (9,  (SELECT id FROM users WHERE name = 'Alex Tan'), 3, CURRENT_DATE - 1, CURRENT_DATE, 'COMPLETED', 320.00,  96.00,  0.00, '8 Senoko Drive, Singapore 758196',                     '',                                                         '2026-03-28 09:00:00'),
   (10, (SELECT id FROM users WHERE name = 'Alex Tan'), 4, CURRENT_DATE - 3, CURRENT_DATE, 'MOBILISED', 900.00,  270.00, 0.00, '3 Benoi Road, Singapore 629895',                       '',                                                         '2026-01-25 09:00:00'),
-  (11, (SELECT id FROM users WHERE name = 'Alex Tan'), 5, CURRENT_DATE, CURRENT_DATE + 3, 'CONFIRMED',   1080.00, 324.00, 0.00, '6 Gul Circle, Singapore 629563',                       '',                                                         '2026-08-05 10:00:00'),
+  (11, (SELECT id FROM users WHERE name = 'Alex Tan'), 5, CURRENT_DATE, CURRENT_DATE + 3, 'CONFIRMED',   1440.00, 432.00, 0.00, '6 Gul Circle, Singapore 629563',                       '',                                                         '2026-08-05 10:00:00'),
   (12, (SELECT id FROM users WHERE name = 'Alex Tan'), 6, CURRENT_DATE, CURRENT_DATE + 5, 'CONFIRMED',   2000.00, 600.00, 0.00, '14 Kallang Ave, Singapore 339410',                     '',                                                         '2026-08-04 09:30:00'),
   (13, (SELECT id FROM users WHERE name = 'Alex Tan'), 1, CURRENT_DATE, CURRENT_DATE + 2, 'MOBILISED',   540.00,  162.00, 0.00, '3 Pandan Loop, Singapore 128215',                      'Confirm delivery lift access',                            '2026-08-06 08:45:00'),
   (14, (SELECT id FROM users WHERE name = 'Alex Tan'), 2, CURRENT_DATE, CURRENT_DATE + 5, 'CONFIRMED', 1650.00, 495.00, 0.00,  '9 Woodlands Loop, Singapore 738322',                   '',                                                         '2026-08-03 13:20:00'),
@@ -371,7 +371,8 @@ INSERT INTO booking_items (id, booking_id, asset_id, daily_rate, subtotal, start
   (94, 87, 26, 110.00, 660.00, 1290.0, NULL, 'GOOD', NULL),
   (95, 88, 26, 110.00, 550.00, 1305.0, 1329.0, 'GOOD', 'GOOD'),
   (96, 89, 27, 210.00, 1050.00, NULL, NULL, NULL, NULL),
-  (97, 90, 27, 210.00, 840.00, NULL, NULL, NULL, NULL)
+  (97, 90, 27, 210.00, 840.00, NULL, NULL, NULL, NULL),
+  (98, 11, 3,  120.00, 360.00, NULL, NULL, NULL, NULL)
 ON CONFLICT (id) DO NOTHING;
 
 -- Sync sequence so runtime inserts don't collide with the explicit ids above
@@ -401,7 +402,7 @@ INSERT INTO payments (id, booking_id, stripe_payment_intent_id, stripe_charge_id
   (9, 8, 'pi_3PQa9FKx9x1x1x1x9', 'ch_3PQa9FKx9x1a9', 'cus_AlexTan001', 'pm_AlexTan001card', 630.00, 'FULL_PAYMENT', 'SUCCESS', NULL, '2026-05-01 09:30:00', '2026-05-01 09:25:00'),
   (10, 9, 'pi_3PQb0FKx9x1x1x1x0', 'ch_3PQb0FKx9x1b0', 'cus_AlexTan001', 'pm_AlexTan001card', 320.00, 'FULL_PAYMENT', 'SUCCESS', NULL, '2026-03-28 09:20:00', '2026-03-28 09:15:00'),
   (11, 10, 'pi_3PQb1FKx9x1x1x1b1', 'ch_3PQb1FKx9x1b1', 'cus_AlexTan001', 'pm_AlexTan001card', 900.00, 'FULL_PAYMENT', 'SUCCESS', NULL, '2026-02-05 09:10:00', '2026-02-05 09:00:00'),
-  (12, 11, 'pi_orph11dep', 'ch_orph11dep', 'cus_orph11', 'pm_orph11card', 324.00, 'DEPOSIT', 'SUCCESS', NULL, CURRENT_DATE + TIME '09:10:00', CURRENT_DATE + TIME '09:05:00'),
+  (12, 11, 'pi_orph11dep', 'ch_orph11dep', 'cus_orph11', 'pm_orph11card', 432.00, 'DEPOSIT', 'SUCCESS', NULL, CURRENT_DATE + TIME '09:10:00', CURRENT_DATE + TIME '09:05:00'),
   (13, 12, 'pi_orph12dep', 'ch_orph12dep', 'cus_orph12', 'pm_orph12card', 600.00, 'DEPOSIT', 'SUCCESS', NULL, CURRENT_DATE + TIME '09:10:00', CURRENT_DATE + TIME '09:05:00'),
   (14, 13, 'pi_orph13dep', 'ch_orph13dep', 'cus_orph13', 'pm_orph13card', 162.00, 'DEPOSIT', 'SUCCESS', NULL, CURRENT_DATE + TIME '09:10:00', CURRENT_DATE + TIME '09:05:00'),
   (15, 14, 'pi_orph14dep', 'ch_orph14dep', 'cus_orph14', 'pm_orph14card', 495.00, 'DEPOSIT', 'SUCCESS', NULL, CURRENT_DATE + TIME '09:10:00', CURRENT_DATE + TIME '09:05:00'),

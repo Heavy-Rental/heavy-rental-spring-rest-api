@@ -3,13 +3,13 @@
 | Field | Value |
 |-------|--------|
 | **Feature** | REST API for viewing/updating bookings and driving the delivery/return status workflow |
-| **Status** | Implemented on branch `HR-80-implement-endpoints-for-bookings-deliveries-and-returns`, not yet merged to `develop`. `returnNotes` (HR-100) implemented on top of that. |
+| **Status** | Implemented on branch `HR-80-implement-endpoints-for-bookings-deliveries-and-returns`, not yet merged to `develop`. `returnNotes` (HR-100) implemented on top of that. All of a booking's items, not just one (HR-113), implemented on top of that. |
 | **Module** | `heavy-rental-spring-rest-api` |
 | **Primary paths** | `GET/PUT /api/bookings`, `/api/bookings/{id}`; `GET /api/deliveries`, `PATCH /api/deliveries/{id}/status`; `GET /api/returns`, `PATCH /api/returns/{id}/status` |
 | **Client** | Mobile (per branch author — see [`SPEC-api-index.md`](./SPEC-api-index.md) §2.2) |
 | **Depends on** | [`SPEC-entity-repository.md`](./SPEC-entity-repository.md) (`Booking`, `BookingItem`, `Asset`, `User`), [`SPEC-auth-login-logout.md`](./SPEC-auth-login-logout.md) (access token required to call any route here) |
 | **Environment context** | [`SPEC-project-environment.md`](./SPEC-project-environment.md) (read first) |
-| **Related code** | `controller/BookingController.java`, `controller/DeliveryController.java`, `controller/ReturnController.java`, `service/BookingService.java`, `service/DeliveryService.java`, `service/ReturnService.java`, `mapper/BookingMapper.java`, `dto/BookingResponse.java`, `dto/BookingUpdateRequest.java`, `dto/DeliveryItemResponse.java`, `dto/ReturnItemResponse.java`, `dto/StatusUpdateRequest.java`, `dto/ReturnStatusUpdateRequest.java`, `repository/BookingRepository.java`, `repository/BookingItemRepository.java` |
+| **Related code** | `controller/BookingController.java`, `controller/DeliveryController.java`, `controller/ReturnController.java`, `service/BookingService.java`, `service/DeliveryService.java`, `service/ReturnService.java`, `mapper/BookingMapper.java`, `dto/BookingResponse.java`, `dto/BookingUpdateRequest.java`, `dto/DeliveryItemResponse.java`, `dto/ReturnItemResponse.java`, `dto/BookingItemLine.java`, `dto/StatusUpdateRequest.java`, `dto/ReturnStatusUpdateRequest.java`, `repository/BookingRepository.java`, `repository/BookingItemRepository.java` |
 
 This document is the **single source of truth** for the `/api/bookings`, `/api/deliveries`, and `/api/returns` REST surface: what each route does, the booking-status state machine it enforces, and known gaps against the underlying data model. It does not restate `Booking`/`BookingItem` column-level detail — see `SPEC-entity-repository.md` for that.
 
@@ -40,7 +40,7 @@ When this feature is correct:
 - `PATCH /api/deliveries/{bookingId}/status` — the single legal transition `CONFIRMED → MOBILISED`.
 - `GET /api/returns` — bookings with `endDate == today` and `status IN (MOBILISED, COMPLETED)`. Each item now includes `returnNotes` (HR-100).
 - `PATCH /api/returns/{bookingId}/status` — the single legal transition `MOBILISED → COMPLETED`, now also accepting and persisting a `returnNotes` string (HR-100).
-- The "primary asset" selection `BookingMapper` uses to represent a booking's equipment in each response.
+- The full `items` list `BookingMapper` builds to represent every asset on a booking in each response (§5.3).
 
 ### 2.2 Out of scope (not built by this feature; noted here so it isn't assumed to exist)
 
@@ -101,7 +101,7 @@ CANCELLED: reachable from any state in principle; no endpoint sets it today.
 
 1. **GIVEN** bookings with `startDate == today` and `status` in `(CONFIRMED, MOBILISED)`
    **WHEN** `GET /api/deliveries`
-   **THEN** `200` with one `DeliveryItemResponse` per matching booking, each carrying the customer name, site address, one representative asset (§5.3), delivery notes, and current status.
+   **THEN** `200` with one `DeliveryItemResponse` per matching booking, each carrying the customer name, site address, every asset on the booking (§5.3), delivery notes, and current status.
 2. **GIVEN** no bookings match
    **THEN** `200` with an empty array (never `404`).
 
@@ -172,13 +172,15 @@ Mirrors Requirement 3: `GET /api/returns` — bookings with `endDate == today` a
   "endDate": "2026-08-13",
   "bookingStatus": "CONFIRMED",
   "siteAddress": "20 Jurong Port Road, Singapore 619094",
-  "assetName": "JLG 460SJ Boom Lift",
-  "serialNumber": "SN-BOOM-460SJ",
+  "items": [
+    { "assetName": "JLG 460SJ Boom Lift", "serialNumber": "SN-BML-000460" },
+    { "assetName": "Toyota 8FD25 Forklift", "serialNumber": "SN-FKL-008FD25" }
+  ],
   "deliveryNotes": ""
 }
 ```
 
-`GET /api/bookings` returns an array of the above; the single-booking route returns one object. `404` body follows the shared error shape (§5.4). Note: `BookingResponse` does not carry `returnNotes` — that field only exists on `ReturnItemResponse` (below), since only the return workflow ever sets it.
+`GET /api/bookings` returns an array of the above; the single-booking route returns one object. `404` body follows the shared error shape (§5.4). Note: `BookingResponse` does not carry `returnNotes` — that field only exists on `ReturnItemResponse` (below), since only the return workflow ever sets it. `items` (HR-113) is booking id `1`'s real seed data — two `BookingItem` rows — shown here specifically to demonstrate that both now come back; see §5.3.
 
 #### `PUT /api/bookings/{bookingId}`
 
@@ -206,8 +208,10 @@ Content-Type: application/json
     "customerName": "Alex Tan",
     "startDate": "2026-08-09",
     "siteAddress": "20 Jurong Port Road, Singapore 619094",
-    "assetName": "JLG 460SJ Boom Lift",
-    "serialNumber": "SN-BOOM-460SJ",
+    "items": [
+      { "assetName": "JLG 460SJ Boom Lift", "serialNumber": "SN-BML-000460" },
+      { "assetName": "Toyota 8FD25 Forklift", "serialNumber": "SN-FKL-008FD25" }
+    ],
     "deliveryNotes": "",
     "bookingStatus": "CONFIRMED"
   }
@@ -235,8 +239,9 @@ Content-Type: application/json
     "customerName": "Alex Tan",
     "endDate": "2026-08-12",
     "siteAddress": "88 Tuas South Ave 3, Singapore 637311",
-    "assetName": "JLG 460SJ Boom Lift",
-    "serialNumber": "SN-BOOM-460SJ",
+    "items": [
+      { "assetName": "JLG 460SJ Boom Lift", "serialNumber": "SN-BML-000460" }
+    ],
     "deliveryNotes": "Crane assist required for offload",
     "returnNotes": "",
     "bookingStatus": "MOBILISED"
@@ -244,7 +249,7 @@ Content-Type: application/json
 ]
 ```
 
-`returnNotes` (HR-100) sits alongside `deliveryNotes` — the delivery-time note is kept for context and is never overwritten by the return-time one. Empty string, not `null`, until a return note has actually been recorded.
+`returnNotes` (HR-100) sits alongside `deliveryNotes` — the delivery-time note is kept for context and is never overwritten by the return-time one. Empty string, not `null`, until a return note has actually been recorded. Booking id `4` has only one `BookingItem` row, so `items` has one entry here — see the `GET /api/bookings`/`GET /api/deliveries` examples above for the multi-item case (booking id `1`).
 
 #### `PATCH /api/returns/{bookingId}/status`
 
@@ -270,17 +275,17 @@ Content-Type: application/json
 | `401` | `unauthorized` (missing/invalid Bearer) |
 | `404` | `not_found` |
 
-### 5.3 Primary-asset selection
+### 5.3 Item list mapping (HR-113)
 
-None of the response DTOs carry a list of a booking's assets — each carries a single `assetName`/`serialNumber` pair. `BookingMapper.primaryAsset(List<BookingItem>)` picks that pair via `items.stream().min(Comparator.comparing(BookingItem::getId))` — i.e. the *first-created* `BookingItem` row for the booking, not necessarily any semantically "primary" item. A booking with no items maps to `assetName: ""`, `serialNumber: ""` (not `null`, not omitted).
+Every response DTO in this spec (`BookingResponse`, `DeliveryItemResponse`, `ReturnItemResponse`) carries a booking's **full** set of line items as `items: List<BookingItemLine>`, where `BookingItemLine(assetName, serialNumber)` (`dto/BookingItemLine.java`) is one entry per `BookingItem` row. `BookingMapper.toItemLines(List<BookingItem>)` builds the list by sorting the booking's items by `BookingItem.id` ascending (deterministic order, no display-order column exists) and mapping each to its asset's name/serial, guarding a null `BookingItem.asset` the same way the mapper always has (empty strings, not a `NullPointerException`). A booking with no `BookingItem` rows maps to `items: []` — not `null`, not omitted.
 
-**This silently drops every other item on a multi-asset booking.** Seed booking id `1` has two `BookingItem` rows (JLG 460SJ Boom Lift, Toyota 8FD25 Forklift); every response shape in this spec that includes that booking shows the boom lift only. See §6.2. Unaffected by HR-100 — `returnNotes` is a scalar `Booking` column, not asset-scoped.
+**Previously (fixed HR-113): primary-asset selection dropped every item but one.** Before this change, `BookingMapper.primaryAsset(List<BookingItem>)` picked a single `BookingItem` via `items.stream().min(Comparator.comparing(BookingItem::getId))` — the *first-created* row, not any semantically "primary" item — and every response DTO carried one flat `assetName`/`serialNumber` pair. Seed booking id `1` has two `BookingItem` rows (JLG 460SJ Boom Lift, Toyota 8FD25 Forklift); every response shape that included that booking used to show the boom lift only. Fixed: see §6.2. Unaffected by HR-100 — `returnNotes` is a scalar `Booking` column, not asset-scoped. The mobile client's `HR-113` branch already expects the `items` shape in §5.2; this change makes the backend match it.
 
 ---
 
 ## 6. Known issues / gaps
 
-Carried over and expanded from the PR review recorded in `SPEC-api-index.md` §5 (that section now points here as the primary write-up; keep both in sync per this doc's own convention). None of these are fixed as of this version.
+Carried over and expanded from the PR review recorded in `SPEC-api-index.md` §5 (that section now points here as the primary write-up; keep both in sync per this doc's own convention). None of these are fixed as of this version, except 6.2 — resolved by HR-113 (see below).
 
 ### 6.1 No role or ownership checks
 
@@ -290,9 +295,9 @@ No `@PreAuthorize`, `@Secured`, or principal/ownership comparison exists in any 
 
 ### 6.2 Multi-asset bookings lose items in every response
 
-See §5.3. Reproducible today against seed booking id `1` in `GET /api/deliveries`.
+See §5.3. Was reproducible against seed booking id `1` in `GET /api/deliveries` (and every other route in this spec).
 
-**Recommended fix (not applied):** either expose all of a booking's assets (a DTO shape change — `assetName`/`serialNumber` becoming a list, or a separate `items` array), or confirm with the team that single-asset-per-booking is the actual product assumption before leaving it as is — multi-asset bookings are already possible per the schema and already exist in seed data.
+**Status: Fixed (HR-113).** `assetName`/`serialNumber` on `BookingResponse`/`DeliveryItemResponse`/`ReturnItemResponse` replaced with `items: List<BookingItemLine>`; `BookingMapper.toItemLines` now maps every `BookingItem` row instead of picking one (§5.3). Verified against seed booking id `1`: `GET /api/bookings/1` and `GET /api/deliveries` both now return both items (JLG 460SJ Boom Lift, Toyota 8FD25 Forklift), sorted by `BookingItem.id`. This matches the shape the mobile client's `HR-113` branch already expects, so both sides are now aligned.
 
 ### 6.3 `DeliveryRecord`/`ReturnRecord` never created
 
@@ -330,7 +335,7 @@ A client that omits (or sends `null` for) any of `startDate`/`endDate`/`siteAddr
 | `BookingUpdateRequest` has no `bookingStatus` field | The route originally accepted a full `BookingResponse` as its request body, so any client could set an arbitrary `bookingStatus` directly via `PUT` — bypassing the transition guards below entirely. Fixed (commit `c06b2ea`, "Restrict `PUT /api/bookings/{id}` to booking details, remove status field") by introducing a narrower request DTO that structurally cannot carry a status. This is the same category of bug the delivery/return transition guards below exist to prevent, just via the response-DTO-as-request-DTO route instead. |
 | Status changes only via two single-hop, guarded endpoints | `DeliveryService.updateStatus`/`ReturnService.updateStatus` each check *both* the booking's current status and the requested one before writing, rejecting anything else with `400` — makes the delivery/return workflow the only path that can advance a booking's lifecycle through this API, and makes each step auditable to exactly one precondition. |
 | `GET /api/deliveries`/`GET /api/returns` are "today" queries, not "all open" queries | `findByStartDateAndStatusIn`/`findByEndDateAndStatusIn` filter to `LocalDate.now()` — matches a driver's daily worklist use case rather than a general booking browser (that's what `GET /api/bookings` is for). |
-| Primary asset via `min(BookingItem.id)` | Simplest deterministic choice for a single-asset response shape — but incomplete for multi-item bookings; see §6.2. |
+| Full item list via `toItemLines`, sorted by `BookingItem.id` ascending (HR-113) | Supersedes the earlier `primaryAsset`/`min(BookingItem.id)` single-asset selection, which was incomplete for multi-item bookings (§6.2, now fixed). Sorting by id keeps ordering deterministic without inventing a display-order concept the schema doesn't have. |
 | `returnNotes` is a dedicated request/response field, not folded into `StatusUpdateRequest` (HR-100) | Deliveries has no use for a notes field. Adding it to the shared `StatusUpdateRequest` would mean the delivery endpoint silently accepts and ignores a field that only makes sense for returns — a `ReturnStatusUpdateRequest` DTO keeps each endpoint's contract limited to what it actually uses. |
 | `returnNotes` kept separate from `deliveryNotes`, not overwriting it (HR-100) | The delivery-time note (e.g. access instructions) remains useful context through the return step; folding a return-time note into the same field would destroy it. Both are shown together on the client. |
 | `returnNotes` only persisted on a successful transition (HR-100) | Matches the existing guard pattern for the status itself — a rejected `PATCH` (invalid transition, unparseable status) leaves the booking entirely unchanged, not partially applied. |
@@ -352,7 +357,7 @@ A client that omits (or sends `null` for) any of `startDate`/`endDate`/`siteAddr
 - [ ] `GET /api/returns` / `PATCH /api/returns/{id}/status` → mirrored checks against `MOBILISED → COMPLETED`.
 - [ ] `PATCH /api/returns/{id}/status` with `returnNotes` set → `200`, response reflects it, and it's actually persisted (re-`GET /api/returns` shows the same value) — not just echoed back (HR-100).
 - [ ] Same call on an invalid transition → `400`, and `returnNotes` is **not** persisted either (HR-100).
-- [ ] Seed booking id `1` (two `BookingItem`s) → confirm `GET /api/deliveries` shows only one asset (§6.2), not an error — documents current behavior rather than a pass/fail gate.
+- [ ] Seed booking id `1` (two `BookingItem`s) → confirm `GET /api/bookings/1` and `GET /api/deliveries` return **both** items under `items`, sorted by `BookingItem.id` (§5.3/§6.2, HR-113) — a real pass/fail gate now that the fix is in.
 
 ### 8.2 Manual smoke (curl)
 
@@ -391,3 +396,4 @@ curl -s http://localhost:8080/api/returns -H "Authorization: Bearer $ACCESS" | j
 |---------|------|--------|
 | 1.0.0 | 2026-08-09 | Initial as-built spec: booking read/update, today's-deliveries/returns lists, guarded `CONFIRMED→MOBILISED`/`MOBILISED→COMPLETED` transitions, primary-asset selection, and the known-issues list from PR review (role/ownership checks, multi-asset data loss, missing `DeliveryRecord`/`ReturnRecord` persistence, N+1 queries, full-replace `PUT` semantics). Written per the standalone-spec criterion added to `SPEC-project-environment.md` §9.1: this feature has independently-evolving business logic (a state machine, its own future authz needs) that warrants its own file rather than living in `SPEC-entity-repository.md`/`SPEC-api-index.md`. |
 | 1.1.0 | 2026-08-12 | HR-100: `PATCH /api/returns/{bookingId}/status` now accepts a dedicated `ReturnStatusUpdateRequest(bookingStatus, returnNotes)` body instead of the shared `StatusUpdateRequest`, and persists `returnNotes` to a new `Booking.returnNotes` column (`SPEC-entity-repository.md` §5.7) only on the valid `MOBILISED → COMPLETED` transition. `ReturnItemResponse` gained a `returnNotes` field alongside the existing `deliveryNotes`; the two are kept separate rather than one overwriting the other. Deliveries' contract (`StatusUpdateRequest`, `DeliveryItemResponse`) is unchanged. |
+| 1.2.0 | 2026-08-12 | **HR-113: multi-asset bookings fixed — closes §6.2.** `BookingResponse`, `DeliveryItemResponse`, `ReturnItemResponse` now carry `items: List<BookingItemLine>` (new `dto/BookingItemLine.java` — `assetName`/`serialNumber` per row) instead of one flat `assetName`/`serialNumber` pair. `BookingMapper.primaryAsset()` (picked one `BookingItem` via `min(BookingItem.id)`, discarding the rest) replaced by public `BookingMapper.toItemLines(List<BookingItem>)`, which maps every `BookingItem` row, sorted by id ascending; an empty input maps to `items: []`, never `null`. Matches the shape the mobile client's `HR-113` branch already expects. `BookingMapperTest` gained zero/single/multi-item coverage (previously only the zero-item path was exercised). §5.2 examples, §5.3 (renamed from "Primary-asset selection" to "Item list mapping"), §6.2, §7, and §8.1 updated to match. |
