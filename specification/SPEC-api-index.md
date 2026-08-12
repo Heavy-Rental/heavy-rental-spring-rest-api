@@ -3,9 +3,9 @@
 | Field | Value |
 |-------|--------|
 | **Document type** | Cross-cutting index — not a feature contract itself |
-| **Status** | As-built across `develop` (which now includes both former `HR-72` and `HR-80` work — see §3.1) + two branches merged in locally: `hr-27-payment-checkout` (§2.5) and `hr-40-equipment-utilization-tracker` (§2.4, this branch) |
+| **Status** | As-built across `develop` (which now includes both former `HR-72` and `HR-80` work — see §3.1) + `hr-27-payment-checkout` (§2.4, local/unpushed) + `36-link-rest-api-users-to-front-end` (§2.7, this branch) |
 | **Module** | `heavy-rental-spring-rest-api` |
-| **Related specs** | [`SPEC-request-bearer-token.md`](./SPEC-request-bearer-token.md), [`SPEC-auth-login-logout.md`](./SPEC-auth-login-logout.md), [`SPEC-equipment-browse-api.md`](./SPEC-equipment-browse-api.md), [`SPEC-entity-repository.md`](./SPEC-entity-repository.md), [`SPEC-stripe.md`](./SPEC-stripe.md), [`SPEC-haystack-recommender-client.md`](./SPEC-haystack-recommender-client.md) |
+| **Related specs** | [`SPEC-request-bearer-token.md`](./SPEC-request-bearer-token.md), [`SPEC-auth-login-logout.md`](./SPEC-auth-login-logout.md), [`SPEC-equipment-browse-api.md`](./SPEC-equipment-browse-api.md), [`SPEC-entity-repository.md`](./SPEC-entity-repository.md), [`SPEC-stripe.md`](./SPEC-stripe.md), [`SPEC-haystack-recommender-client.md`](./SPEC-haystack-recommender-client.md), [`SPEC-admin-users-api.md`](./SPEC-admin-users-api.md) |
 | **Environment context** | [`SPEC-project-environment.md`](./SPEC-project-environment.md) (read first) |
 
 This document is the **single place to see the entire REST surface** — every route, which client it's for, what branch it lives on, and which feature spec (if any) owns its detailed contract. It does not restate request/response shapes already documented elsewhere; it points to them.
@@ -24,6 +24,7 @@ Each feature-scoped SPEC (auth, equipment, …) remains the source of truth for 
 | 🧪 Branch `hr-27-payment-checkout` (local) | Rebased onto `develop` locally as of 2026-08-11; not yet pushed to `origin` or merged. Carries `develop`'s full route set (see §3.1) plus the payments routes in §2.2 |
 | 🧱 Stub | Route exists and returns `200`, but has no real backing entity/logic — placeholder so a frontend call doesn't 404 |
 | ⏳ Not started | Branch name/intent exists; no code written yet |
+| 🔀 Branch (local/unmerged) | Route exists and is fully implemented + verified on the named branch, not yet merged to `develop` |
 
 ---
 
@@ -130,6 +131,20 @@ Phase 2 / **S2b**: resilient Spring client for `haystack-fast-api`, saga, and th
 then returns session handles + **Call 2 quote**.  
 Follow-up chatbot: Call 3 `POST .../project-knowledge/query` via knowledge-query. Also `GET /health` on the client.
 
+### 2.7 Admin — user management
+
+Per branch author: this route family is for the **admin operations portal** (Users tab). It's the one place in the whole API gated `ROLE_ADMIN` alone — every other route in this index uses `hasAnyAuthority("ROLE_USER","ROLE_ADMIN")`.
+
+| Method | Path | Client | Roles allowed | Status | Contract |
+|---|---|---|---|---|---|
+| `GET` | `/api/users` | Admin | `ROLE_ADMIN` only | 🔀 Branch `36-link-rest-api-users-to-front-end` | [`SPEC-admin-users-api.md`](./SPEC-admin-users-api.md) |
+| `GET` | `/api/users/{id}` | Admin | `ROLE_ADMIN` only | 🔀 Branch `36-link-rest-api-users-to-front-end` | same |
+| `POST` | `/api/users` | Admin | `ROLE_ADMIN` only | 🔀 Branch `36-link-rest-api-users-to-front-end` | same |
+| `PATCH` | `/api/users/{id}` | Admin | `ROLE_ADMIN` only | 🔀 Branch `36-link-rest-api-users-to-front-end` | same |
+| `DELETE` | `/api/users/{id}` | Admin | `ROLE_ADMIN` only | 🔀 Branch `36-link-rest-api-users-to-front-end` | same |
+
+No `UserController`/`UserAdminService`/user-management DTOs existed anywhere in this codebase before this branch — confirmed by searching the full git history and every branch. Full contract, role-string mapping, and live verification results in [`SPEC-admin-users-api.md`](./SPEC-admin-users-api.md).
+
 ---
 
 ## 3. Correcting assumptions this index was built to check
@@ -191,3 +206,4 @@ Moved to [`SPEC-booking-delivery-return-api.md`](./SPEC-booking-delivery-return-
 | 1.7.0 | 2026-08-12 | **S2b implemented.** §2.6 routes marked ✅ Implemented; contract status As-built. |
 | 1.8.0 | 2026-08-12 | §2.6: project-spec runs Call 1 then Call 2 (`getassetrecommendations`); response carries Call 2 answer. |
 | 2.0.0 | 2026-08-12 | §2.6 Feasibility v2: Call 2 = recommend quote (`quoteRef`/`items`); knowledge-query = Call 3 `.../query` chatbot. |
+| 2.1.0 | 2026-08-12 | New §2.7 — `/api/users` (list/get/create/update/remove), implemented and verified live on branch `36-link-rest-api-users-to-front-end`. New `🔀 Branch (local/unmerged)` status added to §1's legend to describe it precisely (distinct from the `hr-27`-specific 🧪 symbol). Full contract in new [`SPEC-admin-users-api.md`](./SPEC-admin-users-api.md), added to `Related specs` above. Header `Status` field corrected to reflect the branch this index is actually as-built against right now, replacing a stale reference to `hr-40-equipment-utilization-tracker` (already merged to `develop`, no longer a separate local branch) — **note:** while updating this, found that `/api/monthly-utilization` (real, live code — `MonthlyUtilizationController` exists in this branch's `src/`) has no entry anywhere in this index, despite being documented here on an earlier branch (per merge-conflict-resolution history) — that gap predates this change and wasn't introduced by it; flagged to the user, not fixed in this pass. |
