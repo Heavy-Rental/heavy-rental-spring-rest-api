@@ -156,6 +156,6 @@ public class HaystackClientConfig {
 		SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
 		factory.setConnectTimeout((int) Math.min(Integer.MAX_VALUE, connect.toMillis()));
 		factory.setReadTimeout((int) Math.min(Integer.MAX_VALUE, read.toMillis()));
-		return RestClient.builder().baseUrl(baseUrl).requestFactory(factory).build();
+		return builder.baseUrl(baseUrl).requestFactory(factory).build();
 	}
 }
