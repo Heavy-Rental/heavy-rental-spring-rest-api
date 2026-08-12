@@ -31,7 +31,6 @@ public class ReturnService {
         this.mapper = mapper;
     }
 
-    /** endDate == today AND status in (MOBILISED, COMPLETED). */
     @Transactional(readOnly = true)
     public List<ReturnItemResponse> getTodaysReturns() {
         return bookingRepository.findByEndDateAndStatusIn(LocalDate.now(), RETURN_STATUSES).stream()
@@ -39,9 +38,8 @@ public class ReturnService {
                 .toList();
     }
 
-    /** Only MOBILISED -> COMPLETED is legal here. */
     @Transactional
-    public ReturnItemResponse updateStatus(Long bookingId, String requestedStatus) {
+    public ReturnItemResponse updateStatus(Long bookingId, String requestedStatus, String returnNotes) {
         Booking booking = bookingRepository.findById(bookingId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Booking not found: " + bookingId));
         Booking.BookingStatus requested = BookingService.parseStatusOr400(requestedStatus);
@@ -53,6 +51,7 @@ public class ReturnService {
         }
 
         booking.setStatus(requested);
+        booking.setReturnNotes(returnNotes);
         bookingRepository.save(booking);
         return mapper.toReturnItemResponse(booking, bookingItemRepository.findByBookingId(booking.getId()));
     }

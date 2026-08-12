@@ -10,5 +10,6 @@ public record ReturnItemResponse(
     String assetName,
     String serialNumber,
     String deliveryNotes,
+    String returnNotes,
     String bookingStatus) {
 }

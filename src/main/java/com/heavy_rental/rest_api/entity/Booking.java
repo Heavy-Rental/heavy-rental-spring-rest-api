@@ -76,6 +76,9 @@ public class Booking {
     @Column(name = "delivery_notes", length = 500)
     private String deliveryNotes;
 
+    @Column(name = "return_notes", length = 500)
+    private String returnNotes;
+
     @Column(name = "created_at")
     private LocalDateTime createdAt;
 

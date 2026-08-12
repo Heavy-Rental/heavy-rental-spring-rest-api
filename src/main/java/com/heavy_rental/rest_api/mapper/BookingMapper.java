@@ -15,7 +15,7 @@ import com.heavy_rental.rest_api.entity.BookingItem;
 @Component
 public class BookingMapper {
 
-    public BookingResponse toBookingResponse(Booking booking, List<BookingItem> items) {
+public BookingResponse toBookingResponse(Booking booking, List<BookingItem> items) {
         Asset asset = primaryAsset(items);
         return new BookingResponse(
                 booking.getId(),
@@ -55,6 +55,7 @@ public class BookingMapper {
                 asset != null ? asset.getName() : "",
                 asset != null ? asset.getSerialno() : "",
                 booking.getDeliveryNotes(),
+                booking.getReturnNotes(),
                 booking.getStatus().name());
     }
 

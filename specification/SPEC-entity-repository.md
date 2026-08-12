@@ -7,7 +7,7 @@
 | **Module** | `heavy-rental-spring-rest-api` |
 | **Packages** | `com.heavy_rental.rest_api.entity`, `com.heavy_rental.rest_api.repository`, `com.heavy_rental.rest_api.enums` |
 | **Environment context** | [`SPEC-project-environment.md`](./SPEC-project-environment.md) (read first) |
-| **Related code** | 13 JPA entities, 13 Spring Data repositories, `enums.ConditionType` |
+| **Related code** | 13 JPA entities, 12 Spring Data repositories, `enums.ConditionType` |
 
 This document is the **single source of truth** for the JPA data model: entities, columns, relationships, enums, and the Spring Data repositories built on top of them. It does not define REST endpoints — see §3.2 for what is and isn't exposed today.
 
@@ -41,13 +41,13 @@ When this spec is followed:
 ### 3.1 In scope
 
 - All 13 entities under `entity/` and their column mappings.
-- All 13 repositories under `repository/` and their derived query methods.
+- All 12 repositories under `repository/` and their derived query methods.
 - The shared `ConditionType` enum and each entity's inline status/type enums.
 - Relationship map (FK → referenced table) and schema lifecycle (`ddl-auto`).
 
 ### 3.2 Out of scope / not yet built
 
-- **REST controllers, services, and DTOs for this data model — partially.** `User`/`UserRepository` are consumed by the auth flow (`CustomUserDetailsService`). `Asset` has a full CRUD API (`EquipmentController`/`AssetService`/`EquipmentResponse`/`EquipmentRequest`) — see [`SPEC-equipment-browse-api.md`](./SPEC-equipment-browse-api.md). `Booking` has a full read/update surface plus delivery/return status transitions — see [`SPEC-booking-delivery-return-api.md`](./SPEC-booking-delivery-return-api.md) for the contract, including why `DeliveryRecord`/`ReturnRecord` (§5.10/§5.11 below) are never created by that flow. `Payment` has a controller (`PaymentController`/`PaymentService`, merged via `HR-60`) that creates Stripe `PaymentIntent`s but does **not** use `PaymentRepository` — no `Payment` row is ever persisted by that flow; no feature spec covers it. `RentalPlanController` and `DepotController` are stub `@RestController`s that return an empty list purely so the frontend doesn't 404 — neither uses any repository (`Depot` isn't even an entity in this data model). The remaining entities/repositories (`AssetCategory`, `AssetImage` as its own resource, `RentalPlan`, `RentalPlanRecord`, `BookingItem`, `DeliveryRecord`, `ReturnRecord`, `AIRecommendation`, `RecommendationItem`) still compile and would create tables, but have **no controller, service, or DTO wired up** on this branch. Adding one is a new feature SDD.
+- **REST controllers, services, and DTOs for this data model.** Today only `User` / `UserRepository` are consumed by application code (`CustomUserDetailsService`, `DefaultUserInitializer`, the auth flow). The other 12 entities and their repositories compile and would create tables, but have **no controller, service, or DTO wired up** — there is no CRUD API for assets, bookings, payments, rental plans, delivery/return records, or AI recommendations yet. Adding one is a new feature SDD.
 - Database migrations (Flyway/Liquibase) — schema is Hibernate-generated only; see [`SPEC-project-environment.md`](./SPEC-project-environment.md) §5.2.
 - Validation annotations (Bean Validation) — none of these entities use `@NotNull`/`@Size`/etc.; the only enforced constraints are JPA `@Column(nullable=…)` / `unique=…`, which become DB-level `NOT NULL` / `UNIQUE` constraints.
 
@@ -64,7 +64,7 @@ When this spec is followed:
 | Money fields | `BigDecimal` with `precision = 10, scale = 2` |
 | Timestamps | `LocalDateTime` for instants (`createdAt`, `updatedAt`, `deliveredAt`, …), `LocalDate` for date-only fields (`startDate`, `endDate`) — none are DB-defaulted; the application must set them explicitly |
 | Table naming | `@Table(name = "…")`, snake_case, matching the entity's plural/domain name |
-| Schema lifecycle | `spring.jpa.hibernate.ddl-auto=update` — Hibernate creates/updates tables and constraints from these annotations at context startup; existing tables and columns are never dropped or altered, and data persists between runs against the same instance. See [`SPEC-project-environment.md`](./SPEC-project-environment.md) §5.2 and [`SPEC-seed-data.md`](./SPEC-seed-data.md) (whose upsert-based seeding only makes sense against a persistent schema). |
+| Schema lifecycle | `spring.jpa.hibernate.ddl-auto=create-drop` — Hibernate creates all tables/constraints from these annotations at context startup and **drops them at shutdown**. There is no persistent schema between runs; see [`SPEC-project-environment.md`](./SPEC-project-environment.md) §5.2. |
 
 ---
 
@@ -112,7 +112,6 @@ The rentable equipment item.
 | `condition` | `condition` | enum `ConditionType` (shared, §6) | nullable |
 | `lastConditionUpdatedAt` | `last_condition_updated_at` | `LocalDateTime` | nullable |
 | `purchaseYear` | `purchase_year` | `Integer` | nullable |
-| `location` | `location` | `String(100)` | nullable |
 
 ### 5.4 `AssetImage` → table `asset_images`
 
@@ -166,15 +165,17 @@ A confirmed rental (converted from a `RentalPlan`, or created directly).
 | `rentalPlan` | `rental_plan_id` | → `RentalPlan` | `@ManyToOne` LAZY, nullable FK |
 | `startDate` | `start_date` | `LocalDate` | nullable |
 | `endDate` | `end_date` | `LocalDate` | nullable |
-| `status` | `status` | enum `BookingStatus` (`PENDING_DEPOSIT`, `PENDING_CONFIRMED`, `CONFIRMED`, `MOBILISED`, `COMPLETED`, `CANCELLED`) | nullable |
+| `status` | `status` | enum `BookingStatus` (`PENDING`, `CONFIRMED`, `MOBILISED`, `COMPLETED`, `CANCELLED`) | nullable |
 | `totalAmount` | `total_amount` | `BigDecimal` | nullable |
 | `depositAmount` | `deposit_amount` | `BigDecimal` | nullable |
 | `remainingBalance` | `remaining_balance` | `BigDecimal` | nullable |
+| `paidStatus` | `paid_status` | enum `PaidStatus` (`DEPOSIT`, `FULL`, `UNPAID`) | nullable |
 | `siteAddress` | `site_address` | `String` | nullable |
-| `sitePostalCode` | *(none — `@Formula`)* | `String` | Read-only, `@Setter(AccessLevel.NONE)`; computed as `substring(site_address from length(site_address) - 5 for 6)`, not a real column |
+| `sitePostalCode` | `site_postal_code` | `String` | nullable |
 | `siteLatitude` | `site_latitude` | `BigDecimal` | nullable |
 | `siteLongitude` | `site_longitude` | `BigDecimal` | nullable |
 | `deliveryNotes` | `delivery_notes` | `String(500)` | nullable |
+| `returnNotes` | `return_notes` | `String(500)` | nullable — added HR-100, mirrors `deliveryNotes`; set only by `ReturnService.updateStatus` on a successful `MOBILISED → COMPLETED` transition (`SPEC-booking-delivery-return-api.md` §5.2/Requirement 6) |
 | `createdAt` | `created_at` | `LocalDateTime` | nullable |
 
 ### 5.8 `BookingItem` → table `booking_items`
@@ -344,7 +345,7 @@ users ──┬── rental_plan ──── rental_plan_records ──── 
                  └───────────────┘
 ```
 
-No cascade is configured on any `@ManyToOne`. Because Hibernate generates the schema (`ddl-auto=update`) without an explicit `onDelete` rule, the database default (restrict) applies: deleting a parent row (e.g. a `Booking`) while child rows (e.g. `booking_items`, `payments`) still reference it will fail with a foreign-key violation. Children must be deleted first, or deletion logic must be added in a service layer — `AssetService.delete()` does this for `Asset` (see §10 note 2); every other entity still needs it handled once its delete endpoint is built.
+No cascade is configured on any `@ManyToOne`. Because Hibernate generates the schema (`ddl-auto=create-drop`) without an explicit `onDelete` rule, the database default (restrict) applies: deleting a parent row (e.g. a `Booking`) while child rows (e.g. `booking_items`, `payments`) still reference it will fail with a foreign-key violation. Children must be deleted first, or deletion logic must be added in a service layer — none exists today.
 
 ---
 
@@ -356,8 +357,8 @@ All repositories are plain `interface X extends JpaRepository<Entity, Long>` —
 |---|---|---|
 | `UserRepository` | `User` | `List<User> findByRole(UserRole role)` · `Optional<User> findByEmail(String email)` · `boolean existsByEmail(String email)` |
 | `AssetCategoryRepository` | `AssetCategory` | `AssetCategory findByName(String name)` — ⚠️ returns the raw entity (not `Optional`); `null` if no match, unlike every other `findByX` in this codebase |
-| `AssetRepository` | `Asset` | `List<Asset> findByCategoryId(Long categoryId)` · `List<Asset> findByNameContainingIgnoreCase(String name)` · `List<Asset> findByCondition(ConditionType condition)` · `List<Asset> findAllWithCategory()` (`@Query`, `JOIN FETCH`) |
-| `AssetImageRepository` | `AssetImage` | `List<AssetImage> findByAssetId(Long assetId)` · `List<AssetImage> findByAssetIdIn(Collection<Long> assetIds)` |
+| `AssetRepository` | `Asset` | `List<Asset> findByCategoryId(Long categoryId)` · `List<Asset> findByNameContainingIgnoreCase(String name)` · `List<Asset> findByCondition(ConditionType condition)` |
+| `AssetImageRepository` | `AssetImage` | `List<AssetImage> findByAssetId(Long assetId)` |
 | `RentalPlanRepository` | `RentalPlan` | `List<RentalPlan> findByCustomerId(Long customerId)` · `List<RentalPlan> findByStatus(PlanStatus status)` |
 | `RentalPlanRecordRepository` | `RentalPlanRecord` | `List<RentalPlanRecord> findByRentalPlanId(Long rentalPlanId)` |
 | `BookingRepository` | `Booking` | `List<Booking> findByCustomerId(Long customerId)` · `List<Booking> findByStatus(BookingStatus status)` · `List<Booking> findByCustomerIdAndStatus(Long customerId, BookingStatus status)` · `List<Booking> findByStartDateAndStatusIn(LocalDate startDate, List<BookingStatus> statuses)` · `List<Booking> findByEndDateAndStatusIn(LocalDate endDate, List<BookingStatus> statuses)` — ⚠️ `findByCustomerId`/`findByCustomerIdAndStatus` exist but are unused by any controller today; see [`SPEC-booking-delivery-return-api.md`](./SPEC-booking-delivery-return-api.md) §6.1 |
@@ -387,7 +388,7 @@ No other table declares a unique or composite-unique constraint (e.g. nothing pr
 ## 10. Design notes (as-built quirks)
 
 1. **Read-only from the "one" side.** Since no `@OneToMany` exists, code must call e.g. `bookingItemRepository.findByBookingId(id)` to get a booking's items — `booking.getItems()` does not exist and never will unless a future SDD adds it.
-2. **No cascading deletes.** Deleting a `User`, `Asset`, `Booking`, etc. that still has dependent rows will hit a DB FK violation, not a JPA cascade. `AssetService.delete()` now handles this explicitly for `Asset` (deletes its own `AssetImage` rows first, catches `DataIntegrityViolationException`, returns `409` — see [`SPEC-equipment-browse-api.md`](./SPEC-equipment-browse-api.md) §6); every other entity still needs this handled once its delete endpoint is built.
+2. **No cascading deletes.** Deleting a `User`, `Asset`, `Booking`, etc. that still has dependent rows will hit a DB FK violation, not a JPA cascade. This must be handled explicitly once delete endpoints are built.
 3. **`Asset.capacity` has dead `precision`/`scale` metadata** — it's an `Integer` field annotated as if it were a `BigDecimal`; Hibernate ignores those attributes for integer columns.
 4. ~~**`RentalPlan.PlanStatus.QUOTEED`** is the literal enum constant in code (likely meant "QUOTED"). Any future DTO/API mapping to this enum should use the value as spelled unless a dedicated change renames it.~~ Fixed on `hr-19-request-quote` (2026-08-11, PR review comment) — the enum constant is now correctly `QUOTED` everywhere; no longer a quirk to work around.
 5. **`AssetCategoryRepository.findByName` breaks the `Optional` convention** used everywhere else in this codebase (e.g. `UserRepository.findByEmail`); callers must null-check instead of using `Optional` idioms.
@@ -406,7 +407,7 @@ No other table declares a unique or composite-unique constraint (e.g. nothing pr
 
 ### 11.2 Inspecting the generated schema
 
-The schema persists across runs (`ddl-auto=update`) but is still easiest to inspect while the app or a test context is up:
+Because the schema is created fresh per run (`create-drop`), inspect it while the app or a test context is up:
 
 ```bash
 cd heavy-rental-spring-rest-api
@@ -444,3 +445,4 @@ Or read the Hibernate DDL directly from build/test output (`spring.jpa.show-sql=
 | 1.5.0 | 2026-08-12 | **S2b as-built.** §5.12 columns present on entity; §10.7 controller wiring live. |
 | 1.4.0 | 2026-08-11 | From `hr-19-request-quote`'s PR review (see `SPEC-rental-plan-quote.md` 1.1.0/1.1.1): (1) `RentalPlan` gained a real `version` column (`@Version`, §5.5) — added to the field table. (2) §5.5/§8/§10.4's `QUOTEED` references fixed to `QUOTED` (the underlying enum typo was fixed in code this same PR); §10.4 reworded from "flagging a typo" to "recording that it was fixed," kept at the same list position since other docs cross-reference it as `§10.7`/`§10.6` by number. (3) §10.6 (schema drift) enriched with a concrete real example — the `version` column addition failing under `ddl-auto=update` against a pre-existing database, discovered by actually booting the app rather than just compiling. |
 | 1.5.0 | 2026-08-11 | §8's `BookingItemRepository` row now lists `findByBookingStatusIn(...)`, added on branch `hr-40-equipment-utilization-tracker` to back `MonthlyUtilizationService`; the `@Query`-exceptions callout below the table updated from two methods to three, noting this one's `JOIN FETCH` is needed because the service reads `booking.getStartDate()`/`getEndDate()` outside the repository call. See [`SPEC-api-index.md`](./SPEC-api-index.md) §2.4 and [`CHANGES-monthly-utilization.md`](./CHANGES-monthly-utilization.md) for the route this backs. No entity/relationship facts changed. |
+| 1.6.0 | 2026-08-12 | Added `Booking.returnNotes` (`return_notes`, `String(500)`, nullable) to §5.7 — new column introduced by HR-100 (`SPEC-booking-delivery-return-api.md` §5.2/Requirement 6). No other changes; the pre-existing `BookingStatus` enum drift (§5.7/§6.2 still show 5 values, missing HR-77's `PENDING_DEPOSIT`/`PENDING_CONFIRMED` split) and the `ddl-auto` drift noted in `SPEC-api-index.md` §6 remain unresolved — out of scope for this change. |
