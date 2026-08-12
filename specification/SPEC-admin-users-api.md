@@ -7,6 +7,7 @@
 | **Module** | `heavy-rental-spring-rest-api` |
 | **Primary surface** | New `/api/users` REST surface — did not exist in any form before this branch |
 | **Related code** | `dto/UserResponse.java`, `dto/UserUpdateRequest.java`, `dto/UserCreateRequest.java`, `dto/UserCreateResponse.java`, `service/UserAdminService.java`, `controller/UserController.java`, `config/SecurityConfig.java` |
+| **Frontend counterpart** | `heavy-rental-react-web-portal`, branch `122-fix-error-admin-login` |
 | **Environment context** | [`SPEC-project-environment.md`](./SPEC-project-environment.md) (read first) |
 
 Unlike `/api/equipment`, there was no pre-existing controller, service, DTO, or route for user management anywhere in this codebase — `User` entity and `UserRepository` already existed (with `findAll`, `findByRole`, `findByEmail`, `existsByEmail`), but nothing exposed them over HTTP. This spec is the source of truth for that new `/api/users` surface, built directly against the real frontend's live contract (confirmed by reading `heavy-rental-react-web-portal`'s `types.ts`, `UsersTab.tsx`, and `AdminDataContext.tsx`, not guessed from the admin mockup alone).
@@ -187,3 +188,4 @@ All resolved during spec drafting, by reading the actual frontend code rather th
 | Version | Date | Notes |
 |---------|------|--------|
 | 0.1.0 | 2026-08-12 | Initial draft, created after implementation and full live verification on branch `36-link-rest-api-users-to-front-end`. REQ-1 through REQ-8 captured; all three open questions resolved by reading the actual frontend source rather than the original mockup-based plan. Not yet committed. |
+| 0.1.1 | 2026-08-12 | Added **Frontend counterpart** to the header table — this backend branch pairs with `heavy-rental-react-web-portal`'s `122-fix-error-admin-login` branch. |
