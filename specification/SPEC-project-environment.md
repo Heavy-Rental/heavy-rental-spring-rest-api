@@ -98,6 +98,7 @@ heavy-rental-rest-api/                         # workspace root
 | Maven coordinates | `com.heavy_rental:rest_api:0.0.1-SNAPSHOT` |
 | Packaging | **WAR** |
 | Web | Spring WebMVC (`spring-boot-starter-webmvc`) |
+| Validation | Jakarta Bean Validation (`spring-boot-starter-validation`) — added HR-116 for request-body `@NotBlank`/`@Pattern` constraints, `MethodArgumentNotValidException` handled by `RestExceptionHandler` |
 | Security | Spring Security + **OAuth2 Resource Server** (JWT) |
 | Persistence | Spring Data JPA + Hibernate |
 | Database driver | PostgreSQL JDBC (`postgresql`, runtime) |
@@ -117,6 +118,7 @@ heavy-rental-rest-api/                         # workspace root
 - `spring-boot-starter-security`
 - `spring-boot-starter-oauth2-resource-server`
 - `spring-boot-starter-webmvc`
+- `spring-boot-starter-validation` (HR-116)
 - `postgresql`
 - `lombok` (optional)
 - `spring-boot-starter-tomcat` (provided)
@@ -403,5 +405,6 @@ Unless a dedicated SDD says otherwise:
 | 1.5.0 | 2026-08-09 | §9.1/§9.3 codified when a feature needs a standalone spec file vs. inline documentation: independent, evolving logic (state machine, its own authz, its own contract) gets its own `SPEC-<feature>.md`; trivial/stub routes don't. Grounded in two real incidents in this repo: `SPEC-request-bearer-token.md` was split out of a combined file for exactly this reason, and `SPEC-entity-repository.md` — the shared file the rule steers features away from — took a real multi-branch editing conflict as a direct result of not having per-feature files. Added `SPEC-api-index.md` to §9.1 as the discovery layer that makes "too many files" a non-issue. |
 | 1.6.0 | 2026-08-12 | **S2b hybrid SDD.** §9.1 documents Spec-Kit feature packs, OpenSpec, and SPDD paths alongside living `SPEC-*.md`. §6 adds planned `client.haystack` package; §6.1 layering: no direct external HTTP from controllers; `haystack.*` + Resilience4j planned for recommender client. Links [`SPEC-haystack-recommender-client.md`](./SPEC-haystack-recommender-client.md). Docs only — no runtime dependency added yet. |
 | 1.7.0 | 2026-08-12 | **S2b as-built.** Stack lists Resilience4j 2.3.0; `client.haystack` package live. |
+| 1.8.0 | 2026-08-13 | **HR-116.** New runtime dependency `spring-boot-starter-validation` (§4/§4.1) — backs `@NotBlank`/`@Pattern` request-body validation, first used to require `siteAddress` end with a 6-digit postal code on `CreateBookingRequest`/`BookingUpdateRequest`/`RentalPlanCreateRequest`. `RestExceptionHandler` gained a `MethodArgumentNotValidException` handler (`400 validation_failed`); §7.1's shared error shape is unchanged, this is a new producer of it, not a new shape. Full contract in `SPEC-booking-delivery-return-api.md` §9 1.2.0 and `SPEC-rental-plan-quote.md` §9 1.3.0. |
 
 When changing stack, database strategy, packaging, default security model, or SDD file locations, bump this table and notify dependent feature specs.

@@ -8,6 +8,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.core.AuthenticationException;
+import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.server.ResponseStatusException;
@@ -22,6 +23,16 @@ import org.springframework.web.server.ResponseStatusException;
  */
 @RestControllerAdvice
 public class RestExceptionHandler {
+
+	@ExceptionHandler(MethodArgumentNotValidException.class)
+	public ResponseEntity<Map<String, String>> handleValidation(MethodArgumentNotValidException ex) {
+		String message = ex.getBindingResult().getFieldErrors().stream()
+				.map(fe -> fe.getField() + ": " + fe.getDefaultMessage())
+				.reduce((a, b) -> a + "; " + b)
+				.orElse("Invalid request");
+		return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+				.body(error("validation_failed", message));
+	}
 
 	@ExceptionHandler(ObjectOptimisticLockingFailureException.class)
 	public ResponseEntity<Map<String, String>> handleOptimisticLocking() {
