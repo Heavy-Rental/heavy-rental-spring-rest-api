@@ -12,7 +12,11 @@ Spring Boot is the orchestrating client of `haystack-fast-api` for:
 
 Resilience, saga orchestration, and portal REST for the recommender journey live here.
 
-**Status:** **As-built** (S2b on branch HR-106). Requirements below match Feasibility_Study_Spring v2 and runtime code.
+**Status:** **As-built** (S2b). Requirements below match Feasibility_Study_Spring v2, runtime code, and portal nested quote items.
+
+**Portal HTTP fields:** [`contracts/portal-api.md`](./contracts/portal-api.md)  
+**Upstream wire (read-only):** [haystack-fast-api](https://github.com/Heavy-Rental/haystack-fast-api) OpenSpec Call 1/2/3 contracts  
+**OpenSPDD canvas:** [`../../../spdd/prompt/S2b-resilient-haystack-recommender-client.md`](../../../spdd/prompt/S2b-resilient-haystack-recommender-client.md)
 
 ## Requirements
 
@@ -132,6 +136,48 @@ The system MUST include automated tests (WireMock or equivalent) covering timeou
 - WHEN the saga completes successfully
 - THEN the portal response includes `quoteRef` and mapped `items`
 - AND Call 3 was not required for submit
+
+### Requirement: FR-S2B-010 Nested portal quote items
+
+The system MUST map Call 2 quote lines to the portal as nested objects: each item includes `rankOrder`, optional `matchScore` / `reason` / `quantity` / `lineTotal`, and nested `equipment` with `id`, `name`, `category`, `baseDailyRate`, `weekly`, `capacity`, `platformHeight`, `purchaseYear`, `location`, `available`, `img`, `desc`, and `tags`. The system MUST NOT flatten equipment into `equipmentId` / `equipmentName` top-level item fields.
+
+Haystack values MUST be passed through. The system MUST NOT invent equipment objects, rates, scores, or reasons when omitted upstream.
+
+`platformHeight` MUST be mapped when haystack provides it and MUST be **omitted from portal JSON** when null (not serialized as `null`).
+
+When nested `equipment.id` is a numeric catalog asset id, the system MUST look up `asset_images` and, if a row exists, set `equipment.img` to the same JPEG data URI used by equipment browse (`data:image/jpeg;base64,<raw>`). If no catalog image exists, or the id is not a numeric catalog PK, haystack `img` MUST be passed through unchanged.
+
+Field table: [`contracts/portal-api.md`](./contracts/portal-api.md) `items[].equipment`.
+
+#### Scenario: Submit response exposes nested equipment
+- GIVEN Call 2 returns an item with nested `equipment` and optional `reason` / `quantity` / `matchScore` / `platformHeight`
+- WHEN the portal project-spec response is built
+- THEN each item has nested `equipment` with catalog fields present when provided by haystack
+- AND missing optional fields are null or empty (not fabricated), except `platformHeight` which is omitted from JSON when null
+
+#### Scenario: Item-level baseDailyRate falls back onto equipment
+- GIVEN haystack places `baseDailyRate` on the item and omits it on `equipment`
+- WHEN the item is mapped for the portal
+- THEN `equipment.baseDailyRate` receives that value when equipment is present
+- AND no other rates are invented
+
+#### Scenario: Null platformHeight is omitted from portal JSON
+- GIVEN Call 2 equipment has no `platformHeight`
+- WHEN the portal project-spec response is serialized
+- THEN `items[].equipment.platformHeight` is absent from the JSON
+- AND a present haystack `platformHeight` is still serialized as a number
+
+#### Scenario: Catalog image is loaded onto equipment.img by numeric id
+- GIVEN Call 2 equipment `id` is a numeric catalog asset id with an `asset_images` row
+- WHEN the portal project-spec response is built
+- THEN `equipment.img` is `data:image/jpeg;base64,` plus the stored raw image
+- AND a non-numeric id (for example `asset-1`) does not invent a catalog photo
+
+**Automated evidence (BDD JUnit scenarios):**  
+`RecommenderSagaServiceTest` — DisplayNames containing `(FR-S2B-010)` plus catalog-img-by-id;  
+`RecommenderSagaWireMockTest` dual-hop nested items;  
+`RecommendationControllerIntegrationTest` nested JSON, no flattened `equipmentId`/`equipmentName`, omit-null `platformHeight`, catalog `img` data URI;  
+`HaystackRecommenderClientTest` Call 2 DTO fields.
 
 ## Out of scope (this capability baseline)
 
