@@ -1,6 +1,7 @@
 package com.heavy_rental.rest_api.service;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.format.TextStyle;
 import java.time.temporal.ChronoUnit;
@@ -58,7 +59,8 @@ public class MonthlyUtilizationService {
                         return !paidDate.isBefore(monthStart) && !paidDate.isAfter(monthEnd);
                     })
                     .map(Payment::getAmount)
-                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+                    .reduce(BigDecimal.ZERO, BigDecimal::add)
+                    .setScale(2, RoundingMode.HALF_UP);
 
             long bookedAssetDays = activeBookingItems.stream()
                     .mapToLong(item -> overlapDays(item.getBooking(), monthStart, monthEnd))
