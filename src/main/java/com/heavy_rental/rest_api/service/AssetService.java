@@ -19,6 +19,7 @@ import com.heavy_rental.rest_api.entity.Asset;
 import com.heavy_rental.rest_api.entity.AssetCategory;
 import com.heavy_rental.rest_api.entity.AssetImage;
 import com.heavy_rental.rest_api.entity.Booking;
+import com.heavy_rental.rest_api.entity.BookingItem;
 import com.heavy_rental.rest_api.enums.ConditionType;
 import com.heavy_rental.rest_api.repository.AssetCategoryRepository;
 import com.heavy_rental.rest_api.repository.AssetImageRepository;
@@ -77,11 +78,13 @@ public class AssetService {
         List<Long> assetIds = assets.stream().map(Asset::getId).toList();
         Map<Long, AssetImage> imageByAssetId = loadImageByAssetId(assetIds);
         Set<Long> unavailableAssetIds = findUnavailableAssetIds(assetIds, window);
+        Map<Long, Double> utilizationByAssetId = computeUtilizationByAssetId(assetIds);
 
         return assets.stream()
                 .map(asset -> toResponse(asset,
                         imageByAssetId.get(asset.getId()),
-                        window == null ? null : !unavailableAssetIds.contains(asset.getId())))
+                        window == null ? null : !unavailableAssetIds.contains(asset.getId()),
+                        utilizationByAssetId.get(asset.getId())))
                 .toList();
     }
 
@@ -93,8 +96,9 @@ public class AssetService {
         LocalDate[] window = resolveAvailabilityWindow(startDate, endDate);
         AssetImage image = firstImage(id);
         Set<Long> unavailableAssetIds = findUnavailableAssetIds(List.of(id), window);
+        Double utilization = computeUtilizationByAssetId(List.of(id)).get(id);
 
-        return toResponse(asset, image, window == null ? null : !unavailableAssetIds.contains(id));
+        return toResponse(asset, image, window == null ? null : !unavailableAssetIds.contains(id), utilization);
     }
 
     @Transactional
@@ -105,7 +109,8 @@ public class AssetService {
         applyRequest(asset, request, category);
         Asset saved = assetRepository.save(asset);
 
-        return toResponse(saved, null, true);
+        // A brand-new asset can't have any bookings yet — no query needed, unlike replace/patch below.
+        return toResponse(saved, null, true, 0.0);
     }
 
     @Transactional
@@ -116,7 +121,8 @@ public class AssetService {
         applyRequest(asset, request, category);
         Asset saved = assetRepository.save(asset);
 
-        return toResponse(saved, firstImage(id), true);
+        Double utilization = computeUtilizationByAssetId(List.of(id)).get(id);
+        return toResponse(saved, firstImage(id), true, utilization);
     }
 
     @Transactional
@@ -138,7 +144,8 @@ public class AssetService {
         if (request.location() != null) asset.setLocation(request.location());
 
         Asset saved = assetRepository.save(asset);
-        return toResponse(saved, firstImage(id), true);
+        Double utilization = computeUtilizationByAssetId(List.of(id)).get(id);
+        return toResponse(saved, firstImage(id), true, utilization);
     }
 
     @Transactional
@@ -225,11 +232,41 @@ public class AssetService {
                 assetIds, window[0], window[1], Booking.ACTIVE_STATUSES);
     }
 
+    /**
+     * Per-asset utilization for the current month: booked days (Booking.UTILIZATION_STATUSES,
+     * same day-overlap math as MonthlyUtilizationService's fleet-wide figure) divided by days
+     * in the current month, as a percentage. Missing from the map (rather than 0.0) only when
+     * assetIds is empty; every requested asset id gets an entry, 0.0 if it has no bookings.
+     */
+    private Map<Long, Double> computeUtilizationByAssetId(List<Long> assetIds) {
+        if (assetIds.isEmpty()) {
+            return Map.of();
+        }
+        LocalDate today = LocalDate.now();
+        LocalDate monthStart = today.withDayOfMonth(1);
+        LocalDate monthEnd = monthStart.plusMonths(1).minusDays(1);
+        long daysInMonth = monthStart.lengthOfMonth();
+
+        List<BookingItem> utilizedItems = bookingItemRepository.findByBookingStatusIn(Booking.UTILIZATION_STATUSES);
+        Set<Long> assetIdSet = Set.copyOf(assetIds);
+
+        Map<Long, Long> bookedDaysByAssetId = utilizedItems.stream()
+                .filter(item -> assetIdSet.contains(item.getAsset().getId()))
+                .collect(Collectors.groupingBy(
+                        item -> item.getAsset().getId(),
+                        Collectors.summingLong(item -> Booking.overlapDays(item.getBooking(), monthStart, monthEnd))));
+
+        return assetIds.stream()
+                .collect(Collectors.toMap(
+                        Function.identity(),
+                        id -> (bookedDaysByAssetId.getOrDefault(id, 0L) * 100.0) / daysInMonth));
+    }
+
     private String toDataUri(AssetImage image) {
         return image != null ? JPEG_DATA_URI_PREFIX + image.getImage() : null;
     }
 
-    private EquipmentResponse toResponse(Asset asset, AssetImage image, Boolean available) {
+    private EquipmentResponse toResponse(Asset asset, AssetImage image, Boolean available, Double utilization) {
         return new EquipmentResponse(
                 asset.getId(),
                 asset.getName(),
@@ -245,7 +282,8 @@ public class AssetService {
                 asset.getDescription(),
                 toDataUri(image),
                 asset.getLocation(),
-                List.of());
+                List.of(),
+                utilization);
 
     }
 }

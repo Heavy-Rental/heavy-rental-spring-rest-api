@@ -70,7 +70,7 @@ class BookingMapperTest {
         ReturnItemResponse response = mapper.toReturnItemResponse(booking, List.of(item));
 
         assertThat(response.items()).containsExactly(
-                new BookingItemLine("CAT 320 Excavator", "SN-EXC-000320"));
+                new BookingItemLine(null, "CAT 320 Excavator", "SN-EXC-000320"));
     }
 
     @Test
@@ -102,7 +102,7 @@ class BookingMapperTest {
         ReturnItemResponse response = mapper.toReturnItemResponse(booking, List.of(itemTwo, itemOne));
 
         assertThat(response.items()).containsExactly(
-                new BookingItemLine("JLG 460SJ Boom Lift", "SN-BML-000460"),
-                new BookingItemLine("Toyota 8FD25 Forklift", "SN-FKL-008FD25"));
+                new BookingItemLine(null, "JLG 460SJ Boom Lift", "SN-BML-000460"),
+                new BookingItemLine(null, "Toyota 8FD25 Forklift", "SN-FKL-008FD25"));
     }
 }
