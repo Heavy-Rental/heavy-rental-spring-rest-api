@@ -7,6 +7,8 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
 
+import jakarta.validation.Valid;
+
 import com.heavy_rental.rest_api.dto.RentalPlanCreateRequest;
 import com.heavy_rental.rest_api.dto.RentalPlanResponse;
 import com.heavy_rental.rest_api.service.RentalPlanService;
@@ -26,7 +28,7 @@ public class RentalPlanController {
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    public RentalPlanResponse create(@RequestBody RentalPlanCreateRequest request, @AuthenticationPrincipal Jwt jwt) {
+    public RentalPlanResponse create(@Valid @RequestBody RentalPlanCreateRequest request, @AuthenticationPrincipal Jwt jwt) {
         return rentalPlanService.create(request, jwt.getSubject());
     }
 
