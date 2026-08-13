@@ -16,6 +16,7 @@ import com.heavy_rental.rest_api.repository.RentalPlanRepository;
 import com.heavy_rental.rest_api.repository.UserRepository;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 
 import com.heavy_rental.rest_api.dto.RentalPlanItemRequest;
 import com.heavy_rental.rest_api.entity.Asset;
@@ -65,6 +66,7 @@ public class RentalPlanService {
         plan.setEndDate(request.endDate());
         plan.setSiteAddress(request.siteAddress());
         plan.setStatus(RentalPlan.PlanStatus.DRAFT);
+        plan.setCreatedAt(LocalDateTime.now());
 
         rentalPlanRepository.save(plan);
         return toResponse(plan);
@@ -144,6 +146,7 @@ public class RentalPlanService {
 
         plan.setTotalAmount(total);
         plan.setStatus(RentalPlan.PlanStatus.QUOTED);
+        plan.setUpdatedAt(LocalDateTime.now());
         rentalPlanRepository.save(plan);
 
         return toResponse(plan);

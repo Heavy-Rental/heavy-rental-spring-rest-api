@@ -2,6 +2,8 @@ package com.heavy_rental.rest_api.service;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.Duration;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
@@ -22,11 +24,13 @@ import com.heavy_rental.rest_api.entity.Asset;
 import com.heavy_rental.rest_api.entity.Booking;
 import com.heavy_rental.rest_api.entity.BookingItem;
 import com.heavy_rental.rest_api.entity.RentalPlan;
+import com.heavy_rental.rest_api.entity.RentalPlanRecord;
 import com.heavy_rental.rest_api.entity.User;
 import com.heavy_rental.rest_api.mapper.BookingMapper;
 import com.heavy_rental.rest_api.repository.AssetRepository;
 import com.heavy_rental.rest_api.repository.BookingItemRepository;
 import com.heavy_rental.rest_api.repository.BookingRepository;
+import com.heavy_rental.rest_api.repository.RentalPlanRecordRepository;
 import com.heavy_rental.rest_api.repository.RentalPlanRepository;
 
 @Service
@@ -40,10 +44,14 @@ public class BookingService {
      */
     private static final BigDecimal DEPOSIT_RATE = new BigDecimal("0.30");
 
+    /** How long a RentalPlan's quoted price stays valid before checkout requires a re-quote. */
+    private static final Duration QUOTE_VALIDITY = Duration.ofHours(24);
+
     private final BookingRepository bookingRepository;
     private final BookingItemRepository bookingItemRepository;
     private final AssetRepository assetRepository;
     private final RentalPlanRepository rentalPlanRepository;
+    private final RentalPlanRecordRepository rentalPlanRecordRepository;
     private final CurrentUserService currentUserService;
     private final BookingMapper mapper;
 
@@ -52,12 +60,14 @@ public class BookingService {
             BookingItemRepository bookingItemRepository,
             AssetRepository assetRepository,
             RentalPlanRepository rentalPlanRepository,
+            RentalPlanRecordRepository rentalPlanRecordRepository,
             CurrentUserService currentUserService,
             BookingMapper mapper) {
         this.bookingRepository = bookingRepository;
         this.bookingItemRepository = bookingItemRepository;
         this.assetRepository = assetRepository;
         this.rentalPlanRepository = rentalPlanRepository;
+        this.rentalPlanRecordRepository = rentalPlanRecordRepository;
         this.currentUserService = currentUserService;
         this.mapper = mapper;
     }
@@ -65,6 +75,10 @@ public class BookingService {
     @Transactional
     public BookingResponse createBooking(Jwt jwt, CreateBookingRequest request) {
         User customer = currentUserService.getUser(jwt);
+
+        if (request.rentalPlanId() != null) {
+            return createFromRentalPlan(customer, request);
+        }
 
         if (request.items() == null || request.items().isEmpty()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "At least one item is required");
@@ -74,12 +88,6 @@ public class BookingService {
         }
         if (!request.endDate().isAfter(request.startDate())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "endDate must be after startDate");
-        }
-
-        RentalPlan rentalPlan = null;
-        if (request.rentalPlanId() != null) {
-            rentalPlan = rentalPlanRepository.findById(request.rentalPlanId())
-                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Rental plan not found"));
         }
 
         List<Asset> assets = new ArrayList<>();
@@ -93,17 +101,11 @@ public class BookingService {
             assets.add(asset);
         }
 
-        // Same conflict check AssetService's browse/getById availability flag uses
-        // (Booking.ACTIVE_STATUSES) — reject up front rather than silently double-booking.
-        List<Long> assetIds = assets.stream().map(Asset::getId).toList();
-        Set<Long> unavailable = bookingItemRepository.findAssetIdsWithOverlappingBooking(
-                assetIds, request.startDate(), request.endDate(), Booking.ACTIVE_STATUSES);
-        if (!unavailable.isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Asset(s) already booked for the requested dates: " + unavailable);
-        }
+        assertAvailable(assets, request.startDate(), request.endDate());
 
-        long days = Math.max(1, ChronoUnit.DAYS.between(request.startDate(), request.endDate()));
+        // Inclusive of both start and end day — matches DefaultPricingClient's quote-time math,
+        // so a booking's total agrees with the RentalPlan it was quoted from.
+        long days = ChronoUnit.DAYS.between(request.startDate(), request.endDate()) + 1;
 
         BigDecimal totalAmount = BigDecimal.ZERO;
         List<BookingItem> bookingItems = new ArrayList<>();
@@ -119,14 +121,80 @@ public class BookingService {
             bookingItems.add(bookingItem);
         }
 
+        return persistBooking(customer, null, request.startDate(), request.endDate(), totalAmount, bookingItems, request);
+    }
+
+    /**
+     * Checkout from a quoted RentalPlan (the cart → quote → checkout flow): items, dates, and
+     * price all come from the plan's own persisted records — never recomputed or taken from the
+     * request body — so the amount charged always matches what the customer was quoted.
+     */
+    private BookingResponse createFromRentalPlan(User customer, CreateBookingRequest request) {
+        RentalPlan rentalPlan = rentalPlanRepository.findById(request.rentalPlanId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Rental plan not found"));
+
+        // 404, not 403 — matches this codebase's existing "don't confirm another customer's
+        // resource exists" convention (SPEC-rental-plan-quote.md REQ-3).
+        if (!rentalPlan.getCustomer().getId().equals(customer.getId())) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Rental plan not found");
+        }
+        if (rentalPlan.getStatus() != RentalPlan.PlanStatus.QUOTED) {
+            throw new RentalPlanConflictException("quote_not_ready",
+                    "Rental plan must be quoted before checkout");
+        }
+        boolean stale = rentalPlan.getUpdatedAt() == null
+                || Duration.between(rentalPlan.getUpdatedAt(), LocalDateTime.now()).compareTo(QUOTE_VALIDITY) > 0;
+        if (stale) {
+            throw new RentalPlanConflictException("quote_expired",
+                    "Quote has expired — request a new quote before checking out");
+        }
+
+        List<RentalPlanRecord> records = rentalPlanRecordRepository.findByRentalPlanId(rentalPlan.getId());
+        List<Asset> assets = records.stream().map(RentalPlanRecord::getAsset).toList();
+
+        // Availability was never held at quote time (SPEC-rental-plan-quote.md §7), so it must
+        // still be checked here, right before the booking actually commits.
+        assertAvailable(assets, rentalPlan.getStartDate(), rentalPlan.getEndDate());
+
+        List<BookingItem> bookingItems = records.stream().map(record -> {
+            BookingItem bookingItem = new BookingItem();
+            bookingItem.setAsset(record.getAsset());
+            bookingItem.setDailyRate(record.getDailyRate());
+            bookingItem.setSubtotal(record.getSubtotal());
+            return bookingItem;
+        }).toList();
+
+        BookingResponse response = persistBooking(customer, rentalPlan, rentalPlan.getStartDate(),
+                rentalPlan.getEndDate(), rentalPlan.getTotalAmount(), bookingItems, request);
+
+        rentalPlan.setStatus(RentalPlan.PlanStatus.CONVERTED);
+        rentalPlanRepository.save(rentalPlan);
+
+        return response;
+    }
+
+    // Same conflict check AssetService's browse/getById availability flag uses
+    // (Booking.ACTIVE_STATUSES) — reject up front rather than silently double-booking.
+    private void assertAvailable(List<Asset> assets, LocalDate startDate, LocalDate endDate) {
+        List<Long> assetIds = assets.stream().map(Asset::getId).toList();
+        Set<Long> unavailable = bookingItemRepository.findAssetIdsWithOverlappingBooking(
+                assetIds, startDate, endDate, Booking.ACTIVE_STATUSES);
+        if (!unavailable.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Asset(s) already booked for the requested dates: " + unavailable);
+        }
+    }
+
+    private BookingResponse persistBooking(User customer, RentalPlan rentalPlan, LocalDate startDate,
+            LocalDate endDate, BigDecimal totalAmount, List<BookingItem> bookingItems, CreateBookingRequest request) {
         BigDecimal depositAmount = totalAmount.multiply(DEPOSIT_RATE).setScale(2, RoundingMode.HALF_UP);
         BigDecimal remainingBalance = totalAmount.subtract(depositAmount);
 
         Booking booking = new Booking();
         booking.setCustomer(customer);
         booking.setRentalPlan(rentalPlan);
-        booking.setStartDate(request.startDate());
-        booking.setEndDate(request.endDate());
+        booking.setStartDate(startDate);
+        booking.setEndDate(endDate);
         booking.setStatus(Booking.BookingStatus.PENDING_DEPOSIT);
         booking.setTotalAmount(totalAmount);
         booking.setDepositAmount(depositAmount);

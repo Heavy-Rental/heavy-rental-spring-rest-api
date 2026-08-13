@@ -34,6 +34,12 @@ public class RestExceptionHandler {
 				.body(error("validation_failed", message));
 	}
 
+	@ExceptionHandler(com.heavy_rental.rest_api.service.RentalPlanConflictException.class)
+	public ResponseEntity<Map<String, String>> handleRentalPlanConflict(
+			com.heavy_rental.rest_api.service.RentalPlanConflictException ex) {
+		return ResponseEntity.status(HttpStatus.CONFLICT).body(error(ex.getCode(), ex.getMessage()));
+	}
+
 	@ExceptionHandler(ObjectOptimisticLockingFailureException.class)
 	public ResponseEntity<Map<String, String>> handleOptimisticLocking() {
 		return ResponseEntity.status(HttpStatus.CONFLICT)
