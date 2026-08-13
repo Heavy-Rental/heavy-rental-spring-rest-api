@@ -118,9 +118,11 @@ Set<Long> findAssetIdsWithOverlappingBooking(...);
 
 | Params given | Behavior |
 |---|---|
-| Neither | Defaults to `LocalDate.now()` for both — "available today" |
-| Both | Uses the given window |
+| Neither | No window resolved; `available` is `null` in the response — no default to "today" (see §7.1's note; corrected 2026-08-13, was previously documented as defaulting to `LocalDate.now()`) |
+| Both | Uses the given window; `available` is `true`/`false` |
 | Only one | `400 Bad Request` — "Both startDate and endDate must be provided together" |
+
+`resolveAvailabilityWindow(startDate, endDate)` (`AssetService.java`) returns `null`, not a two-`LocalDate.now()` window, when both params are omitted — `browse()`/`getById()` then pass `available = null` straight through to `EquipmentResponse` rather than computing today's overlap. `EquipmentResponse.available` is `Boolean` (nullable), not `boolean`, to carry that third state.
 
 ---
 
@@ -182,12 +184,17 @@ All query params optional. `category` matches `AssetCategory.name` exactly (400 
     "available": true,
     "desc": "...",
     "img": "data:image/jpeg;base64,/9j/4AAQSkZJRg...",
-    "location": "Tuas"
+    "location": "Tuas",
+    "tags": []
   }
 ]
 ```
 
+`available: true` above reflects the example request's `startDate`/`endDate` params. When neither is given, `available` is `null` (see §4.3) rather than defaulting to a computed "today" value.
+
 `img` is `null` for an asset with no image row (e.g. a freshly created one — see §7.3).
+
+`tags` is always `[]` today — `EquipmentResponse.tags` exists on the DTO but `AssetService` never populates it from anything (`Asset` has no tags column/relation). Present in every response for forward-compatibility; not yet backed by real data.
 
 ### 7.2 `GET /api/equipment/{id}`
 
@@ -222,7 +229,7 @@ Content-Type: application/json
 
 ### 7.4 `PUT /api/equipment/{id}` / `PATCH /api/equipment/{id}`
 
-Same `EquipmentRequest` body. `PUT` replaces every field unconditionally; `PATCH` only overwrites fields present (non-null) in the request body. Both return `200` with the updated `EquipmentResponse` (images unchanged, `available` recomputed for "today"). `404` if the id doesn't exist; `400` if `categoryId`/`condition` given but invalid.
+Same `EquipmentRequest` body. `PUT` replaces every field unconditionally; `PATCH` only overwrites fields present (non-null) in the request body. Both return `200` with the updated `EquipmentResponse` (images unchanged, `available` hardcoded `true` — same as `POST`, not date-window-computed; corrected 2026-08-13, was previously documented as "recomputed for today"). `404` if the id doesn't exist; `400` if `categoryId`/`condition` given but invalid.
 
 ### 7.5 `DELETE /api/equipment/{id}`
 
@@ -305,7 +312,7 @@ Confirm the "Browse Equipment" cards render real photos directly from `img` with
 | Fixed the mislabeled PNG (asset id 4) by re-encoding to real JPEG, not by adding per-image MIME tracking | Simpler fix given only one file was wrong; a `mimeType` column is still the right call *if* a non-JPEG asset is ever legitimately added (see §3.4) |
 | Overlap query lives on `BookingItemRepository`, not `BookingRepository` | Only `BookingItem` has an `asset_id` FK |
 | `PENDING_DEPOSIT`/`PENDING_CONFIRMED`/`CONFIRMED`/`MOBILISED` block availability; `COMPLETED`/`CANCELLED` don't | Matches real-world booking lifecycle — a completed or cancelled booking no longer holds the asset |
-| Default date window to "today" when neither given | Lets the frontend call `GET /api/equipment` with no params and still get a meaningful `available` flag, matching the mock API's always-present field |
+| `available` is `null` (not defaulted to "today") when no date window is given | `EquipmentResponse.available` is nullable specifically to let the frontend distinguish "no availability computed" from a real `true`/`false` — corrected 2026-08-13, this row previously described a `LocalDate.now()` default that isn't what the code does |
 | Batch image/availability lookups instead of per-asset loops | `open-in-view=false` already forces careful transaction-scoped mapping; batching is barely more code and cuts query count from ~17 to 3 |
 | Delete asset's own images first, then catch `DataIntegrityViolationException` | No cascade exists anywhere in this schema; this is the only path to a clean `409` instead of a raw DB error |
 | Contract paths match the frontend's existing mock exactly (`/api/equipment`, `/api/equipment/{id}`) | Zero frontend path changes required |
@@ -323,3 +330,5 @@ Confirm the "Browse Equipment" cards render real photos directly from `img` with
 | 1.2.0 | 2026-08-11 | Doc-only corrections, no code change: (1) §2.2/§5 asset-count scale ceiling updated from 8 to a planned 16-asset fleet, and the stale "9 seeded images / ~1.85MB" figures (left over from before the CAT 320 second-photo removal already reflected in §3.2.1) corrected to the current 8-image/~1.3MB baseline, per review of `specification/temporary/data-seeding-spec` (not yet executed — the live fleet is still 8 assets as of this note). (2) §4.2/§9 corrected stale `PENDING` status wording to the actual `PENDING_DEPOSIT`/`PENDING_CONFIRMED` split from `HR-77` — the code (`AssetService.ACTIVE_BOOKING_STATUSES`) was already correct, only this doc's prose was stale. The §8 QA checklist/curl script's literal "8 seeded assets" text is intentionally left as-is until the reseed actually executes and `SPEC-seed-data.md` is updated to match. |
 | 1.3.0 | 2026-08-11 | `specification/temporary/data-seeding-spec` revised again (still not executed): the planned fleet target grew from 16 to 27 assets, to give every category's spec-band real coverage instead of leaving most bands empty. §2.2/§5 scale-ceiling wording and image-size estimate updated accordingly (16→28-asset ceiling, ~2.6MB→~4.4MB). No other change. |
 | 1.4.0 | 2026-08-11 | The planned reseed executed: `data.sql` now seeds 27 assets (up from 8), per `SPEC-seed-data.md` 2.0.0. §2.2/§5 updated from planned/ceiling language to the actual current numbers (27 assets, ~4.6MB embedded images). §8 QA checklist and curl script's "8 seeded assets" updated to 27 — no longer deferred, since the fleet this doc describes is now real. `specification/temporary/data-seeding-spec`/`design.md` removed as part of the same change (their content is now durably captured in `SPEC-seed-data.md`). No code change. |
+| 1.5.0 | 2026-08-13 | **Doc-only corrections against `AssetService.java`, no code change.** §4.3/§7.1/§9 previously said the availability window defaults to `LocalDate.now()`/"today" when neither `startDate` nor `endDate` is given; `resolveAvailabilityWindow` actually returns `null` in that case and `browse()`/`getById()` pass `available: null` straight through — never a computed "today" value. §7.4 previously said `PUT`/`PATCH` "recompute" `available` for today; they actually hardcode `true`, same as `POST` (§7.3), with no date logic at all. §7.1's example response and DTO discussion updated to note the always-empty `tags` field, present on `EquipmentResponse` but never populated by `AssetService` (no backing column on `Asset`) — previously undocumented. |
+| 1.6.0 | 2026-08-13 | **Cross-check requested by a web-portal API audit, re-verified — no divergence found.** `GET /api/equipment`'s `startDate`/`endDate` query params (`EquipmentController.browse`/`getById`, both `@RequestParam(required = false) @DateTimeFormat(iso = ISO.DATE) LocalDate`) were read directly against this file's §4.3/§7.1/§7.2 line by line: `resolveAvailabilityWindow` (`AssetService.java:195`) returns `null` on neither param, throws `400 Bad Request` "Both startDate and endDate must be provided together" on exactly one, and returns the real `[startDate, endDate]` window on both — matching §4.3's table exactly, including the two corrections already made in 1.5.0 above. No code change; this entry exists to record that the cross-check happened and passed, closing the "never cross-checked" gap the audit flagged. |

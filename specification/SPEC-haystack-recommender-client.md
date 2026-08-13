@@ -96,7 +96,7 @@ Client                         API                              haystack
 - Headers: `Idempotency-Key`, `X-Correlation-Id`, optional `traceparent`
 - Saga: ingest → persist → recommend; no re-ingest on Call 2/3 failure
 - Extend `AIRecommendation` for haystack handles
-- Portal REST (three routes above)
+- Portal REST (three routes above), including multipart project-file submit on Call 1
 - WireMock test suite
 - Config + ops runbook notes
 
@@ -105,7 +105,6 @@ Client                         API                              haystack
 - FastAPI S2a implementation (as-built elsewhere)
 - 202 + poll/SSE (C2), gRPC/queues (C3)
 - C/W/D multi-agent roles in Spring
-- Multipart project-file upload (JSON text only)
 - Writing `recommendation_items` from Call 2
 - Persisting Q&A answer history
 - Flyway migrations
@@ -402,7 +401,25 @@ PR packing: **S2b-0** docs → **S2b-1** client → **S2b-2** resilience → **S
 
 ---
 
-## 15. Change control
+## 16. Known gaps (from a web-portal API audit, 2026-08-13)
+
+### 16.1 This file's full contract must actually reach the portal team
+
+A separate web-portal-facing reference document had only "a one-line, ambiguous gloss" of this feature — the full field-level contract in §5 (request/response shapes for `project-spec`, `knowledge-query`, `GET /{id}`) never made it across. This backend repository is not the gap: §5 above is, and has been, the complete field-level portal contract. The gap is distribution — this section exists so it's written down explicitly, in the one file both sides can point to: **§5 of this document is the authoritative, complete field-level contract for all three portal routes** (`POST /api/recommendations/project-spec`, `POST /api/recommendations/{recommendationId}/knowledge-query`, `GET /api/recommendations/{recommendationId}`), including request/response field tables, the multipart variant (§5.1), and error mapping (§5.4). Anyone maintaining a portal-side summary of this contract should link to or copy §5 directly rather than re-derive or re-summarize it, to avoid the drift that produced the one-line gloss in the first place.
+
+### 16.2 Rental dates are not part of the Call 2 (recommend) contract — `HR-111`, unstarted
+
+**Gap, not yet designed:** neither the portal request (§5.1) nor the upstream Call 2 wire contract (§6; normative detail in [`wire-contract-call1-call2.md`](../Feasibility_Study_Spring/wire-contract-call1-call2.md) §"Call 2 — recommend / quote") accepts a rental date range as an input to pricing/recommendation. Specifically:
+
+- `POST /api/recommendations/project-spec`'s `startDate`/`endDate` (§5.1 request table) are optional, described only as "tentative" project dates, stored on `AIRecommendation` (§8: `tentativeStartDate`/`tentativeEndDate`, "Optional") — they are **not** forwarded to Call 2.
+- Call 2's actual request body (`wire-contract-call1-call2.md`) is `user_id`, `ingest_id`, `query` (optional), `top_k` (optional) — no date field of any kind.
+- Call 2's response can include `days`/`estimatedTotal` "when known" (same wire-contract doc), but with no date-range input, there's no documented mechanism for the caller to specify *which* rental window `days`/`estimatedTotal` should be computed against.
+
+Ticket `HR-111` exists to close this gap; as of this writing it has no branch and no design in this repository — confirmed via `git branch -a` (no matching branch name) and a repo-wide search for "HR-111" (no hits outside this note). This section exists so the gap itself is visible in the contract it affects, rather than only living in an external ticket tracker. Not resolved here — recorded so it isn't lost, matching this project's convention for open items elsewhere (e.g. `SPEC-rental-plan-quote.md` §7).
+
+---
+
+## 17. Change control
 
 | Version | Date | Notes |
 |---------|------|--------|
@@ -412,3 +429,5 @@ PR packing: **S2b-0** docs → **S2b-1** client → **S2b-2** resilience → **S
 | **2.0.0** | 2026-08-12 | **Feasibility v2 alignment.** Call 2 = recommend quote (`quoteRef`/`items`); Call 3 = `.../query` chatbot. Separate recommend timeout/bulkhead. Specs/OpenSpec/SPDD/feasibility as-built notes updated. |
 | **2.0.1** | 2026-08-12 | Plan §7 residual tests: timeout+same-key retry, dual-hop WireMock saga (paths + correlation + quote); exponential retry backoff. |
 | **2.1.0** | 2026-08-12 | Multipart project-file submit; `RecommendationControllerIntegrationTest` (MockMvc). |
+| 2.1.1 | 2026-08-13 | §3.1/§3.2 corrected: multipart project-file upload had shipped in 2.1.0 but §3.2 still listed it under "Out of scope" ("JSON text only"), contradicting §5.1/§11.3/the 2.1.0 entry above. Moved into §3.1's in-scope list; removed from §3.2. No behavior change. |
+| 2.2.0 | 2026-08-13 | New §16, from a web-portal API audit: §16.1 records that this file's §5 is the authoritative portal contract (a separate portal-side reference only had a one-line gloss, not the full field-level contract); §16.2 records that no rental-date-range input exists anywhere in the Call 2 request path today, and that `HR-111` (the ticket to add one) has no branch or design yet. No behavior change. |

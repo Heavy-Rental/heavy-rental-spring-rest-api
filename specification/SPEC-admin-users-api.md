@@ -1,3 +1,7 @@
+> **Provenance note (updated 2026-08-13):** this file was originally brought into `HR-129-update-api-contracts-2` as a verbatim copy from `origin/36-link-rest-api-users-to-front-end` (commit `e79742d`), at a point when that branch was unmerged and its code (`UserController`, `UserAdminService`, the `User*` DTOs, the `SecurityConfig` matcher) did not exist in this working tree — see this file's git history for that original note. **That's since changed:** `36-link-rest-api-users-to-front-end` merged into `develop` via PR #37 (commit `13ec76c`, "36 link rest api users to front end"), and this branch has now merged `develop`, bringing the real code in alongside this doc. The code this spec describes is real and present as of this merge — everything below is the original spec content, unedited.
+
+---
+
 # Specification: Admin Users — Backend Wiring
 
 | Field | Value |
