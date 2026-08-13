@@ -14,6 +14,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
+import jakarta.validation.Valid;
+
 import com.heavy_rental.rest_api.dto.BookingResponse;
 import com.heavy_rental.rest_api.dto.BookingUpdateRequest;
 import com.heavy_rental.rest_api.dto.CreateBookingRequest;
@@ -31,7 +33,7 @@ public class BookingController {
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    public BookingResponse createBooking(@AuthenticationPrincipal Jwt jwt, @RequestBody CreateBookingRequest request) {
+    public BookingResponse createBooking(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody CreateBookingRequest request) {
         return bookingService.createBooking(jwt, request);
     }
 
@@ -46,7 +48,7 @@ public class BookingController {
     }
 
     @PutMapping("/{bookingId}")
-    public BookingResponse updateBooking(@PathVariable Long bookingId, @RequestBody BookingUpdateRequest request) {
+    public BookingResponse updateBooking(@PathVariable Long bookingId, @Valid @RequestBody BookingUpdateRequest request) {
         return bookingService.updateBooking(bookingId, request);
     }
 }

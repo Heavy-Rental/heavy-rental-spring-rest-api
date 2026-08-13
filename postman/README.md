@@ -71,6 +71,15 @@ Submit test script asserts the portal body is **quote-shaped** and stores `recom
 
 ## Contracts
 
-- Index: [`../specification/SPEC-api-index.md`](../specification/SPEC-api-index.md)
-- Auth: [`../specification/SPEC-auth-login-logout.md`](../specification/SPEC-auth-login-logout.md)
-- Recommender: [`../specification/SPEC-haystack-recommender-client.md`](../specification/SPEC-haystack-recommender-client.md)
+- Route map: [`../openspec/specs/api-index/contracts/routes.md`](../openspec/specs/api-index/contracts/routes.md)
+- Auth interim: [`../openspec/specs/auth-interim-token/`](../openspec/specs/auth-interim-token/)
+- Auth login/logout: [`../openspec/specs/auth-login-logout/`](../openspec/specs/auth-login-logout/)
+- Equipment: [`../openspec/specs/equipment-browse/`](../openspec/specs/equipment-browse/)
+- Bookings: [`../openspec/specs/booking-delivery-return/`](../openspec/specs/booking-delivery-return/)
+- Payments: [`../openspec/specs/payments-stripe/`](../openspec/specs/payments-stripe/)
+- Rental plans: [`../openspec/specs/rental-plan-quote/`](../openspec/specs/rental-plan-quote/)
+- Admin users: [`../openspec/specs/admin-users/`](../openspec/specs/admin-users/)
+- Monthly utilization: [`../openspec/specs/monthly-utilization/`](../openspec/specs/monthly-utilization/)
+- Pricing estimate (design): [`../openspec/changes/pricing-estimate/`](../openspec/changes/pricing-estimate/)
+- Recommender: [`../openspec/specs/haystack-recommender/`](../openspec/specs/haystack-recommender/) · [`contracts/portal-api.md`](../openspec/specs/haystack-recommender/contracts/portal-api.md)
+- OpenSpec guide: [`../openspec/AGENTS.md`](../openspec/AGENTS.md)

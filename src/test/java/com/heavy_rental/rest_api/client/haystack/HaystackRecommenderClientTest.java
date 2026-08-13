@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.math.BigDecimal;
 import java.time.Duration;
 
 import org.junit.jupiter.api.AfterEach;
@@ -178,6 +179,9 @@ class HaystackRecommenderClientTest {
 								  "items": [
 								    {
 								      "rankOrder": 1,
+								      "matchScore": 0.95,
+								      "reason": "Fits indoor height",
+								      "quantity": 1,
 								      "equipment": { "id": "asset-3", "name": "Genie GS-1930", "category": "Scissor Lift" },
 								      "baseDailyRate": 150.00,
 								      "lineTotal": 1500.00
@@ -195,6 +199,12 @@ class HaystackRecommenderClientTest {
 		assertNotNull(resp.items());
 		assertEquals(1, resp.items().size());
 		assertEquals("asset-3", resp.items().get(0).equipment().id());
+		assertEquals("Genie GS-1930", resp.items().get(0).equipment().name());
+		assertEquals(new BigDecimal("0.95"), resp.items().get(0).matchScore());
+		assertEquals("Fits indoor height", resp.items().get(0).reason());
+		assertEquals(Integer.valueOf(1), resp.items().get(0).quantity());
+		assertEquals(new BigDecimal("150.00"), resp.items().get(0).baseDailyRate());
+		assertEquals(new BigDecimal("1500.00"), resp.items().get(0).lineTotal());
 
 		wireMock.verify(postRequestedFor(urlEqualTo(HaystackRecommenderClient.PATH_RECOMMEND))
 				.withHeader(HaystackRecommenderClient.HEADER_CORRELATION_ID, equalTo("corr-rec")));

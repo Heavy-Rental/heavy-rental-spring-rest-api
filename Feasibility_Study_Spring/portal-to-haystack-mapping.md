@@ -3,10 +3,13 @@
 | Field | Value |
 |-------|--------|
 | **Document type** | Integration mapping (Spring-facing) |
-| **Version** | **2.0.0** |
-| **Date** | 2026-08-12 |
+| **Version** | **2.0.2** |
+| **Date** | 2026-08-13 |
 | **Status** | Normative — Call 2 = **recommend**; Call 3 = **chatbot Q&A** |
 | **Package** | [`README.md`](./README.md) |
+| **Upstream repo** | [Heavy-Rental/haystack-fast-api](https://github.com/Heavy-Rental/haystack-fast-api) (**read-only**) |
+| **Synced from** | `develop` @ `12f89dda9b27ba0196c7a37f7f4310459731cb1e` |
+| **Spring OpenSpec** | [`../openspec/specs/haystack-recommender/`](../openspec/specs/haystack-recommender/) |
 
 ---
 
@@ -65,9 +68,15 @@ React  ← primary submit response = Call 2 recommend quote
 | `specSummary` | From Call 1 summary |
 | `rationale` | Tool-backed text |
 | `items[]` | Ranked equipment; `equipment.id` = catalog asset only |
+| `items[].equipment.platformHeight` | Portal JSON **omits** the key when null |
+| `items[].equipment.img` | Spring sets catalog JPEG data URI when `id` is a numeric `assets.id` with `asset_images`; else haystack pass-through |
 | `warnings` | Soft issues |
 
-Full contract: `openspec/specs/recommendation-pipeline/contracts/get-asset-recommendations.md`.
+Full upstream contract (haystack-fast-api, read-only):  
+`openspec/specs/recommendation-pipeline/contracts/get-asset-recommendations.md`  
+(includes nested `items[]`, `mlPredictedPrice`, `equipment.baseDailyRate`).
+
+Spring portal field tables: [`../openspec/specs/haystack-recommender/contracts/portal-api.md`](../openspec/specs/haystack-recommender/contracts/portal-api.md).
 
 **Safeguard:** never invent asset ids or rates; empty fleet → empty `items` + warning.
 
@@ -80,7 +89,8 @@ Full contract: `openspec/specs/recommendation-pipeline/contracts/get-asset-recom
 | `answer` | Markdown synthesis |
 | `sources_used`, `research_hits`, `graph_hits`, `tool_traces` | Evidence |
 
-Contract: `openspec/specs/knowledge-graph/contracts/project-knowledge-query.md`.
+Upstream contract (haystack-fast-api, read-only):  
+`openspec/specs/knowledge-graph/contracts/project-knowledge-query.md`.
 
 ---
 
@@ -108,5 +118,6 @@ Contract: `openspec/specs/knowledge-graph/contracts/project-knowledge-query.md`.
 
 | Version | Date | Notes |
 |---------|------|--------|
+| **2.0.2** | 2026-08-13 | Portal omit-null `platformHeight`; catalog `img` data URI from `asset_images` |
 | **2.0.0** | 2026-08-12 | Call 2 recommend; Call 3 chatbot Q&A |
 | **1.0.1** | 2026-08-12 | Prior dual-hop with Call 2 as Q&A (superseded) |
