@@ -142,8 +142,11 @@ public class RentalPlanService {
     public RentalPlanResponse requestQuote(Long planId, String customerEmail) {
         RentalPlan plan = loadOwnedPlan(planId, customerEmail);
 
-        if (plan.getStatus() != RentalPlan.PlanStatus.DRAFT && plan.getStatus() != RentalPlan.PlanStatus.SAVED) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Plan is already quoted");
+        // Re-quoting a QUOTED plan is allowed — it's how a customer refreshes a stale quote
+        // (BookingService's 24-hour freshness check, REQ-6) before checkout. Only a CONVERTED
+        // plan is truly final and can never be quoted again.
+        if (plan.getStatus() == RentalPlan.PlanStatus.CONVERTED) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Plan has already been converted to a booking");
         }
 
         List<RentalPlanRecord> items = rentalPlanRecordRepository.findByRentalPlanId(plan.getId());
