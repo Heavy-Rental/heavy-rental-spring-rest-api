@@ -30,7 +30,8 @@ Routes other than interim token, login, health, and Stripe webhook need an **acc
 
 | Email | Password | Role |
 |-------|----------|------|
-| `alex.tan@example.sg` | `customer123` | USER (default in env) |
+| `alex.tan@example.sg` | `customer123` | USER (default in env; has active plans) |
+| `mei.lin@example.sg` | `customer456` | USER (no plans — cart → quote → checkout) |
 | `admin@localhost` | `admin1234` | ADMIN |
 
 ## Folders
@@ -41,10 +42,11 @@ Routes other than interim token, login, health, and Stripe webhook need an **acc
 | **1. Auth** | Interim → login → logout |
 | **2. Recommendations (S2b)** | Submit quote · knowledge-query · get session |
 | **3. Equipment** | Browse / CRUD |
-| **4. Bookings** | Create / list / get / update |
-| **5. Deliveries & Returns** | List + status patch |
+| **4. Bookings** | Direct create / **checkout from plan** / list / get / update |
+| **5. Deliveries & Returns** | List + status patch (`CONFIRMED→MOBILISED`, `MOBILISED→COMPLETED`) |
 | **6. Payments** | Deposit intent (needs Stripe key); webhook (signature) |
-| **7. Stubs** | Depots / rental-plans empty lists |
+| **7. Rental Plans** | Create / list / get / add item / remove item / quote (`/api/rentalPlans`) |
+| **8. Stubs** | Depots empty list only |
 
 ## Recommendations (S2b) checklist
 
@@ -56,6 +58,18 @@ Routes other than interim token, login, health, and Stripe webhook need an **acc
 
 Submit test script asserts the portal body is **quote-shaped** and stores `recommendationId`.
 
+## Rental plan checkout checklist
+
+1. Complete **Auth** login.
+2. For a full walk, login as **Mei Lin** (`mei.lin@example.sg` / `customer456`) so Create is not blocked by BR-06.
+3. **Rental Plans → Create** → **Add item** → **Request quote**. Scripts save `rentalPlanId`.
+4. **Bookings → Checkout from rental plan** — body is `rentalPlanId` + `siteAddress` (items/dates ignored).
+5. Expect `201`, plan `CONVERTED`, `bookingId` saved.
+6. If `409 quote_expired`, run **Request quote** again then retry checkout.
+7. Alex Tan can skip Create: **Request quote** on seeded plan `3`, then checkout.
+
+`siteAddress` must end with a 6-digit postal code or the API returns `400 validation_failed`.
+
 ## Variables
 
 | Variable | Default | Set by |
@@ -65,7 +79,9 @@ Submit test script asserts the portal body is **quote-shaped** and stores `recom
 | `interimToken` | — | Get interim request |
 | `accessToken` | — | Login request |
 | `recommendationId` | `1` | Submit project-spec (success) |
-| `bookingId` | `1` | Create booking (if id present) |
+| `bookingId` | `1` | Create / checkout booking |
+| `rentalPlanId` | `3` | Create plan / quote (seeded Alex Tan QUOTED plan) |
+| `rentalPlanItemId` | `1` | Add item |
 | `equipmentId` | `1` | you |
 | `correlationId` | `postman-corr-001` | optional header on submit |
 
@@ -75,7 +91,8 @@ Submit test script asserts the portal body is **quote-shaped** and stores `recom
 - Auth interim: [`../openspec/specs/auth-interim-token/`](../openspec/specs/auth-interim-token/)
 - Auth login/logout: [`../openspec/specs/auth-login-logout/`](../openspec/specs/auth-login-logout/)
 - Equipment: [`../openspec/specs/equipment-browse/`](../openspec/specs/equipment-browse/)
-- Bookings: [`../openspec/specs/booking-delivery-return/`](../openspec/specs/booking-delivery-return/)
+- Bookings: [`../openspec/specs/booking-delivery-return/`](../openspec/specs/booking-delivery-return/)  
+- Checkout: [`../openspec/specs/rental-plan-quote/contracts/checkout.md`](../openspec/specs/rental-plan-quote/contracts/checkout.md)
 - Payments: [`../openspec/specs/payments-stripe/`](../openspec/specs/payments-stripe/)
 - Rental plans: [`../openspec/specs/rental-plan-quote/`](../openspec/specs/rental-plan-quote/)
 - Admin users: [`../openspec/specs/admin-users/`](../openspec/specs/admin-users/)
