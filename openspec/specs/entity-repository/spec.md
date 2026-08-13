@@ -6,7 +6,7 @@ Describe the as-built JPA data model (entities, relationships, enums, repositori
 
 **Status:** **As-built**  
 **Field catalog:** [`contracts/entity-catalog.md`](./contracts/entity-catalog.md)  
-**Not a REST contract** — endpoints live in feature capabilities / remaining SPECs.
+**Not a REST contract** — endpoints live in feature capabilities under `openspec/specs/`.
 
 ## Requirements
 

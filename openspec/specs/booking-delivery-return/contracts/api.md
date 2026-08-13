@@ -39,10 +39,12 @@ May also include amount fields when booking-create branch is present (`totalAmou
 |--------|------|------|---------|
 | `GET` | `/api/bookings` | — | `BookingResponse[]` |
 | `GET` | `/api/bookings/{id}` | — | `BookingResponse` |
-| `PUT` | `/api/bookings/{id}` | `BookingUpdateRequest` | `BookingResponse` |
+| `PUT` | `/api/bookings/{id}` | `BookingUpdateRequest` (`siteAddress` MUST end with a 6-digit postal code or `400 validation_failed`) | `BookingResponse` |
 | `GET` | `/api/deliveries` | — | `DeliveryItemResponse[]` |
 | `PATCH` | `/api/deliveries/{id}/status` | `{ "bookingStatus": "MOBILISED" }` | `DeliveryItemResponse` |
 | `GET` | `/api/returns` | — | `ReturnItemResponse[]` (incl. `returnNotes`) |
 | `PATCH` | `/api/returns/{id}/status` | `{ "bookingStatus":"COMPLETED", "returnNotes"? }` | `ReturnItemResponse` |
 
-Errors: shared `{ "error", "message" }` — `400` invalid transition/enum, `404` missing.
+Errors: shared `{ "error", "message" }` — `400` invalid transition/enum or `validation_failed` (bad `siteAddress`), `404` missing.
+
+`POST /api/bookings` (create) uses the same `siteAddress` postal-code rule on `CreateBookingRequest`. Plan-backed checkout is proposed in [`../../../changes/rental-plan-checkout-conversion/`](../../../changes/rental-plan-checkout-conversion/).

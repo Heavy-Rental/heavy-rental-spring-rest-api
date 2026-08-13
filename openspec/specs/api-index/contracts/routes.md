@@ -19,7 +19,7 @@ Legend: **Shared** = web + mobile; **Web** / **Mobile** / **Admin** = primary cl
 
 | Method | Path | Client | Roles | Contract |
 |--------|------|--------|-------|----------|
-| `POST` | `/api/bookings` | Shared | USER/ADMIN (caller = customer) | booking create (see payments branch / booking service); list/update [booking-delivery-return](../../booking-delivery-return/) |
+| `POST` | `/api/bookings` | Shared | USER/ADMIN (caller = customer) | booking create (see payments branch / booking service); list/update [booking-delivery-return](../../booking-delivery-return/). Plan-backed checkout: design-only [`../../../changes/rental-plan-checkout-conversion/`](../../../changes/rental-plan-checkout-conversion/) |
 | `GET` | `/api/bookings` | Mobile+ | USER/ADMIN | [booking-delivery-return](../../booking-delivery-return/) |
 | `GET` | `/api/bookings/{id}` | Mobile+ | USER/ADMIN | same |
 | `PUT` | `/api/bookings/{id}` | Mobile+ | USER/ADMIN | same |
@@ -64,6 +64,7 @@ Legend: **Shared** = web + mobile; **Web** / **Mobile** / **Admin** = primary cl
 | Method | Path | Notes |
 |--------|------|--------|
 | `POST` | `/api/pricing/estimate` | Design only — active change [`../../../changes/pricing-estimate/`](../../../changes/pricing-estimate/) |
+| `POST` | `/api/bookings` (`rentalPlanId`) | Design only behavior on existing route — [`../../../changes/rental-plan-checkout-conversion/`](../../../changes/rental-plan-checkout-conversion/) |
 
 ## Haystack proxy map
 

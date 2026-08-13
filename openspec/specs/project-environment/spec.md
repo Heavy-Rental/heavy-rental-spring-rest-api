@@ -54,12 +54,16 @@ Schema management MUST use `spring.jpa.hibernate.ddl-auto=update` unless an expl
 
 ### Requirement: FR-ENV-006 OpenSpec-primary process
 
-New feature contracts MUST be added under `openspec/specs/` or `openspec/changes/` only. OpenSPDD canvases remain under `spdd/prompt/` for generation only.
+New feature contracts MUST be added under `openspec/specs/` or `openspec/changes/` only. OpenSPDD canvases remain under `spdd/prompt/` for generation only. Living contracts MUST NOT be authored under `specification/`.
 
 #### Scenario: New capability
 - GIVEN a new product capability
 - WHEN documentation is authored
 - THEN an OpenSpec domain or change folder is created
+
+### Requirement: FR-ENV-007 Request-body Bean Validation
+
+Write DTOs that carry format rules (for example `siteAddress` postal code) MUST use Jakarta Bean Validation (`@NotBlank`, `@Pattern`) on the request record and `@Valid` on the controller parameter. `MethodArgumentNotValidException` MUST map to HTTP `400` with `error` = `validation_failed` and the shared `{ "error", "message" }` body. Entity columns MUST NOT be the enforcement point for those format rules.
 
 ## Stack (normative summary)
 

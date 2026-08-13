@@ -14,9 +14,9 @@ Full historical field tables: git history (former `specification/SPEC-entity-rep
 | `AssetCategory` | `asset_categories` | 4 categories in seed |
 | `Asset` | `assets` | Fleet item; rates; capacity/height; condition |
 | `AssetImage` | `asset_images` | base64 `image` TEXT; FK asset; also source for haystack-recommender portal `items[].equipment.img` |
-| `RentalPlan` | `rental_plan` | customer FK; status DRAFT/SAVED/QUOTED/CONVERTED |
+| `RentalPlan` | `rental_plan` | customer FK; status DRAFT/SAVED/QUOTED/CONVERTED; `siteAddress` unconstrained at column — DTO postal-code rule on create |
 | `RentalPlanRecord` | `rental_plan_records` | plan line items |
-| `Booking` | `bookings` | customer, dates, status, totals |
+| `Booking` | `bookings` | customer, dates, status, totals; `sitePostalCode` `@Formula` from trailing 6 chars of `siteAddress` |
 | `BookingItem` | `booking_items` | asset lines; conditions; hours |
 | `Payment` | `payments` | deposit/balance; Stripe fields |
 | `DeliveryRecord` | `delivery_records` | booking + driver |

@@ -58,8 +58,23 @@ On `DRAFT`/`SAVED` plans, `POST .../items` with `assetId` MUST create a line wit
 
 Adding/quoting plan items MUST NOT block equipment availability; only bookings with active statuses do.
 
+### Requirement: FR-RP-008 Site address ends with a 6-digit postal code
+
+`POST /api/rentalPlans` `siteAddress` MUST be non-blank and MUST end with a 6-digit postal code (`^.*\d{6}$`). Leading/trailing whitespace MUST be stripped before validation. Invalid or missing address MUST return `400` with `error` = `validation_failed` before the one-active-plan check or any persist. The `RentalPlan.siteAddress` column itself remains an unconstrained nullable string.
+
+#### Scenario: Missing postal code rejected
+- GIVEN a caller with no active plan
+- WHEN they POST a plan whose `siteAddress` is blank or does not end in six digits
+- THEN `400` `validation_failed`
+- AND no `RentalPlan` row is created
+
+#### Scenario: Padded valid address accepted
+- GIVEN `siteAddress` is `"  20 Jurong Port Road, 619094  "`
+- WHEN the plan is created
+- THEN validation passes on the stripped value
+
 ## Out of scope
 
-- Plan → Booking conversion  
+- Plan → Booking conversion (proposed: [`../../../changes/rental-plan-checkout-conversion/`](../../../changes/rental-plan-checkout-conversion/))  
 - Discounts / agreement e-sign  
 - Line-item quantity column redesign

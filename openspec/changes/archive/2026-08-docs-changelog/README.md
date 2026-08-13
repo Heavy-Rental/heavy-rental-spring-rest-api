@@ -8,3 +8,5 @@ Historical plain-language change logs migrated out of `specification/` during Op
 | `CHANGES-equipment-frontend-integration.md` | [`../../../specs/equipment-browse/`](../../../specs/equipment-browse/) (equipment API) |
 
 These files are **audit history only** — do not treat as living contracts.
+
+Leftover long-form `specification/SPEC-*.md` files (api-index, booking-delivery-return, entity-repository, project-environment, rental-plan-quote) were retired after this archive era. As-built SoT is `openspec/specs/`. Unbuilt checkout work is [`../../rental-plan-checkout-conversion/`](../../rental-plan-checkout-conversion/). Full SDD narratives remain in git history.

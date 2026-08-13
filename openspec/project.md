@@ -55,6 +55,7 @@ HTTP tables: `specs/<capability>/contracts/`.
 | Change | Status |
 |--------|--------|
 | [`changes/pricing-estimate/`](./changes/pricing-estimate/) | **Design only** — open availability decision; not implemented |
+| [`changes/rental-plan-checkout-conversion/`](./changes/rental-plan-checkout-conversion/) | **Design only** — plan → booking checkout; not implemented |
 
 ## Archives
 

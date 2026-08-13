@@ -9,7 +9,7 @@
 
 | Method | Path | Notes |
 |--------|------|--------|
-| `POST` | `/api/rentalPlans` | Create `{ startDate, endDate, siteAddress }` → `201` DRAFT |
+| `POST` | `/api/rentalPlans` | Create `{ startDate, endDate, siteAddress }` → `201` DRAFT. `siteAddress` MUST end with a 6-digit postal code or `400 validation_failed` |
 | `GET` | `/api/rentalPlans` | Caller's plans only |
 | `GET` | `/api/rentalPlans/{id}` | Owner or `404` |
 | `POST` | `/api/rentalPlans/{id}/items` | `{ assetId }` |

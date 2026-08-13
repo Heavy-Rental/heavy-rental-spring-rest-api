@@ -22,6 +22,7 @@
 | Recommender | `haystack-recommender` + portal contract + `../Feasibility_Study_Spring/` |
 | Data / seed / tests | `entity-repository`, `seed-data`, `testing` |
 | Estimate (not built) | `changes/pricing-estimate/` |
+| Plan checkout (not built) | `changes/rental-plan-checkout-conversion/` |
 
 ## Haystack upstream (read-only)
 
