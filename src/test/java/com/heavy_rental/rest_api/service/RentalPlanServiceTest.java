@@ -224,4 +224,57 @@ class RentalPlanServiceTest {
         assertThat(response.status()).isEqualTo("DRAFT");
         assertThat(response.createdAt()).isNotNull();
     }
+
+    // --- cancel ------------------------------------------------------------------------------
+
+    @Test
+    void cancel_onQuotedPlan_setsCancelledAndClearsTotal() {
+        RentalPlan plan = ownedPlan(9L, RentalPlan.PlanStatus.QUOTED);
+        plan.setTotalAmount(new BigDecimal("2250.00"));
+        when(rentalPlanRepository.findById(9L)).thenReturn(Optional.of(plan));
+        when(rentalPlanRecordRepository.findByRentalPlanId(9L)).thenReturn(List.of());
+
+        RentalPlanResponse response = service.cancel(9L, EMAIL);
+
+        assertThat(response.status()).isEqualTo("CANCELLED");
+        assertThat(response.totalAmount()).isNull();
+        assertThat(plan.getUpdatedAt()).isNotNull();
+        verify(rentalPlanRepository).save(plan);
+    }
+
+    @Test
+    void cancel_onConvertedPlan_rejectedWith409AlreadyConverted() {
+        RentalPlan plan = ownedPlan(9L, RentalPlan.PlanStatus.CONVERTED);
+        when(rentalPlanRepository.findById(9L)).thenReturn(Optional.of(plan));
+
+        assertThatThrownBy(() -> service.cancel(9L, EMAIL))
+                .isInstanceOf(RentalPlanConflictException.class)
+                .satisfies(ex -> assertThat(((RentalPlanConflictException) ex).getCode())
+                        .isEqualTo("already_converted"));
+    }
+
+    @Test
+    void cancel_onAlreadyCancelledPlan_rejectedWith409AlreadyCancelled() {
+        RentalPlan plan = ownedPlan(9L, RentalPlan.PlanStatus.CANCELLED);
+        when(rentalPlanRepository.findById(9L)).thenReturn(Optional.of(plan));
+
+        assertThatThrownBy(() -> service.cancel(9L, EMAIL))
+                .isInstanceOf(RentalPlanConflictException.class)
+                .satisfies(ex -> assertThat(((RentalPlanConflictException) ex).getCode())
+                        .isEqualTo("already_cancelled"));
+    }
+
+    @Test
+    void cancel_doesNotCountAsActivePlan_forOneActivePlanRule() {
+        RentalPlan cancelled = ownedPlan(1L, RentalPlan.PlanStatus.CANCELLED);
+        when(rentalPlanRepository.findByCustomerId(1L)).thenReturn(List.of(cancelled));
+        when(rentalPlanRecordRepository.findByRentalPlanId(any())).thenReturn(List.of());
+
+        RentalPlanCreateRequest request =
+                new RentalPlanCreateRequest(LocalDate.of(2026, 10, 1), LocalDate.of(2026, 10, 3), "1 Test St, 123456");
+
+        RentalPlanResponse response = service.create(request, EMAIL);
+
+        assertThat(response.status()).isEqualTo("DRAFT");
+    }
 }

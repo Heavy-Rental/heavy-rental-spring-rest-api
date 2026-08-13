@@ -45,7 +45,7 @@ Routes other than interim token, login, health, and Stripe webhook need an **acc
 | **4. Bookings** | Direct create / **checkout from plan** / list / get / update |
 | **5. Deliveries & Returns** | List + status patch (`CONFIRMED→MOBILISED`, `MOBILISED→COMPLETED`) |
 | **6. Payments** | Deposit intent (needs Stripe key); webhook (signature) |
-| **7. Rental Plans** | Create / list / get / add item / remove item / quote (`/api/rentalPlans`) |
+| **7. Rental Plans** | Create / list / get / add item / remove item / quote / cancel (`/api/rentalPlans`) |
 | **8. Stubs** | Depots empty list only |
 
 ## Recommendations (S2b) checklist

@@ -16,7 +16,7 @@ import java.time.LocalDateTime;
 public class RentalPlan {
   
   public enum PlanStatus {
-    DRAFT, SAVED, QUOTED, CONVERTED
+    DRAFT, SAVED, QUOTED, CONVERTED, CANCELLED
   }
 
   @Id

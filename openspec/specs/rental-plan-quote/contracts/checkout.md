@@ -9,7 +9,7 @@
 ## Status enum — wire format is UPPERCASE
 
 ```
-"DRAFT" | "SAVED" | "QUOTED" | "CONVERTED"
+"DRAFT" | "SAVED" | "QUOTED" | "CONVERTED" | "CANCELLED"
 ```
 
 `SAVED` is declared but unused; treat it as valid if seen.
@@ -52,6 +52,10 @@ Succeeds: mutation applied, `status` → `"DRAFT"`, `totalAmount` → `null`, `u
 
 Returns `RentalPlanResponse`. Success refreshes `updatedAt`. Re-quote of `QUOTED` is allowed (stale-quote recovery). `CONVERTED` → `409`.
 
+## `POST /api/rentalPlans/{id}/cancel`
+
+Returns `RentalPlanResponse`. Sets `status` → `"CANCELLED"`, `totalAmount` → `null`, refreshes `updatedAt`. Allowed from `DRAFT`/`SAVED`/`QUOTED`. `CONVERTED` → `409 already_converted`; already `CANCELLED` → `409 already_cancelled`.
+
 ## `POST /api/bookings` with `rentalPlanId`
 
 ```json
@@ -77,12 +81,14 @@ Returns `RentalPlanResponse`. Success refreshes `updatedAt`. Re-quote of `QUOTED
 | `409` | `quote_not_ready` | status ≠ `QUOTED` |
 | `409` | `quote_expired` | `QUOTED` but `now - updatedAt > 24h` — re-quote then retry |
 | `409` | `conflict` | Optimistic-lock double-submit, or overlapping booking |
+| `409` | `already_converted` | Cancel attempted on a `CONVERTED` plan |
+| `409` | `already_cancelled` | Cancel attempted on an already-`CANCELLED` plan |
 | `400` | `bad_request` | No `rentalPlanId` and no items/dates |
 | `400` | `validation_failed` | `siteAddress` blank or missing 6-digit postal code |
 
 ## `GET /api/rentalPlans`
 
-No active-plan filter. Client: at most one plan with `status != "CONVERTED"`.
+No active-plan filter. Client: at most one plan with `status` not in `("CONVERTED", "CANCELLED")`.
 
 ## Single-item price preview
 

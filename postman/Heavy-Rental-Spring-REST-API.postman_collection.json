@@ -716,6 +716,30 @@
             "description": "Spring-only sum of line subtotals. Sets `QUOTED` and refreshes `updatedAt` (24h checkout window). Re-quote of `QUOTED` is allowed. Empty plan → 400. `CONVERTED` → 409. Then run **Bookings → Checkout from rental plan**."
           },
           "response": []
+        },
+        {
+          "name": "Cancel plan",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  const body = pm.response.json();",
+                  "  console.log('plan status=' + body.status + ' totalAmount=' + body.totalAmount);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/rentalPlans/{{rentalPlanId}}/cancel",
+            "description": "Sets `CANCELLED`, clears `totalAmount`, refreshes `updatedAt`. Allowed from `DRAFT`/`SAVED`/`QUOTED`. `CONVERTED` → `409 already_converted`; already `CANCELLED` → `409 already_cancelled`. `CANCELLED` does not count toward the one-active-plan rule, so **Create plan** works again afterward."
+          },
+          "response": []
         }
       ]
     },

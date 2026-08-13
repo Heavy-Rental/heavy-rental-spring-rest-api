@@ -12,7 +12,7 @@ Customer rental plan lifecycle: create (one active plan), add/remove line items 
 
 ### Requirement: FR-RP-001 Create plan with one active plan rule
 
-`POST /api/rentalPlans` MUST create a `DRAFT` plan for the caller when they have no active plan (`DRAFT`/`SAVED`/`QUOTED`). A second create while active → `409`. `CONVERTED` MUST NOT count as active.
+`POST /api/rentalPlans` MUST create a `DRAFT` plan for the caller when they have no active plan (`DRAFT`/`SAVED`/`QUOTED`). A second create while active → `409`. `CONVERTED` and `CANCELLED` MUST NOT count as active (see FR-RP-010).
 
 #### Scenario: Second active plan rejected
 - GIVEN caller already has a QUOTED plan
@@ -100,6 +100,25 @@ Adding/quoting plan items MUST NOT block equipment availability; only bookings w
 ### Requirement: FR-RP-009 Convert quoted plan into a booking
 
 When `POST /api/bookings` includes `rentalPlanId`, the system MUST apply FR-BDR-009. After success the plan MUST be `CONVERTED` in the same transaction.
+
+### Requirement: FR-RP-010 Cancel a plan
+
+`POST .../cancel` on a plan owned by the caller MUST set status `CANCELLED`, clear `totalAmount`, and refresh `updatedAt`, regardless of the plan's current `DRAFT`/`SAVED`/`QUOTED` state. A `CONVERTED` plan MUST NOT be cancellable (`409` `already_converted`) — it already became a booking. An already-`CANCELLED` plan MUST NOT be re-cancelled (`409` `already_cancelled`). `CANCELLED` MUST NOT count as active for FR-RP-001, so cancelling frees the caller to create a new plan. Non-owner → `404`.
+
+#### Scenario: Cancel a draft plan
+- GIVEN a DRAFT plan owned by the caller
+- WHEN `POST .../cancel`
+- THEN `200` and status is `CANCELLED`
+
+#### Scenario: Cancelling frees the one-active-plan slot
+- GIVEN the caller's only plan is `CANCELLED`
+- WHEN they POST a new plan
+- THEN `201` DRAFT
+
+#### Scenario: Converted plan cannot be cancelled
+- GIVEN a CONVERTED plan
+- WHEN `POST .../cancel`
+- THEN `409` `already_converted`
 
 ## Out of scope
 

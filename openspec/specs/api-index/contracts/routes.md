@@ -42,6 +42,7 @@ Legend: **Shared** = web + mobile; **Web** / **Mobile** / **Admin** = primary cl
 | `POST` | `/api/rentalPlans/{id}/items` | Web | owner | same |
 | `DELETE` | `/api/rentalPlans/{id}/items/{itemId}` | Web | owner | same |
 | `POST` | `/api/rentalPlans/{id}/quote` | Web | owner | same — **Spring-only**, not haystack |
+| `POST` | `/api/rentalPlans/{id}/cancel` | Web | owner | same |
 
 ## Recommender (S2b)
 

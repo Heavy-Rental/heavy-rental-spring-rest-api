@@ -166,6 +166,26 @@ public class RentalPlanService {
         return toResponse(plan);
     }
 
+    @Transactional
+    public RentalPlanResponse cancel(Long planId, String customerEmail) {
+        RentalPlan plan = loadOwnedPlan(planId, customerEmail);
+
+        if (plan.getStatus() == RentalPlan.PlanStatus.CONVERTED) {
+            throw new RentalPlanConflictException("already_converted",
+                    "Rental plan has already been converted to a booking and cannot be cancelled");
+        }
+        if (plan.getStatus() == RentalPlan.PlanStatus.CANCELLED) {
+            throw new RentalPlanConflictException("already_cancelled", "Rental plan has already been cancelled");
+        }
+
+        plan.setStatus(RentalPlan.PlanStatus.CANCELLED);
+        plan.setTotalAmount(null);
+        plan.setUpdatedAt(LocalDateTime.now());
+        rentalPlanRepository.save(plan);
+
+        return toResponse(plan);
+    }
+
     private RentalPlan loadOwnedPlan(Long planId, String customerEmail) {
         User customer = resolveCustomer(customerEmail);
         RentalPlan plan = rentalPlanRepository.findById(planId)
