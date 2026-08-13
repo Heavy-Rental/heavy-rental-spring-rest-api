@@ -17,6 +17,7 @@ public record RecommendEquipmentDto(
 		BigDecimal baseDailyRate,
 		BigDecimal weekly,
 		Integer capacity,
+		BigDecimal platformHeight,
 		Integer purchaseYear,
 		String location,
 		Boolean available,

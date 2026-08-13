@@ -19,9 +19,9 @@
 | `HaystackTimeoutRetryTest` | Timeout → retry same key; `recommender_timeout` |
 | `HaystackCircuitBreakerTest` | Open → fail-fast |
 | `HaystackBulkheadTest` | Concurrency limit |
-| `RecommenderSagaServiceTest` | Dual-hop quote; no re-ingest; Call 3 only on knowledge-query |
+| `RecommenderSagaServiceTest` | Dual-hop quote; nested equipment; catalog `img` by numeric id; no re-ingest; Call 3 only on knowledge-query |
 | `RecommenderSagaWireMockTest` | Real client dual-hop paths + correlation + quote |
-| `RecommendationControllerIntegrationTest` | MockMvc + JWT + WireMock submit/session/query |
+| `RecommendationControllerIntegrationTest` | MockMvc + JWT + WireMock submit/session/query; omit-null `platformHeight`; catalog `img` data URI |
 
 ## Commands
 

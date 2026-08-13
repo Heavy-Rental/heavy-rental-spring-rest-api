@@ -57,24 +57,43 @@ Orchestrates **Call 1 then Call 2 recommend**. Success body is primarily the **C
 | `reason` | string \| null | Match rationale |
 | `lineTotal` | number \| null | Line total |
 | `quantity` | int \| null | Quantity |
-| `equipment` | object \| null | Nested catalog equipment (pass-through; never invent) |
+| `equipment` | object \| null | Nested catalog equipment (see below) |
 
 ### `items[].equipment`
 
+Portal type: `RecommendEquipmentResponse`. Haystack fields are pass-through (never invent rates or a synthetic equipment object). Two Spring enrichments apply after mapping:
+
 | Field | Type | Notes |
 |-------|------|--------|
-| `id` | number \| string | Catalog asset id when known |
+| `id` | number \| string | Catalog asset id when known; numeric strings normalize to JSON number |
 | `name` | string | |
 | `category` | string | |
 | `baseDailyRate` | number \| null | May fall back from item-level rate if haystack puts rate on the item |
 | `weekly` | number \| null | |
 | `capacity` | int \| null | |
+| `platformHeight` | number | Pass-through from haystack; **omitted from JSON** when null |
 | `purchaseYear` | int \| null | |
 | `location` | string \| null | |
 | `available` | boolean \| null | |
-| `img` | string \| null | |
+| `img` | string \| null | When `id` is a numeric `assets.id` with an `asset_images` row: JPEG data URI `data:image/jpeg;base64,<raw>` (same as [`equipment-browse`](../../equipment-browse/)). Otherwise haystack `img` pass-through |
 | `desc` | string \| null | |
 | `tags` | string[] | Empty list when omitted |
+
+```json
+{
+  "id": 1,
+  "name": "CAT 320",
+  "category": "Excavator",
+  "baseDailyRate": 400.00,
+  "weekly": null,
+  "capacity": null,
+  "img": "data:image/jpeg;base64,/9j/...",
+  "desc": null,
+  "tags": []
+}
+```
+
+`platformHeight` is absent in the example because it is null. Other optional fields still serialize as `null` when omitted upstream.
 
 Upstream Call 2 may also send `mlPredictedPrice` (haystack contract); Spring maps known portal fields pass-through and MUST NOT invent rates.
 

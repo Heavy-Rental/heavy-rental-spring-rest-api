@@ -39,6 +39,7 @@ import com.heavy_rental.rest_api.dto.SubmitProjectSpecResponse;
 import com.heavy_rental.rest_api.entity.AIRecommendation;
 import com.heavy_rental.rest_api.entity.User;
 import com.heavy_rental.rest_api.repository.AIRecommendationRepository;
+import com.heavy_rental.rest_api.repository.AssetImageRepository;
 
 import io.github.resilience4j.bulkhead.Bulkhead;
 import io.github.resilience4j.bulkhead.BulkheadConfig;
@@ -66,6 +67,8 @@ class RecommenderSagaWireMockTest {
 	private AIRecommendationRepository recommendationRepository;
 	@Mock
 	private CurrentUserService currentUserService;
+	@Mock
+	private AssetImageRepository assetImageRepository;
 	@Mock
 	private Jwt jwt;
 
@@ -100,7 +103,8 @@ class RecommenderSagaWireMockTest {
 		client = new HaystackRecommenderClient(
 				properties, RestClient.builder(), new ObjectMapper(),
 				cb, bh, bh, bh, noRetry, noRetry, noRetry);
-		saga = new RecommenderSagaService(client, recommendationRepository, currentUserService);
+		saga = new RecommenderSagaService(
+				client, recommendationRepository, currentUserService, assetImageRepository);
 
 		user = new User();
 		user.setId(7L);

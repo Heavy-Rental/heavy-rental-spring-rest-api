@@ -3,7 +3,7 @@
 | Field | Value |
 |-------|--------|
 | **Document type** | Integration mapping (Spring-facing) |
-| **Version** | **2.0.1** |
+| **Version** | **2.0.2** |
 | **Date** | 2026-08-13 |
 | **Status** | Normative — Call 2 = **recommend**; Call 3 = **chatbot Q&A** |
 | **Package** | [`README.md`](./README.md) |
@@ -68,6 +68,8 @@ React  ← primary submit response = Call 2 recommend quote
 | `specSummary` | From Call 1 summary |
 | `rationale` | Tool-backed text |
 | `items[]` | Ranked equipment; `equipment.id` = catalog asset only |
+| `items[].equipment.platformHeight` | Portal JSON **omits** the key when null |
+| `items[].equipment.img` | Spring sets catalog JPEG data URI when `id` is a numeric `assets.id` with `asset_images`; else haystack pass-through |
 | `warnings` | Soft issues |
 
 Full upstream contract (haystack-fast-api, read-only):  
@@ -116,5 +118,6 @@ Upstream contract (haystack-fast-api, read-only):
 
 | Version | Date | Notes |
 |---------|------|--------|
+| **2.0.2** | 2026-08-13 | Portal omit-null `platformHeight`; catalog `img` data URI from `asset_images` |
 | **2.0.0** | 2026-08-12 | Call 2 recommend; Call 3 chatbot Q&A |
 | **1.0.1** | 2026-08-12 | Prior dual-hop with Call 2 as Q&A (superseded) |

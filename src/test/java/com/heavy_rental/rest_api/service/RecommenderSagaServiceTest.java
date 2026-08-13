@@ -42,8 +42,11 @@ import com.heavy_rental.rest_api.dto.ProjectSpecSubmitCommand;
 import com.heavy_rental.rest_api.dto.SubmitProjectSpecRequest;
 import com.heavy_rental.rest_api.dto.SubmitProjectSpecResponse;
 import com.heavy_rental.rest_api.entity.AIRecommendation;
+import com.heavy_rental.rest_api.entity.Asset;
+import com.heavy_rental.rest_api.entity.AssetImage;
 import com.heavy_rental.rest_api.entity.User;
 import com.heavy_rental.rest_api.repository.AIRecommendationRepository;
+import com.heavy_rental.rest_api.repository.AssetImageRepository;
 
 /**
  * BDD scenarios for recommender saga: FR-S2B-005/007 (dual-hop, no re-ingest, Call 3)
@@ -60,6 +63,8 @@ class RecommenderSagaServiceTest {
 	@Mock
 	private CurrentUserService currentUserService;
 	@Mock
+	private AssetImageRepository assetImageRepository;
+	@Mock
 	private Jwt jwt;
 
 	private RecommenderSagaService saga;
@@ -67,7 +72,8 @@ class RecommenderSagaServiceTest {
 
 	@BeforeEach
 	void setUp() {
-		saga = new RecommenderSagaService(haystackClient, recommendationRepository, currentUserService);
+		saga = new RecommenderSagaService(
+				haystackClient, recommendationRepository, currentUserService, assetImageRepository);
 		user = new User();
 		user.setId(7L);
 		user.setName("Alex");
@@ -295,6 +301,7 @@ class RecommenderSagaServiceTest {
 								new BigDecimal("580"),
 								new BigDecimal("2600"),
 								1,
+								new BigDecimal("41.15"),
 								2023,
 								"Jurong Port",
 								true,
@@ -323,6 +330,7 @@ class RecommenderSagaServiceTest {
 		assertEquals(new BigDecimal("580"), item.equipment().baseDailyRate());
 		assertEquals(new BigDecimal("2600"), item.equipment().weekly());
 		assertEquals(Integer.valueOf(1), item.equipment().capacity());
+		assertEquals(new BigDecimal("41.15"), item.equipment().platformHeight());
 		assertEquals(Integer.valueOf(2023), item.equipment().purchaseYear());
 		assertEquals("Jurong Port", item.equipment().location());
 		assertEquals(Boolean.TRUE, item.equipment().available());
@@ -355,6 +363,7 @@ class RecommenderSagaServiceTest {
 								null,
 								null,
 								null,
+								null,
 								null),
 						new BigDecimal("150.00")))));
 
@@ -369,6 +378,7 @@ class RecommenderSagaServiceTest {
 		assertEquals(new BigDecimal("150.00"), equip.baseDailyRate());
 		assertNull(equip.weekly());
 		assertNull(equip.capacity());
+		assertNull(equip.platformHeight());
 		assertNull(equip.purchaseYear());
 		assertNull(equip.location());
 		assertNull(equip.available());
@@ -422,7 +432,7 @@ class RecommenderSagaServiceTest {
 								"1",
 								"CAT 320",
 								"Excavator",
-								null, null, null, null, null, null, null, null, null),
+								null, null, null, null, null, null, null, null, null, null),
 						null))));
 
 		// WHEN mapped
@@ -433,6 +443,38 @@ class RecommenderSagaServiceTest {
 
 		// THEN portal equipment.id is Long 1 (catalog-friendly JSON number)
 		assertEquals(1L, resp.items().get(0).equipment().id());
+	}
+
+	@DisplayName("Scenario: Catalog image is loaded onto equipment.img by numeric id")
+	@Test
+	void submitProjectSpec_setsImgFromCatalogAssetImage() {
+		stubIngestAndSave(13L);
+		Asset asset = new Asset();
+		asset.setId(1L);
+		AssetImage image = new AssetImage();
+		image.setAsset(asset);
+		image.setImage("abc123");
+		when(assetImageRepository.findByAssetIdIn(any())).thenReturn(List.of(image));
+		when(haystackClient.recommend(any(), anyString())).thenReturn(quoteWithItems(
+				List.of(new RecommendItemDto(
+						1,
+						null,
+						null,
+						null,
+						1,
+						new RecommendEquipmentDto(
+								"1",
+								"CAT 320",
+								"Excavator",
+								null, null, null, null, null, null, null, "photo-abc", null, null),
+						null))));
+
+		SubmitProjectSpecResponse resp = saga.submitProjectSpec(
+				jwt,
+				new SubmitProjectSpecRequest("Need excavator", null, null, null, null, null),
+				"corr-img");
+
+		assertEquals("data:image/jpeg;base64,abc123", resp.items().get(0).equipment().img());
 	}
 
 	private void stubIngestAndSave(long recommendationId) {
@@ -466,6 +508,7 @@ class RecommenderSagaServiceTest {
 								"asset-1",
 								"Genie GS-1930",
 								"Scissor Lift",
+								null,
 								null,
 								null,
 								null,

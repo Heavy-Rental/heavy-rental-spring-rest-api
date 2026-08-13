@@ -5,7 +5,7 @@
 | **Document type** | SPDD structured prompt (first-class delivery artifact) |
 | **Change** | `s2b-resilient-haystack-client` |
 | **Status** | **As-built** (Feasibility v2 Call 1/2/3) |
-| **Date** | 2026-08-12 |
+| **Date** | 2026-08-13 |
 | **Discipline** | If reality diverges: **update this canvas first**, then code. Refactors without behavior change: code first, then sync canvas. |
 
 **Linked:** OpenSpec [`openspec/specs/haystack-recommender/`](../../openspec/specs/haystack-recommender/) · portal contract [`contracts/portal-api.md`](../../openspec/specs/haystack-recommender/contracts/portal-api.md) · archived change `openspec/changes/archive/2026-08-12-s2b-resilient-haystack-client/` · [`Feasibility_Study_Spring/`](../../Feasibility_Study_Spring/) · OpenSPDD [`../README.md`](../README.md)
@@ -37,7 +37,7 @@ C2 202/SSE, C3 gRPC/queues, C/W/D in Spring, Q&A history table, Flyway, `recomme
 | Haystack ingest response | lean FR-IX-023 DTO |
 | Haystack recommend (Call 2) | `GetAssetRecommendationsResponse` — `quoteRef`, nested `items[]` |
 | Portal quote item | `RecommendItemResponse` — `rankOrder`, `matchScore`, `reason`, `lineTotal`, `quantity`, nested `equipment` |
-| Portal equipment | `RecommendEquipmentResponse` — `id`, `name`, `category`, `baseDailyRate`, `weekly`, `capacity`, `purchaseYear`, `location`, `available`, `img`, `desc`, `tags` (pass-through; never invent) |
+| Portal equipment | `RecommendEquipmentResponse` — `id`, `name`, `category`, `baseDailyRate`, `weekly`, `capacity`, `platformHeight` (JSON omitted when null), `purchaseYear`, `location`, `available`, `img`, `desc`, `tags`. Haystack pass-through except: `img` is the catalog JPEG data URI when numeric `id` matches `asset_images`; never invent equipment/rates. |
 | Haystack Q&A (Call 3) | `ProjectKnowledgeQueryResponse` — `answer`, `sources_used`; not persisted in S2b |
 | Haystack error | `{error, message}` |
 | Ranked assets | Nested portal JSON from Call 2 only; **`RecommendationItem` rows not written in S2b** |
@@ -48,7 +48,7 @@ C2 202/SSE, C3 gRPC/queues, C/W/D in Spring, Q&A history table, Flyway, `recomme
 
 1. **RestClient** to haystack base URL with per-op read timeouts (health / qa / recommend / ingest).
 2. **Resilience4j** CB + bulkheads (ingest / recommend / qa) + limited retry (ingest only with same key when flag on).
-3. **Saga service** owns keys, Call order (1→2 on submit; 3 on knowledge-query), persistence, and “no re-ingest” rule.
+3. **Saga service** owns keys, Call order (1→2 on submit; 3 on knowledge-query), persistence, and “no re-ingest” rule. After Call 2, map nested `items[].equipment`; omit null `platformHeight`; batch-load `asset_images` for numeric catalog ids and set `img` to the browse JPEG data URI.
 4. **Thin controller** for portal; derive user identity server-side.
 5. **WireMock** for default CI; optional joint test against real haystack later.
 6. Sticky/single FastAPI instance for Call 1→2 is an **ops** constraint, not Spring clustering logic.
@@ -64,7 +64,8 @@ com.heavy_rental.rest_api
   controller.RecommendationController
   entity.AIRecommendation    // extended
   repository.AIRecommendationRepository
-  dto.*                      // portal records (Submit*, RecommendItem*, ProjectKnowledge*)
+  repository.AssetImageRepository  // catalog JPEG for numeric items[].equipment.id
+  dto.*                      // portal records (Submit*, RecommendItem*, RecommendEquipment*, ProjectKnowledge*)
 ```
 
 Feasibility wire docs remain normative for HTTP shapes:  
@@ -111,6 +112,8 @@ Feasibility wire docs remain normative for HTTP shapes:
    - call `recommend` (Call 2) with stored `ingest_id`
      - optional focus: portal `query` → Call 1 summary → fixed default
    - return portal response with Call 2 **quote** (`quoteRef`, `items`, …)
+     - nested `equipment.platformHeight` omitted from JSON when null
+     - nested `equipment.img` from `asset_images` when `id` is a numeric catalog PK
    - if Call 2 fails: **do not** re-ingest; session remains for retry / Call 3
 3. `queryKnowledge(user, recommendationId, query, topK?)`:
    - load by id; 404 if missing; 403 if not owner (unless admin)
@@ -127,8 +130,9 @@ Feasibility wire docs remain normative for HTTP shapes:
 1. Client tests: Call 2 quote mapping; Call 3 answer mapping; headers; 4xx/5xx.
 2. Retry test verifies same `Idempotency-Key` header twice.
 3. CB test forces N failures then fail-fast.
-4. Saga test: ingest 200 + recommend 500 → one ingest; happy path quote body.
+4. Saga test: ingest 200 + recommend 500 → one ingest; happy path quote body; catalog `img` by numeric id.
 5. Knowledge-query uses Call 3 only.
+6. Portal MockMvc: nested equipment JSON; omit-null `platformHeight`; catalog `img` data URI.
 
 ### O8 — Closeout
 1. Document runbook in living SPEC.
@@ -162,6 +166,8 @@ Feasibility wire docs remain normative for HTTP shapes:
 7. **MUST NOT** expand scope into C2/C3 product tracks in this change.
 8. **MUST** use `/internal/v1/recommendations/...` paths only.
 9. **MUST** keep max upload size configurable and documented for gateway alignment.
+10. **MUST NOT** invent `equipment.img` when `id` is not a numeric catalog PK or `asset_images` has no row.
+11. **MUST** omit portal `equipment.platformHeight` from JSON when null.
 
 ---
 

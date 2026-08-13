@@ -13,7 +13,7 @@ Full historical field tables: git history (former `specification/SPEC-entity-rep
 | `User` | `users` | Auth principal; `name` UNIQUE; `email` login; roles USER/ADMIN/DRIVER |
 | `AssetCategory` | `asset_categories` | 4 categories in seed |
 | `Asset` | `assets` | Fleet item; rates; capacity/height; condition |
-| `AssetImage` | `asset_images` | base64 `image` TEXT; FK asset |
+| `AssetImage` | `asset_images` | base64 `image` TEXT; FK asset; also source for haystack-recommender portal `items[].equipment.img` |
 | `RentalPlan` | `rental_plan` | customer FK; status DRAFT/SAVED/QUOTED/CONVERTED |
 | `RentalPlanRecord` | `rental_plan_records` | plan line items |
 | `Booking` | `bookings` | customer, dates, status, totals |

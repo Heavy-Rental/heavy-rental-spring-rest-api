@@ -89,7 +89,8 @@ See lean FR-IX-023 fields in [`call1-ingest-response-for-spring.md`](./call1-ing
 **Saga:** Call 2 5xx → do not re-ingest; keep `ingest_id`.  
 **Safeguard:** do not invent `equipment.id` or rates — catalog/pricing path only.
 
-Spring portal mapping of nested items: [`../openspec/specs/haystack-recommender/contracts/portal-api.md`](../openspec/specs/haystack-recommender/contracts/portal-api.md).
+Spring portal mapping of nested items: [`../openspec/specs/haystack-recommender/contracts/portal-api.md`](../openspec/specs/haystack-recommender/contracts/portal-api.md)  
+(Spring omits null `platformHeight` and sets `img` from `asset_images` when `equipment.id` is a numeric catalog PK).
 
 ---
 

@@ -48,4 +48,5 @@ Auth: `Authorization: Bearer <access-jwt>`.
 ## Related
 
 - Entity model: [`../../entity-repository/`](../../entity-repository/)  
-- Seed images: [`../../seed-data/`](../../seed-data/)
+- Seed images: [`../../seed-data/`](../../seed-data/)  
+- Recommender quote `items[].equipment.img` uses the same data-URI rule: [`../../haystack-recommender/contracts/portal-api.md`](../../haystack-recommender/contracts/portal-api.md)

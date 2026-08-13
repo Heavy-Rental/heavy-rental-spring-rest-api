@@ -28,7 +28,7 @@ The system MUST provide `GET /api/equipment` (optional filters) and `GET /api/eq
 
 ### Requirement: FR-EQ-002 Image as data URI
 
-Stored `AssetImage.image` is raw base64. The API MUST expose `EquipmentResponse.img` as `data:image/jpeg;base64,<raw>` (or null if no image). Exactly one primary image per asset is used for the response.
+Stored `AssetImage.image` is raw base64. The API MUST expose `EquipmentResponse.img` as `data:image/jpeg;base64,<raw>` (or null if no image). Exactly one primary image per asset is used for the response. The same data-URI convention MUST be used for haystack-recommender portal `items[].equipment.img` when `equipment.id` matches that asset.
 
 #### Scenario: Renderable img
 - GIVEN an asset with a JPEG base64 image row
