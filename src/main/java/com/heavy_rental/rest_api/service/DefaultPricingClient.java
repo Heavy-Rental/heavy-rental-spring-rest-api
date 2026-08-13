@@ -8,7 +8,8 @@ import org.springframework.stereotype.Service;
 
 import com.heavy_rental.rest_api.entity.Asset;
 
-// Only implementation until a FastAPI-backed PricingClient replaces it (see SPEC-rental-plan-quote.md §5.1).
+// Only implementation until a FastAPI-backed PricingClient replaces it
+// (see openspec/specs/rental-plan-quote/ and spring-proxy-endpoints).
 @Service
 public class DefaultPricingClient implements PricingClient {
 

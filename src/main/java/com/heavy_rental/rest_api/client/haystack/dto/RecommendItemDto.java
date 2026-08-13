@@ -8,8 +8,11 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record RecommendItemDto(
 		Integer rankOrder,
-		RecommendEquipmentDto equipment,
-		BigDecimal baseDailyRate,
+		BigDecimal matchScore,
+		String reason,
 		BigDecimal lineTotal,
-		BigDecimal matchScore) {
+		Integer quantity,
+		RecommendEquipmentDto equipment,
+		/** Optional legacy field when rate is on the item instead of nested equipment. */
+		BigDecimal baseDailyRate) {
 }

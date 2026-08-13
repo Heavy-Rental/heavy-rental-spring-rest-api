@@ -380,7 +380,7 @@ Use stage PR body: **What & Why** + **Key Changes**; link haystack S2a under Dep
 | B3 | Programmatic Resilience4j: CB `haystack`; bulkheads ingest/recommend/qa; retries |
 | B4 | Headers on ingest + all ops; prod `haystack.retry.ingest-enabled=false` |
 | B5 | `RecommenderSagaService` + `RecommendationController`; portal quote body; Call 3 on `/knowledge-query` |
-| B6 | `specification/SPEC-haystack-recommender-client.md` §12 |
+| B6 | `openspec/specs/haystack-recommender/` + `contracts/portal-api.md` (ops notes) |
 
 **Tests:** `HaystackRecommenderClientTest`, `HaystackRetryIdempotencyTest`, `HaystackTimeoutRetryTest` (§7 #1), `HaystackCircuitBreakerTest`, `HaystackBulkheadTest`, `RecommenderSagaServiceTest`, `RecommenderSagaWireMockTest` (§7 #4/#6/#8 dual-hop paths + correlation + quote).
 
