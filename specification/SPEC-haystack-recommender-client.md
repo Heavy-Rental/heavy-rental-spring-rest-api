@@ -96,7 +96,7 @@ Client                         API                              haystack
 - Headers: `Idempotency-Key`, `X-Correlation-Id`, optional `traceparent`
 - Saga: ingest → persist → recommend; no re-ingest on Call 2/3 failure
 - Extend `AIRecommendation` for haystack handles
-- Portal REST (three routes above)
+- Portal REST (three routes above), including multipart project-file submit on Call 1
 - WireMock test suite
 - Config + ops runbook notes
 
@@ -105,7 +105,6 @@ Client                         API                              haystack
 - FastAPI S2a implementation (as-built elsewhere)
 - 202 + poll/SSE (C2), gRPC/queues (C3)
 - C/W/D multi-agent roles in Spring
-- Multipart project-file upload (JSON text only)
 - Writing `recommendation_items` from Call 2
 - Persisting Q&A answer history
 - Flyway migrations
@@ -412,3 +411,4 @@ PR packing: **S2b-0** docs → **S2b-1** client → **S2b-2** resilience → **S
 | **2.0.0** | 2026-08-12 | **Feasibility v2 alignment.** Call 2 = recommend quote (`quoteRef`/`items`); Call 3 = `.../query` chatbot. Separate recommend timeout/bulkhead. Specs/OpenSpec/SPDD/feasibility as-built notes updated. |
 | **2.0.1** | 2026-08-12 | Plan §7 residual tests: timeout+same-key retry, dual-hop WireMock saga (paths + correlation + quote); exponential retry backoff. |
 | **2.1.0** | 2026-08-12 | Multipart project-file submit; `RecommendationControllerIntegrationTest` (MockMvc). |
+| 2.1.1 | 2026-08-13 | §3.1/§3.2 corrected: multipart project-file upload had shipped in 2.1.0 but §3.2 still listed it under "Out of scope" ("JSON text only"), contradicting §5.1/§11.3/the 2.1.0 entry above. Moved into §3.1's in-scope list; removed from §3.2. No behavior change. |
