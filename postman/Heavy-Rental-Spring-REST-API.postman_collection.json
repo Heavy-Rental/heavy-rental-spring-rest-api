@@ -1,0 +1,583 @@
+{
+  "info": {
+    "_postman_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "name": "Heavy Rental Spring REST API",
+    "description": "Manual API tests for `heavy-rental-spring-rest-api` (port 8080).\n\n## Auth flow (required for most routes)\n1. Run **Auth → 1. Get interim Bearer token** — saves `interimToken`.\n2. Run **Auth → 2. Login** — saves `accessToken` (Bearer for other folders).\n3. Run protected requests (collection auth uses `{{accessToken}}`).\n\n## Seed users (local / data.sql)\n| Email | Password | Role |\n|-------|----------|------|\n| admin@localhost | admin1234 | ADMIN |\n| alex.tan@example.sg | customer123 | USER |\n\n## Recommender (S2b)\n- `POST /project-spec` → Call 1 ingest + Call 2 recommend quote (`quoteRef`, `items`).\n- `POST .../knowledge-query` → Call 3 chatbot (`answer`, `sourcesUsed`).\n- Requires haystack at `haystack.base-url` (default `http://localhost:8000`).\n\nSee `specification/SPEC-api-index.md` and `SPEC-haystack-recommender-client.md`.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{accessToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8080" },
+    { "key": "interimToken", "value": "" },
+    { "key": "accessToken", "value": "" },
+    { "key": "email", "value": "alex.tan@example.sg" },
+    { "key": "password", "value": "customer123" },
+    { "key": "recommendationId", "value": "1" },
+    { "key": "bookingId", "value": "1" },
+    { "key": "equipmentId", "value": "1" },
+    { "key": "correlationId", "value": "postman-corr-001" }
+  ],
+  "item": [
+    {
+      "name": "0. Health",
+      "item": [
+        {
+          "name": "Actuator health",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/actuator/health",
+            "description": "Public liveness. No JWT required."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "1. Auth",
+      "description": "Two-step JWT: interim (public) → login (ROLE_INTERIM) → access token (ROLE_USER/ADMIN).",
+      "item": [
+        {
+          "name": "1. Get interim Bearer token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const token = pm.response.text().trim();",
+                  "pm.test('Body is non-empty JWT text', () => pm.expect(token.length).to.be.above(20));",
+                  "pm.collectionVariables.set('interimToken', token);",
+                  "console.log('interimToken saved (length ' + token.length + ')');"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "text/plain" }],
+            "url": "{{baseUrl}}/api/auth/getBearerToken",
+            "description": "Public. Returns plain-text interim JWT (no `Bearer` prefix). Test script stores it as `interimToken`."
+          },
+          "response": []
+        },
+        {
+          "name": "2. Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('Has accessToken', () => pm.expect(body.accessToken).to.be.a('string').and.not.empty);",
+                  "pm.collectionVariables.set('accessToken', body.accessToken);",
+                  "console.log('accessToken saved; username=' + body.username);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{interimToken}}", "type": "string" }]
+            },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\"\n}"
+            },
+            "url": "{{baseUrl}}/api/auth/login",
+            "description": "Requires interim Bearer. Body: email + password. Saves `accessToken` for collection auth."
+          },
+          "response": []
+        },
+        {
+          "name": "3. Logout",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('accessToken', '');",
+                  "console.log('accessToken cleared after logout');"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/auth/logout",
+            "description": "Revokes current access token. Uses collection Bearer `{{accessToken}}`. Re-login after this."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "2. Recommendations (S2b)",
+      "description": "Portal recommender. Needs access JWT + running haystack for submit/query.\n\nSubmit response is Call 2 **quote** (`quoteRef`, `items`) — not Call 3 `answer`.",
+      "item": [
+        {
+          "name": "Submit project-spec (Call 1 + Call 2 quote)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "if (body.recommendationId != null) {",
+                  "  pm.collectionVariables.set('recommendationId', String(body.recommendationId));",
+                  "  console.log('recommendationId=' + body.recommendationId + ' ingestId=' + body.ingestId + ' quoteRef=' + body.quoteRef);",
+                  "}",
+                  "pm.test('Has recommendationId and ingestId', function () {",
+                  "  pm.expect(body.recommendationId).to.exist;",
+                  "  pm.expect(body.ingestId).to.be.a('string').and.not.empty;",
+                  "});",
+                  "pm.test('Primary body is quote (not chatbot answer)', function () {",
+                  "  pm.expect(body).to.have.property('quoteRef');",
+                  "  pm.expect(body).to.have.property('items');",
+                  "  pm.expect(body).to.not.have.property('answer');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "application/json" },
+              { "key": "X-Correlation-Id", "value": "{{correlationId}}", "description": "Optional; propagated to haystack" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"projectText\": \"Foundation excavation at Marina South. Need excavator and dump truck for 10 days. Soft soil, 4m depth. Site access via B2 ramp.\",\n  \"startDate\": \"2026-09-01\",\n  \"endDate\": \"2026-09-12\",\n  \"userName\": \"Alex Tan\",\n  \"query\": null,\n  \"topK\": 5\n}"
+            },
+            "url": "{{baseUrl}}/api/recommendations/project-spec",
+            "description": "Orchestrates haystack Call 1 then Call 2 recommend. Saves `recommendationId` on success.\n\nResponse includes session fields + `quoteRef`, `items`, rates — **not** `answer`/`sourcesUsed`."
+          },
+          "response": []
+        },
+        {
+          "name": "Submit project-spec (multipart file)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "if (body.recommendationId != null) {",
+                  "  pm.collectionVariables.set('recommendationId', String(body.recommendationId));",
+                  "}",
+                  "pm.test('Has quoteRef', () => pm.expect(body.quoteRef).to.exist);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "X-Correlation-Id", "value": "{{correlationId}}" }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": [],
+                  "description": "Select a small .txt/.pdf project-spec file"
+                },
+                {
+                  "key": "projectText",
+                  "type": "text",
+                  "value": "Optional caption alongside file",
+                  "description": "Optional if file is present"
+                },
+                { "key": "topK", "type": "text", "value": "5" }
+              ]
+            },
+            "url": "{{baseUrl}}/api/recommendations/project-spec",
+            "description": "Multipart Call 1 (file and/or projectText) then Call 2 quote. Max size: haystack.max-in-memory-size (20MB default)."
+          },
+          "response": []
+        },
+        {
+          "name": "Knowledge query (Call 3 chatbot)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('Has chatbot answer', () => pm.expect(body.answer).to.exist);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"What working height or capacity constraints apply to this project?\",\n  \"topK\": 5\n}"
+            },
+            "url": "{{baseUrl}}/api/recommendations/{{recommendationId}}/knowledge-query",
+            "description": "Call 3 only — uses stored `ingest_id`. Returns `answer` / `sourcesUsed`. Does not re-ingest."
+          },
+          "response": []
+        },
+        {
+          "name": "Get recommendation session",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('Has session fields', () => {",
+                  "  pm.expect(body.recommendationId).to.exist;",
+                  "  pm.expect(body.ingestId).to.exist;",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/recommendations/{{recommendationId}}",
+            "description": "DB-only session summary. No haystack call. Owner or admin."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "3. Equipment (web)",
+      "item": [
+        {
+          "name": "Browse equipment",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/equipment?category=&search=&condition=&startDate=&endDate=",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "equipment"],
+              "query": [
+                { "key": "category", "value": "", "description": "Optional category filter", "disabled": true },
+                { "key": "search", "value": "", "disabled": true },
+                { "key": "condition", "value": "", "disabled": true },
+                { "key": "startDate", "value": "2026-09-01", "disabled": true },
+                { "key": "endDate", "value": "2026-09-12", "disabled": true }
+              ]
+            },
+            "description": "List equipment. Optional query: category, search, condition, startDate, endDate."
+          },
+          "response": []
+        },
+        {
+          "name": "Get equipment by id",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/equipment/{{equipmentId}}",
+            "description": "Single asset by id."
+          },
+          "response": []
+        },
+        {
+          "name": "Create equipment",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Postman Test Excavator\",\n  \"serialno\": \"PM-EX-001\",\n  \"categoryId\": 1,\n  \"baseDailyRate\": 450.00,\n  \"minDailyRate\": 400.00,\n  \"maxDailyRate\": 550.00,\n  \"capacity\": 20,\n  \"platformHeight\": null,\n  \"purchaseYear\": 2022,\n  \"condition\": \"GOOD\",\n  \"desc\": \"Created from Postman collection\",\n  \"location\": \"Tuas Depot\"\n}"
+            },
+            "url": "{{baseUrl}}/api/equipment",
+            "description": "Create asset. Adjust `categoryId` / `condition` to match seed enums."
+          },
+          "response": []
+        },
+        {
+          "name": "Update equipment (PUT)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Postman Test Excavator (updated)\",\n  \"serialno\": \"PM-EX-001\",\n  \"categoryId\": 1,\n  \"baseDailyRate\": 460.00,\n  \"minDailyRate\": 400.00,\n  \"maxDailyRate\": 560.00,\n  \"capacity\": 20,\n  \"platformHeight\": null,\n  \"purchaseYear\": 2022,\n  \"condition\": \"GOOD\",\n  \"desc\": \"Updated from Postman\",\n  \"location\": \"Tuas Depot\"\n}"
+            },
+            "url": "{{baseUrl}}/api/equipment/{{equipmentId}}",
+            "description": "Full replace of equipment fields."
+          },
+          "response": []
+        },
+        {
+          "name": "Patch equipment",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Postman Test Excavator (patched)\",\n  \"serialno\": null,\n  \"categoryId\": null,\n  \"baseDailyRate\": 470.00,\n  \"minDailyRate\": null,\n  \"maxDailyRate\": null,\n  \"capacity\": null,\n  \"platformHeight\": null,\n  \"purchaseYear\": null,\n  \"condition\": null,\n  \"desc\": null,\n  \"location\": null\n}"
+            },
+            "url": "{{baseUrl}}/api/equipment/{{equipmentId}}",
+            "description": "Partial update (same request type as create; nulls may be ignored depending on service)."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete equipment",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/api/equipment/{{equipmentId}}",
+            "description": "Delete asset by id. Prefer a non-seeded id created via Create."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "4. Bookings (mobile)",
+      "item": [
+        {
+          "name": "Create booking",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200 || pm.response.code === 201) {",
+                  "  const body = pm.response.json();",
+                  "  if (body.id != null) pm.collectionVariables.set('bookingId', String(body.id));",
+                  "  if (body.bookingId != null) pm.collectionVariables.set('bookingId', String(body.bookingId));",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [{ \"assetId\": 1 }],\n  \"startDate\": \"2026-10-01\",\n  \"endDate\": \"2026-10-10\",\n  \"rentalPlanId\": null,\n  \"siteAddress\": \"1 Marina South, Singapore S018989\",\n  \"deliveryNotes\": \"Call site contact 30 min before arrival\"\n}"
+            },
+            "url": "{{baseUrl}}/api/bookings",
+            "description": "Creates booking for JWT user. May 409 if asset overlaps active booking."
+          },
+          "response": []
+        },
+        {
+          "name": "List bookings",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/bookings",
+            "description": "List bookings."
+          },
+          "response": []
+        },
+        {
+          "name": "Get booking by id",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/bookings/{{bookingId}}",
+            "description": "Single booking."
+          },
+          "response": []
+        },
+        {
+          "name": "Update booking",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"startDate\": \"2026-10-02\",\n  \"endDate\": \"2026-10-12\",\n  \"siteAddress\": \"1 Marina South, Singapore S018989\",\n  \"deliveryNotes\": \"Updated notes from Postman\"\n}"
+            },
+            "url": "{{baseUrl}}/api/bookings/{{bookingId}}",
+            "description": "Update booking dates/site fields."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "5. Deliveries & Returns",
+      "item": [
+        {
+          "name": "List deliveries",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/deliveries"
+          },
+          "response": []
+        },
+        {
+          "name": "Patch delivery status",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"bookingStatus\": \"CONFIRMED\"\n}"
+            },
+            "url": "{{baseUrl}}/api/deliveries/{{bookingId}}/status",
+            "description": "Body: `{ \"bookingStatus\": \"...\" }` — use a valid `BookingStatus` enum value for your branch."
+          },
+          "response": []
+        },
+        {
+          "name": "List returns",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/returns"
+          },
+          "response": []
+        },
+        {
+          "name": "Patch return status",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"bookingStatus\": \"COMPLETED\"\n}"
+            },
+            "url": "{{baseUrl}}/api/returns/{{bookingId}}/status",
+            "description": "Body: `{ \"bookingStatus\": \"...\" }`."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "6. Payments",
+      "item": [
+        {
+          "name": "Create deposit intent",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"bookingId\": {{bookingId}}\n}"
+            },
+            "url": "{{baseUrl}}/api/payments/deposit-intent",
+            "description": "Creates Stripe PaymentIntent for booking deposit. Needs real `STRIPE_API_KEY` or fails on placeholder."
+          },
+          "response": []
+        },
+        {
+          "name": "Stripe webhook (stub)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Stripe-Signature", "value": "t=0,v1=invalid-for-manual-test" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"evt_postman_test\",\n  \"type\": \"payment_intent.succeeded\",\n  \"data\": { \"object\": { \"id\": \"pi_test\" } }\n}"
+            },
+            "url": "{{baseUrl}}/api/payments/webhook",
+            "description": "Public path; signature verified with `stripe.webhook.secret`. Manual calls usually 400 unless you craft a valid Stripe signature."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "7. Stubs (web)",
+      "item": [
+        {
+          "name": "List depots (stub)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/depots",
+            "description": "Always returns `[]` — stub for React portal."
+          },
+          "response": []
+        },
+        {
+          "name": "List rental plans (stub)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/rental-plans",
+            "description": "Currently returns `[]` — stub for React portal."
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

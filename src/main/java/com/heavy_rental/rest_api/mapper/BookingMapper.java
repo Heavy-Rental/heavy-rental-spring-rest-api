@@ -5,10 +5,10 @@ import java.util.List;
 
 import org.springframework.stereotype.Component;
 
+import com.heavy_rental.rest_api.dto.BookingItemLine;
 import com.heavy_rental.rest_api.dto.BookingResponse;
 import com.heavy_rental.rest_api.dto.DeliveryItemResponse;
 import com.heavy_rental.rest_api.dto.ReturnItemResponse;
-import com.heavy_rental.rest_api.entity.Asset;
 import com.heavy_rental.rest_api.entity.Booking;
 import com.heavy_rental.rest_api.entity.BookingItem;
 
@@ -16,7 +16,6 @@ import com.heavy_rental.rest_api.entity.BookingItem;
 public class BookingMapper {
 
     public BookingResponse toBookingResponse(Booking booking, List<BookingItem> items) {
-        Asset asset = primaryAsset(items);
         return new BookingResponse(
                 booking.getId(),
                 booking.getCustomer() != null ? booking.getCustomer().getName() : "",
@@ -24,8 +23,7 @@ public class BookingMapper {
                 booking.getEndDate(),
                 booking.getStatus().name(),
                 booking.getSiteAddress(),
-                asset != null ? asset.getName() : "",
-                asset != null ? asset.getSerialno() : "",
+                toItemLines(items),
                 booking.getDeliveryNotes(),
                 booking.getTotalAmount(),
                 booking.getDepositAmount(),
@@ -33,35 +31,34 @@ public class BookingMapper {
     }
 
     public DeliveryItemResponse toDeliveryItemResponse(Booking booking, List<BookingItem> items) {
-        Asset asset = primaryAsset(items);
         return new DeliveryItemResponse(
                 booking.getId(),
                 booking.getCustomer() != null ? booking.getCustomer().getName() : "",
                 booking.getStartDate(),
                 booking.getSiteAddress(),
-                asset != null ? asset.getName() : "",
-                asset != null ? asset.getSerialno() : "",
+                toItemLines(items),
                 booking.getDeliveryNotes(),
                 booking.getStatus().name());
     }
 
     public ReturnItemResponse toReturnItemResponse(Booking booking, List<BookingItem> items) {
-        Asset asset = primaryAsset(items);
         return new ReturnItemResponse(
                 booking.getId(),
                 booking.getCustomer() != null ? booking.getCustomer().getName() : "",
                 booking.getEndDate(),
                 booking.getSiteAddress(),
-                asset != null ? asset.getName() : "",
-                asset != null ? asset.getSerialno() : "",
+                toItemLines(items),
                 booking.getDeliveryNotes(),
+                booking.getReturnNotes(),
                 booking.getStatus().name());
     }
 
-    private Asset primaryAsset(List<BookingItem> items) {
+    public List<BookingItemLine> toItemLines(List<BookingItem> items) {
         return items.stream()
-                .min(Comparator.comparing(BookingItem::getId))
-                .map(BookingItem::getAsset)
-                .orElse(null);
+                .sorted(Comparator.comparing(BookingItem::getId))
+                .map(item -> new BookingItemLine(
+                        item.getAsset() != null ? item.getAsset().getName() : "",
+                        item.getAsset() != null ? item.getAsset().getSerialno() : ""))
+                .toList();
     }
 }

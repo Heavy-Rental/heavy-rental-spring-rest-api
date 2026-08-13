@@ -33,6 +33,8 @@ No `SecurityConfig` changes — new routes fall under the existing auth rule aut
 
 Neither has a real entity behind it. They exist only because the frontend's equipment page also calls these on every load, and errors out entirely if `/api/depots` fails — even though it's unrelated to equipment itself.
 
+**Update, 2026-08-11:** `RentalPlanController` is no longer a stub — it's now the full REQ-1–5 implementation built on `hr-19-request-quote` (see [`SPEC-rental-plan-quote.md`](./SPEC-rental-plan-quote.md)), and its route was renamed `/api/rental-plans` → `/api/rentalPlans` in that same branch's PR review. The line above is left as-is since it's an accurate record of what this specific change (equipment-frontend integration) actually built at the time; `DepotController` is still a real stub today, only `RentalPlanController` has moved on.
+
 ### 1.4 Corrected `SPEC-entity-repository.md` per PR review feedback
 A teammate's review caught that this branch's code changes had made 4 statements in that doc false (it said there was no equipment CRUD API, omitted 3 new repository methods, and described cascade-delete/controller handling as future work that had actually already shipped). Fixed all 4, plus a 5th instance of the same pattern found while checking. Documentation-only — no entity, repository, or relationship content changed. See that doc's own `1.1.0` changelog entry for the full list.
 
@@ -75,6 +77,8 @@ The last commit on this branch (`ad80def`, "change ddl to update") flips `spring
 ## 2. What still isn't built
 
 Only `/api/equipment`, `/api/auth/*`, and the two empty stubs above exist on this backend. Anything needing real bookings, checkout/payment, admin asset management, or AI recommendations will `404` if exercised — expected, not a bug, until those features are built the same way equipment was.
+
+**Update, 2026-08-11:** as of `hr-19-request-quote` (see §1.3's note above), rental plans/quoting is real and built — only `/api/depots` remains an empty stub today. Bookings, checkout/payment, admin asset management, and AI recommendations are still not built, as originally stated.
 
 ---
 

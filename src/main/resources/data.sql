@@ -18,7 +18,8 @@ INSERT INTO users (id, name, password, email, company, role, enabled, created_at
   (3, 'Ravi Kumar', '$2a$10$2b9rJGeTNNaTx3Qo0YFuJO0ax4fCAwgzvATjztZTg/HNJCI9//dfO', 'ravi.kumar@example.sg', NULL,               'ADMIN',  true, '2026-01-05 09:00:00'),
   (4, 'Ah Tan',     '$2a$10$/Hrb7byw5a9ya.54mddREu1UuPWQ0gIS/gjci/pSyJmYHqT6S.fpK', 'ah.tan@example.sg',     NULL,               'DRIVER', true, '2026-01-05 09:00:00'),
   (5, 'Mei Ling',   '$2a$10$Iv73UJNt6A4WyteXiqlfROtFFKPrOIZCvQjc6jQ.ubA1Itj1vjuoS', 'mei.ling@example.sg',   'Ling Builders',    'USER',   true, '2026-08-11 09:00:00'),
-  (6, 'Farid Rahman','$2a$10$on8F4.i73nPbHVYmJMWSgORgommvMQAFAEXw8d4IQ95.C7DMy4DEa','farid.rahman@example.sg', NULL,              'USER',   true, '2026-08-11 09:00:00')
+  (6, 'Farid Rahman','$2a$10$on8F4.i73nPbHVYmJMWSgORgommvMQAFAEXw8d4IQ95.C7DMy4DEa','farid.rahman@example.sg', NULL,              'USER',   true, '2026-08-11 09:00:00'),
+  (7, 'Mei Lin',    '$2a$10$TM3IZGiEkuUTq/VJKWod7OHUb/sqRI3GWUvCcfeQr6u7fkpONI5dm', 'mei.lin@example.sg',   'Lin Builders',      'USER',   true, '2026-01-05 09:00:00')
 ON CONFLICT (id) DO UPDATE SET
   name = EXCLUDED.name,
   password = EXCLUDED.password,
@@ -135,13 +136,13 @@ SELECT setval(pg_get_serial_sequence('asset_images', 'id'), COALESCE((SELECT MAX
 -- ============================================================
 -- 4. rental_plan
 -- ============================================================
-INSERT INTO rental_plan (id, customer_id, start_date, end_date, total_amount, status, site_address, site_postal_code, created_at, updated_at) VALUES
-  (1, (SELECT id FROM users WHERE name = 'Alex Tan'), '2026-08-20', '2026-08-25', 1050.00, 'DRAFT',    '88 Tuas South Ave 3',              'S(637311)', '2026-08-01 09:00:00', '2026-08-01 09:00:00'),
-  (2, (SELECT id FROM users WHERE name = 'Alex Tan'), '2026-08-18', '2026-08-22', 480.00,  'SAVED',    '15 Pioneer Sector 1',              'S(628413)', '2026-08-02 10:00:00', '2026-08-02 10:00:00'),
-  (3, (SELECT id FROM users WHERE name = 'Alex Tan'), '2026-09-01', '2026-09-05', 1440.00, 'QUOTEED',  '20 Jurong Port Road',              'S(619094)', '2026-08-03 11:00:00', '2026-08-03 15:00:00'),
-  (4, (SELECT id FROM users WHERE name = 'Alex Tan'), '2026-07-20', '2026-07-22', 900.00,  'CONVERTED','12 Commercial Avenue, Marina South','S(018982)', '2026-07-15 10:30:00', '2026-07-15 10:30:00'),
-  (5, (SELECT id FROM users WHERE name = 'Alex Tan'), '2026-08-10', '2026-08-14', 1440.00, 'CONVERTED','20 Jurong Port Road',              'S(619094)', '2026-08-01 09:00:00', '2026-08-01 09:00:00'),
-  (6, (SELECT id FROM users WHERE name = 'Alex Tan'), '2026-10-05', '2026-10-09', 2400.00, 'DRAFT',    '5 Tampines Industrial Ave',        'S(528896)', '2026-08-04 09:00:00', '2026-08-04 09:00:00')
+INSERT INTO rental_plan (id, customer_id, start_date, end_date, total_amount, status, site_address, site_postal_code, created_at, updated_at, version) VALUES
+  (1, (SELECT id FROM users WHERE name = 'Alex Tan'), '2026-08-20', '2026-08-25', 1050.00, 'DRAFT',    '88 Tuas South Ave 3',              'S(637311)', '2026-08-01 09:00:00', '2026-08-01 09:00:00', 0),
+  (2, (SELECT id FROM users WHERE name = 'Alex Tan'), '2026-08-18', '2026-08-22', 480.00,  'SAVED',    '15 Pioneer Sector 1',              'S(628413)', '2026-08-02 10:00:00', '2026-08-02 10:00:00', 0),
+  (3, (SELECT id FROM users WHERE name = 'Alex Tan'), '2026-09-01', '2026-09-05', 1440.00, 'QUOTED',   '20 Jurong Port Road',              'S(619094)', '2026-08-03 11:00:00', '2026-08-03 15:00:00', 0),
+  (4, (SELECT id FROM users WHERE name = 'Alex Tan'), '2026-07-20', '2026-07-22', 900.00,  'CONVERTED','12 Commercial Avenue, Marina South','S(018982)', '2026-07-15 10:30:00', '2026-07-15 10:30:00', 0),
+  (5, (SELECT id FROM users WHERE name = 'Alex Tan'), '2026-08-10', '2026-08-14', 1440.00, 'CONVERTED','20 Jurong Port Road',              'S(619094)', '2026-08-01 09:00:00', '2026-08-01 09:00:00', 0),
+  (6, (SELECT id FROM users WHERE name = 'Alex Tan'), '2026-10-05', '2026-10-09', 2400.00, 'DRAFT',    '5 Tampines Industrial Ave',        'S(528896)', '2026-08-04 09:00:00', '2026-08-04 09:00:00', 0)
 ON CONFLICT (id) DO NOTHING;
 
 -- Sync sequence so runtime inserts don't collide with the explicit ids above
@@ -175,24 +176,24 @@ SELECT setval(pg_get_serial_sequence('rental_plan_records', 'id'), COALESCE((SEL
 INSERT INTO bookings (id, customer_id, rental_plan_id, start_date, end_date, status, total_amount, deposit_amount, remaining_balance, site_address, delivery_notes, created_at) VALUES
   (1,  (SELECT id FROM users WHERE name = 'Alex Tan'), 1, CURRENT_DATE, CURRENT_DATE + 4, 'CONFIRMED', 1440.00, 432.00, 0.00,  '20 Jurong Port Road, Singapore 619094',                '',                                                         '2026-08-01 09:00:00'),
   (2,  (SELECT id FROM users WHERE name = 'Alex Tan'), 2, CURRENT_DATE - 3, CURRENT_DATE, 'COMPLETED', 900.00,  270.00, 0.00,  '12 Commercial Avenue, Marina South, Singapore 018982', '',                                                         '2026-07-15 10:30:00'),
-  (3,  (SELECT id FROM users WHERE name = 'Alex Tan'), 3, CURRENT_DATE, CURRENT_DATE + 1, 'PENDING_CONFIRMED',   360.00,  108.00, 252.00, '15 Pioneer Sector 1, Singapore 628413',                'Access via loading bay B, coordinate with site security', '2026-08-05 14:00:00'),
+  (3,  (SELECT id FROM users WHERE name = 'Alex Tan'), 3, CURRENT_DATE, CURRENT_DATE + 1, 'MOBILISED',   360.00,  108.00, 0.00, '15 Pioneer Sector 1, Singapore 628413',                'Access via loading bay B, coordinate with site security', '2026-08-05 14:00:00'),
   (4,  (SELECT id FROM users WHERE name = 'Alex Tan'), 4, CURRENT_DATE - 2, CURRENT_DATE, 'MOBILISED', 840.00,  252.00, 0.00, '88 Tuas South Ave 3, Singapore 637311',                'Crane assist required for offload',                       '2026-07-25 08:50:00'),
   (5,  (SELECT id FROM users WHERE name = 'Alex Tan'), 5, CURRENT_DATE, CURRENT_DATE + 7, 'CONFIRMED', 2350.00, 705.00, 0.00, '5 Tampines Industrial Ave, Singapore 528896',          '',                                                         '2026-08-20 11:00:00'),
   (6,  (SELECT id FROM users WHERE name = 'Alex Tan'), 6, CURRENT_DATE - 1, CURRENT_DATE, 'CANCELLED', 300.00,  90.00,  0.00, '10 Woodlands Ave 2, Singapore 738068',                 'Deposit payment failed; booking cancelled',                '2026-06-25 09:00:00'),
   (7,  (SELECT id FROM users WHERE name = 'Alex Tan'), 1, CURRENT_DATE - 1, CURRENT_DATE, 'COMPLETED', 240.00,  72.00,  0.00, '20 Jurong Port Road, Singapore 619094',                '',                                                         '2026-06-01 09:00:00'),
   (8,  (SELECT id FROM users WHERE name = 'Alex Tan'), 2, CURRENT_DATE - 2, CURRENT_DATE, 'COMPLETED', 630.00,  189.00, 0.00, '22 Kranji Way, Singapore 739450',                      '',                                                         '2026-05-01 09:00:00'),
   (9,  (SELECT id FROM users WHERE name = 'Alex Tan'), 3, CURRENT_DATE - 1, CURRENT_DATE, 'COMPLETED', 320.00,  96.00,  0.00, '8 Senoko Drive, Singapore 758196',                     '',                                                         '2026-03-28 09:00:00'),
-  (10, (SELECT id FROM users WHERE name = 'Alex Tan'), 4, CURRENT_DATE - 3, CURRENT_DATE, 'COMPLETED', 900.00,  270.00, 0.00, '3 Benoi Road, Singapore 629895',                       '',                                                         '2026-01-25 09:00:00'),
-  (11, (SELECT id FROM users WHERE name = 'Alex Tan'), 5, CURRENT_DATE, CURRENT_DATE + 3, 'PENDING_CONFIRMED',   1080.00, 324.00, 756.00, '6 Gul Circle, Singapore 629563',                       '',                                                         '2026-08-05 10:00:00'),
-  (12, (SELECT id FROM users WHERE name = 'Alex Tan'), 6, CURRENT_DATE, CURRENT_DATE + 5, 'PENDING_CONFIRMED',   2000.00, 600.00, 1400.00, '14 Kallang Ave, Singapore 339410',                     '',                                                         '2026-08-04 09:30:00'),
-  (13, (SELECT id FROM users WHERE name = 'Alex Tan'), 1, CURRENT_DATE, CURRENT_DATE + 2, 'PENDING_CONFIRMED',   540.00,  162.00, 378.00, '3 Pandan Loop, Singapore 128215',                      'Confirm delivery lift access',                            '2026-08-06 08:45:00'),
+  (10, (SELECT id FROM users WHERE name = 'Alex Tan'), 4, CURRENT_DATE - 3, CURRENT_DATE, 'MOBILISED', 900.00,  270.00, 0.00, '3 Benoi Road, Singapore 629895',                       '',                                                         '2026-01-25 09:00:00'),
+  (11, (SELECT id FROM users WHERE name = 'Alex Tan'), 5, CURRENT_DATE, CURRENT_DATE + 3, 'CONFIRMED',   1440.00, 432.00, 0.00, '6 Gul Circle, Singapore 629563',                       '',                                                         '2026-08-05 10:00:00'),
+  (12, (SELECT id FROM users WHERE name = 'Alex Tan'), 6, CURRENT_DATE, CURRENT_DATE + 5, 'CONFIRMED',   2000.00, 600.00, 0.00, '14 Kallang Ave, Singapore 339410',                     '',                                                         '2026-08-04 09:30:00'),
+  (13, (SELECT id FROM users WHERE name = 'Alex Tan'), 1, CURRENT_DATE, CURRENT_DATE + 2, 'MOBILISED',   540.00,  162.00, 0.00, '3 Pandan Loop, Singapore 128215',                      'Confirm delivery lift access',                            '2026-08-06 08:45:00'),
   (14, (SELECT id FROM users WHERE name = 'Alex Tan'), 2, CURRENT_DATE, CURRENT_DATE + 5, 'CONFIRMED', 1650.00, 495.00, 0.00,  '9 Woodlands Loop, Singapore 738322',                   '',                                                         '2026-08-03 13:20:00'),
   (15, (SELECT id FROM users WHERE name = 'Alex Tan'), 3, CURRENT_DATE, CURRENT_DATE + 3, 'CONFIRMED', 980.01,  294.00, 0.00,  '77 Ayer Rajah Crescent, Singapore 139953',             'Site rep: Mr. Lim, contact on arrival',                   '2026-07-29 15:00:00'),
   (16, (SELECT id FROM users WHERE name = 'Alex Tan'), 4, CURRENT_DATE, CURRENT_DATE + 6, 'MOBILISED', 1260.00, 378.00, 0.00,  '18 Tuas Ave 10, Singapore 639142',                     'Weekend access requires prior approval',                  '2026-07-27 09:15:00'),
   (17, (SELECT id FROM users WHERE name = 'Alex Tan'), 5, CURRENT_DATE, CURRENT_DATE + 2, 'MOBILISED', 700.00,  210.00, 0.00,  '5 Sungei Kadut Street 1, Singapore 729367',            '',                                                         '2026-07-24 10:40:00'),
-  (18, (SELECT id FROM users WHERE name = 'Alex Tan'), 6, CURRENT_DATE - 1, CURRENT_DATE, 'COMPLETED', 480.00,  144.00, 0.00, '40 Penjuru Road, Singapore 609216',                    '',                                                         '2026-06-10 09:00:00'),
-  (19, (SELECT id FROM users WHERE name = 'Alex Tan'), 1, CURRENT_DATE - 2, CURRENT_DATE, 'COMPLETED', 1100.00, 330.00, 0.00, '12 Jalan Papan, Singapore 619389',                     'Returned in good condition',                              '2026-07-01 11:00:00'),
-  (20, (SELECT id FROM users WHERE name = 'Alex Tan'), 2, CURRENT_DATE - 3, CURRENT_DATE, 'COMPLETED', 860.01,  258.00, 0.00, '27 Gul Drive, Singapore 629468',                       '',                                                         '2026-07-18 09:30:00'),
+  (18, (SELECT id FROM users WHERE name = 'Alex Tan'), 6, CURRENT_DATE - 1, CURRENT_DATE, 'MOBILISED', 480.00,  144.00, 0.00, '40 Penjuru Road, Singapore 609216',                    '',                                                         '2026-06-10 09:00:00'),
+  (19, (SELECT id FROM users WHERE name = 'Alex Tan'), 1, CURRENT_DATE - 2, CURRENT_DATE, 'MOBILISED', 1100.00, 330.00, 0.00, '12 Jalan Papan, Singapore 619389',                     'Returned in good condition',                              '2026-07-01 11:00:00'),
+  (20, (SELECT id FROM users WHERE name = 'Alex Tan'), 2, CURRENT_DATE - 3, CURRENT_DATE, 'MOBILISED', 860.01,  258.00, 0.00, '27 Gul Drive, Singapore 629468',                       '',                                                         '2026-07-18 09:30:00'),
   (21, (SELECT id FROM users WHERE name = 'Alex Tan'), NULL, CURRENT_DATE - 1, CURRENT_DATE + 4, 'CONFIRMED', 2250.00, 675.00, 0.00, '20 Jurong Port Road, Singapore 619094', '', CURRENT_DATE - 6 + TIME '09:00:00'),
   (22, (SELECT id FROM users WHERE name = 'Mei Ling'), NULL, CURRENT_DATE, CURRENT_DATE + 3, 'PENDING_DEPOSIT', 1410.00, 423.00, 1410.00, '12 Commercial Avenue, Marina South, Singapore 018982', '', CURRENT_DATE - 5 + TIME '09:00:00'),
   (23, (SELECT id FROM users WHERE name = 'Alex Tan'), NULL, CURRENT_DATE - 20, CURRENT_DATE - 15, 'COMPLETED', 2325.00, 697.50, 0.00, '15 Pioneer Sector 1, Singapore 628413', 'Access via loading bay B', CURRENT_DATE - 25 + TIME '09:00:00'),
@@ -370,7 +371,8 @@ INSERT INTO booking_items (id, booking_id, asset_id, daily_rate, subtotal, start
   (94, 87, 26, 110.00, 660.00, 1290.0, NULL, 'GOOD', NULL),
   (95, 88, 26, 110.00, 550.00, 1305.0, 1329.0, 'GOOD', 'GOOD'),
   (96, 89, 27, 210.00, 1050.00, NULL, NULL, NULL, NULL),
-  (97, 90, 27, 210.00, 840.00, NULL, NULL, NULL, NULL)
+  (97, 90, 27, 210.00, 840.00, NULL, NULL, NULL, NULL),
+  (98, 11, 3,  120.00, 360.00, NULL, NULL, NULL, NULL)
 ON CONFLICT (id) DO NOTHING;
 
 -- Sync sequence so runtime inserts don't collide with the explicit ids above
@@ -400,7 +402,7 @@ INSERT INTO payments (id, booking_id, stripe_payment_intent_id, stripe_charge_id
   (9, 8, 'pi_3PQa9FKx9x1x1x1x9', 'ch_3PQa9FKx9x1a9', 'cus_AlexTan001', 'pm_AlexTan001card', 630.00, 'FULL_PAYMENT', 'SUCCESS', NULL, '2026-05-01 09:30:00', '2026-05-01 09:25:00'),
   (10, 9, 'pi_3PQb0FKx9x1x1x1x0', 'ch_3PQb0FKx9x1b0', 'cus_AlexTan001', 'pm_AlexTan001card', 320.00, 'FULL_PAYMENT', 'SUCCESS', NULL, '2026-03-28 09:20:00', '2026-03-28 09:15:00'),
   (11, 10, 'pi_3PQb1FKx9x1x1x1b1', 'ch_3PQb1FKx9x1b1', 'cus_AlexTan001', 'pm_AlexTan001card', 900.00, 'FULL_PAYMENT', 'SUCCESS', NULL, '2026-02-05 09:10:00', '2026-02-05 09:00:00'),
-  (12, 11, 'pi_orph11dep', 'ch_orph11dep', 'cus_orph11', 'pm_orph11card', 324.00, 'DEPOSIT', 'SUCCESS', NULL, CURRENT_DATE + TIME '09:10:00', CURRENT_DATE + TIME '09:05:00'),
+  (12, 11, 'pi_orph11dep', 'ch_orph11dep', 'cus_orph11', 'pm_orph11card', 432.00, 'DEPOSIT', 'SUCCESS', NULL, CURRENT_DATE + TIME '09:10:00', CURRENT_DATE + TIME '09:05:00'),
   (13, 12, 'pi_orph12dep', 'ch_orph12dep', 'cus_orph12', 'pm_orph12card', 600.00, 'DEPOSIT', 'SUCCESS', NULL, CURRENT_DATE + TIME '09:10:00', CURRENT_DATE + TIME '09:05:00'),
   (14, 13, 'pi_orph13dep', 'ch_orph13dep', 'cus_orph13', 'pm_orph13card', 162.00, 'DEPOSIT', 'SUCCESS', NULL, CURRENT_DATE + TIME '09:10:00', CURRENT_DATE + TIME '09:05:00'),
   (15, 14, 'pi_orph14dep', 'ch_orph14dep', 'cus_orph14', 'pm_orph14card', 495.00, 'DEPOSIT', 'SUCCESS', NULL, CURRENT_DATE + TIME '09:10:00', CURRENT_DATE + TIME '09:05:00'),

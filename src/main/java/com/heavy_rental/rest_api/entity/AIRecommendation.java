@@ -4,6 +4,7 @@ import jakarta.persistence.*;
 import lombok.*;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 @Entity
@@ -48,4 +49,39 @@ public class AIRecommendation {
   @Column(name = "created_at", nullable = false)
   private LocalDateTime createdAt;
 
+  // --- S2b: haystack session handles (Call 1 persist → Call 2/3 use) ---
+
+  /** Haystack ingest id from Call 1; required handle for Call 2 recommend and Call 3 Q&amp;A. */
+  @Column(name = "ingest_id")
+  private String ingestId;
+
+  /** Identity sent to haystack (typically String.valueOf(user.id) or Call 1 echo). */
+  @Column(name = "haystack_user_id")
+  private String haystackUserId;
+
+  /** Logical submit key (audit); same key reused if ingest is retried. */
+  @Column(name = "idempotency_key")
+  private String idempotencyKey;
+
+  /** Shared with outbound haystack calls for log join. */
+  @Column(name = "correlation_id")
+  private String correlationId;
+
+  @Column(name = "tentative_start_date")
+  private LocalDate tentativeStartDate;
+
+  @Column(name = "tentative_end_date")
+  private LocalDate tentativeEndDate;
+
+  @Column(name = "expected_budget_amount", precision = 19, scale = 2)
+  private BigDecimal expectedBudgetAmount;
+
+  @Column(name = "expected_budget_currency")
+  private String expectedBudgetCurrency;
+
+  @Column(name = "expected_budget_source")
+  private String expectedBudgetSource;
+
+  @Column(name = "warnings", columnDefinition = "TEXT")
+  private String warnings;
 }
