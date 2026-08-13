@@ -30,6 +30,29 @@ public class Booking {
             List.of(BookingStatus.PENDING_DEPOSIT, BookingStatus.PENDING_CONFIRMED,
                     BookingStatus.CONFIRMED, BookingStatus.MOBILISED);
 
+    /**
+     * Statuses that count as "the asset was actually utilized" for reporting — distinct
+     * from ACTIVE_STATUSES above (no PENDING_* here, since a deposit-pending booking hasn't
+     * happened yet; COMPLETED is included, since a finished rental still counts toward past
+     * utilization even though it no longer blocks availability). Shared by
+     * MonthlyUtilizationService (fleet-wide) and AssetService (per-asset) so the two can't
+     * drift apart on what "utilized" means.
+     */
+    public static final List<BookingStatus> UTILIZATION_STATUSES =
+            List.of(BookingStatus.CONFIRMED, BookingStatus.MOBILISED, BookingStatus.COMPLETED);
+
+    /**
+     * Days this booking's date range overlaps [windowStart, windowEnd], inclusive on both
+     * ends. Shared by MonthlyUtilizationService (fleet-wide, per month) and AssetService
+     * (per-asset, current month) so the day-count math can't drift between the two.
+     */
+    public static long overlapDays(Booking booking, LocalDate windowStart, LocalDate windowEnd) {
+        LocalDate overlapStart = booking.getStartDate().isAfter(windowStart) ? booking.getStartDate() : windowStart;
+        LocalDate overlapEnd = booking.getEndDate().isBefore(windowEnd) ? booking.getEndDate() : windowEnd;
+        long days = java.time.temporal.ChronoUnit.DAYS.between(overlapStart, overlapEnd) + 1;
+        return Math.max(days, 0);
+    }
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
