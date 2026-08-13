@@ -1,14 +1,14 @@
 package com.heavy_rental.rest_api.dto;
 
 import java.time.LocalDate;
+import java.util.List;
 
 public record DeliveryItemResponse(
     Long bookingId,
     String customerName,
     LocalDate startDate,
     String siteAddress,
-    String assetName,
-    String serialNumber,
+    List<BookingItemLine> items,
     String deliveryNotes,
     String bookingStatus) {
 }

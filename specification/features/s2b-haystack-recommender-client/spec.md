@@ -30,7 +30,6 @@ The portal needs equipment recommendations driven by project specifications. Ind
 - Multi-agent C/W/D roles inside Spring
 - Async job API (202 + poll/SSE)
 - gRPC / queues
-- Multipart project-file upload (JSON text only in S2b)
 - Writing `recommendation_items` rows from Call 2
 - Multi-replica shared FastAPI session store
 
@@ -109,5 +108,11 @@ The portal needs equipment recommendations driven by project specifications. Ind
 ## 7. Open questions (ops — non-blocking for code)
 
 1. Production p95 ingest / recommend duration?
-2. Final max project file size and allowed MIME set (multipart deferred)?
+2. Final max project file size and allowed MIME set for multipart (shipped in 2.1.0 with a `haystack.max-in-memory-size` default of 20MB — is that default final?)?
 3. Is spinner UX enough for C1, or is progress UI required (→ C2)?
+
+## 8. Change control
+
+| Date | Note |
+|------|------|
+| 2026-08-13 | §3/§7 corrected: multipart project-file upload was listed as a non-goal ("JSON text only in S2b") and an open/deferred question, but it shipped in `SPEC-haystack-recommender-client.md` v2.1.0 (`RecommendationController.submitProjectSpecMultipart`, `HaystackRecommenderClient.ingestMultipart`) — removed from non-goals; §7 Q2 reworded to reflect that it's implemented, with the remaining open point being whether the current size/MIME defaults are final. No behavior change. |
