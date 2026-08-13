@@ -18,6 +18,7 @@ public record EquipmentResponse(
         String desc,
         String img,
         String location,
-        List<String> tags) {
+        List<String> tags,
+        Double utilization) {
 
 }

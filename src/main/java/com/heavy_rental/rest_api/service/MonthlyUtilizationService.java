@@ -1,9 +1,9 @@
 package com.heavy_rental.rest_api.service;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.format.TextStyle;
-import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -22,9 +22,6 @@ import com.heavy_rental.rest_api.repository.PaymentRepository;
 @Service
 public class MonthlyUtilizationService {
 
-    private static final List<Booking.BookingStatus> ACTIVE_STATUSES = List.of(
-            Booking.BookingStatus.CONFIRMED, Booking.BookingStatus.MOBILISED, Booking.BookingStatus.COMPLETED);
-
     private final PaymentRepository paymentRepository;
     private final BookingItemRepository bookingItemRepository;
     private final AssetRepository assetRepository;
@@ -40,7 +37,7 @@ public class MonthlyUtilizationService {
     @Transactional(readOnly = true)
     public List<MonthlyUtilizationResponse> getTrailingSixMonths() {
         List<Payment> successfulPayments = paymentRepository.findByStatus(Payment.PaymentStatus.SUCCESS);
-        List<BookingItem> activeBookingItems = bookingItemRepository.findByBookingStatusIn(ACTIVE_STATUSES);
+        List<BookingItem> activeBookingItems = bookingItemRepository.findByBookingStatusIn(Booking.UTILIZATION_STATUSES);
         long totalAssets = assetRepository.count();
 
         LocalDate today = LocalDate.now();
@@ -58,10 +55,11 @@ public class MonthlyUtilizationService {
                         return !paidDate.isBefore(monthStart) && !paidDate.isAfter(monthEnd);
                     })
                     .map(Payment::getAmount)
-                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+                    .reduce(BigDecimal.ZERO, BigDecimal::add)
+                    .setScale(2, RoundingMode.HALF_UP);
 
             long bookedAssetDays = activeBookingItems.stream()
-                    .mapToLong(item -> overlapDays(item.getBooking(), monthStart, monthEnd))
+                    .mapToLong(item -> Booking.overlapDays(item.getBooking(), monthStart, monthEnd))
                     .sum();
 
             long daysInMonth = monthStart.lengthOfMonth();
@@ -76,12 +74,5 @@ public class MonthlyUtilizationService {
         }
 
         return result;
-    }
-
-    private long overlapDays(Booking booking, LocalDate monthStart, LocalDate monthEnd) {
-        LocalDate overlapStart = booking.getStartDate().isAfter(monthStart) ? booking.getStartDate() : monthStart;
-        LocalDate overlapEnd = booking.getEndDate().isBefore(monthEnd) ? booking.getEndDate() : monthEnd;
-        long days = ChronoUnit.DAYS.between(overlapStart, overlapEnd) + 1;
-        return Math.max(days, 0);
     }
 }
