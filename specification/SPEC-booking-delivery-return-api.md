@@ -3,13 +3,13 @@
 | Field | Value |
 |-------|--------|
 | **Feature** | REST API for viewing/updating bookings and driving the delivery/return status workflow |
-| **Status** | Implemented on branch `HR-80-implement-endpoints-for-bookings-deliveries-and-returns`, not yet merged to `develop`. `returnNotes` (HR-100) implemented on top of that. All of a booking's items, not just one (HR-113), implemented on top of that. |
+| **Status** | Implemented on branch `HR-80-implement-endpoints-for-bookings-deliveries-and-returns`, not yet merged to `develop`. `returnNotes` (HR-100) implemented on top of that. Two further additions on top of that, each on its own not-yet-merged branch: all of a booking's items, not just one (HR-113); and `siteAddress` postal-code validation on `PUT /api/bookings/{id}` (HR-116), implemented on branch `HR-116-site-address-postal-code-validation`. |
 | **Module** | `heavy-rental-spring-rest-api` |
 | **Primary paths** | `GET/PUT /api/bookings`, `/api/bookings/{id}`; `GET /api/deliveries`, `PATCH /api/deliveries/{id}/status`; `GET /api/returns`, `PATCH /api/returns/{id}/status` |
 | **Client** | Mobile (per branch author — see [`SPEC-api-index.md`](./SPEC-api-index.md) §2.2) |
 | **Depends on** | [`SPEC-entity-repository.md`](./SPEC-entity-repository.md) (`Booking`, `BookingItem`, `Asset`, `User`), [`SPEC-auth-login-logout.md`](./SPEC-auth-login-logout.md) (access token required to call any route here) |
 | **Environment context** | [`SPEC-project-environment.md`](./SPEC-project-environment.md) (read first) |
-| **Related code** | `controller/BookingController.java`, `controller/DeliveryController.java`, `controller/ReturnController.java`, `service/BookingService.java`, `service/DeliveryService.java`, `service/ReturnService.java`, `mapper/BookingMapper.java`, `dto/BookingResponse.java`, `dto/BookingUpdateRequest.java`, `dto/DeliveryItemResponse.java`, `dto/ReturnItemResponse.java`, `dto/BookingItemLine.java`, `dto/StatusUpdateRequest.java`, `dto/ReturnStatusUpdateRequest.java`, `repository/BookingRepository.java`, `repository/BookingItemRepository.java` |
+| **Related code** | `controller/BookingController.java`, `controller/DeliveryController.java`, `controller/ReturnController.java`, `service/BookingService.java`, `service/DeliveryService.java`, `service/ReturnService.java`, `mapper/BookingMapper.java`, `dto/BookingResponse.java`, `dto/BookingUpdateRequest.java`, `dto/DeliveryItemResponse.java`, `dto/ReturnItemResponse.java`, `dto/BookingItemLine.java`, `dto/StatusUpdateRequest.java`, `dto/ReturnStatusUpdateRequest.java`, `repository/BookingRepository.java`, `repository/BookingItemRepository.java`, `config/RestExceptionHandler.java` (`MethodArgumentNotValidException` → `400 validation_failed`, HR-116) |
 
 This document is the **single source of truth** for the `/api/bookings`, `/api/deliveries`, and `/api/returns` REST surface: what each route does, the booking-status state machine it enforces, and known gaps against the underlying data model. It does not restate `Booking`/`BookingItem` column-level detail — see `SPEC-entity-repository.md` for that.
 
@@ -94,6 +94,9 @@ CANCELLED: reachable from any state in principle; no endpoint sets it today.
 3. **GIVEN** a `bookingId` that doesn't exist
    **WHEN** `PUT /api/bookings/{bookingId}`
    **THEN** `404`.
+4. **GIVEN** a `siteAddress` that is blank/missing, or does not end with a 6-digit postal code (HR-116)
+   **WHEN** `PUT /api/bookings/{bookingId}`
+   **THEN** `400` — `{"error":"validation_failed","message":"siteAddress: <reason>"}` — before any field is written; the booking is left completely unchanged. Leading/trailing whitespace on `siteAddress` is stripped before the check runs, so `"  ...619094  "` is accepted.
 
 ### Requirement 3: Today's deliveries
 
@@ -199,6 +202,8 @@ Content-Type: application/json
 
 **DTO:** `BookingUpdateRequest(startDate, endDate, siteAddress, deliveryNotes)` — no `bookingStatus` field exists on this type; it cannot be sent. `200` — updated `BookingResponse`. Every field in the request body is written to the entity unconditionally (see §6.5): a client that wants to change only `deliveryNotes` must still resend the current `startDate`/`endDate`/`siteAddress`, or those fields will be nulled.
 
+**`siteAddress` validation (HR-116):** the controller method is now `@Valid`-annotated, and `siteAddress` on `BookingUpdateRequest` carries `@NotBlank` plus `@Pattern(regexp = "^.*\\d{6}$")` — the value must end with a 6-digit postal code (e.g. `"20 Jurong Port Road, 619094"`). A compact canonical constructor strips leading/trailing whitespace before either constraint is evaluated. A violation short-circuits before `BookingService.updateBooking` runs at all — see Requirement 2.4 and §5.4 for the resulting `400`. `startDate`/`endDate`/`deliveryNotes` carry no such constraint and remain fully nullable, per §6.5.
+
 #### `GET /api/deliveries`
 
 ```json
@@ -272,6 +277,7 @@ Content-Type: application/json
 | HTTP | Typical `error` |
 |------|-----------------|
 | `400` | `bad_request` (invalid transition, unparseable status) |
+| `400` | `validation_failed` (`PUT /api/bookings/{id}` only — `siteAddress` blank or missing its 6-digit postal-code suffix; HR-116, handled by `RestExceptionHandler.handleValidation`) |
 | `401` | `unauthorized` (missing/invalid Bearer) |
 | `404` | `not_found` |
 
@@ -351,6 +357,8 @@ A client that omits (or sends `null` for) any of `startDate`/`endDate`/`siteAddr
 - [ ] `GET /api/bookings` → `200`, array covering all seeded bookings.
 - [ ] `GET /api/bookings/{id}` on a real id → `200`; on a fake id → `404`.
 - [ ] `PUT /api/bookings/{id}` with all four fields → `200`, values updated; omitting a field → that field nulled (§6.5), not preserved.
+- [ ] `PUT /api/bookings/{id}` with `siteAddress` blank, missing, or not ending in a 6-digit postal code → `400 validation_failed`, booking left unchanged (HR-116).
+- [ ] `PUT /api/bookings/{id}` with `siteAddress` padded with leading/trailing whitespace but otherwise valid → `200`, stored value stripped (HR-116).
 - [ ] `GET /api/deliveries` → only bookings with `startDate == today` and status `CONFIRMED`/`MOBILISED`.
 - [ ] `PATCH /api/deliveries/{id}/status` on a `CONFIRMED` booking with `{"bookingStatus":"MOBILISED"}` → `200`, status now `MOBILISED`.
 - [ ] Same call on a non-`CONFIRMED` booking, or with any status other than `MOBILISED` → `400`.
@@ -397,3 +405,4 @@ curl -s http://localhost:8080/api/returns -H "Authorization: Bearer $ACCESS" | j
 | 1.0.0 | 2026-08-09 | Initial as-built spec: booking read/update, today's-deliveries/returns lists, guarded `CONFIRMED→MOBILISED`/`MOBILISED→COMPLETED` transitions, primary-asset selection, and the known-issues list from PR review (role/ownership checks, multi-asset data loss, missing `DeliveryRecord`/`ReturnRecord` persistence, N+1 queries, full-replace `PUT` semantics). Written per the standalone-spec criterion added to `SPEC-project-environment.md` §9.1: this feature has independently-evolving business logic (a state machine, its own future authz needs) that warrants its own file rather than living in `SPEC-entity-repository.md`/`SPEC-api-index.md`. |
 | 1.1.0 | 2026-08-12 | HR-100: `PATCH /api/returns/{bookingId}/status` now accepts a dedicated `ReturnStatusUpdateRequest(bookingStatus, returnNotes)` body instead of the shared `StatusUpdateRequest`, and persists `returnNotes` to a new `Booking.returnNotes` column (`SPEC-entity-repository.md` §5.7) only on the valid `MOBILISED → COMPLETED` transition. `ReturnItemResponse` gained a `returnNotes` field alongside the existing `deliveryNotes`; the two are kept separate rather than one overwriting the other. Deliveries' contract (`StatusUpdateRequest`, `DeliveryItemResponse`) is unchanged. |
 | 1.2.0 | 2026-08-12 | **HR-113: multi-asset bookings fixed — closes §6.2.** `BookingResponse`, `DeliveryItemResponse`, `ReturnItemResponse` now carry `items: List<BookingItemLine>` (new `dto/BookingItemLine.java` — `assetName`/`serialNumber` per row) instead of one flat `assetName`/`serialNumber` pair. `BookingMapper.primaryAsset()` (picked one `BookingItem` via `min(BookingItem.id)`, discarding the rest) replaced by public `BookingMapper.toItemLines(List<BookingItem>)`, which maps every `BookingItem` row, sorted by id ascending; an empty input maps to `items: []`, never `null`. Matches the shape the mobile client's `HR-113` branch already expects. `BookingMapperTest` gained zero/single/multi-item coverage (previously only the zero-item path was exercised). §5.2 examples, §5.3 (renamed from "Primary-asset selection" to "Item list mapping"), §6.2, §7, and §8.1 updated to match. |
+| 1.3.0 | 2026-08-13 | **HR-116: `siteAddress` postal-code validation on `PUT /api/bookings/{id}`.** (Renumbered from a colliding `1.2.0` assigned independently on this branch.) `BookingController.updateBooking` is now `@Valid`-annotated; `BookingUpdateRequest.siteAddress` carries `@NotBlank` + `@Pattern(regexp = "^.*\\d{6}$")` (must end with a 6-digit postal code) and is stripped of leading/trailing whitespace in a compact canonical constructor. A new `RestExceptionHandler.handleValidation(MethodArgumentNotValidException)` maps any violation to `400 {"error":"validation_failed", ...}` — new row in §5.4 — before `BookingService.updateBooking` runs, so a rejected request leaves the booking completely unchanged. New Maven dependency `spring-boot-starter-validation` (`pom.xml`). `startDate`/`endDate`/`deliveryNotes` are unaffected — still fully nullable, per §6.5. `POST /api/bookings` (`CreateBookingRequest`) got the identical constraint in the same change; that route's contract lives in `SPEC-api-index.md` §2.2.1, not here — see that file's own change control for the mirrored entry. |
