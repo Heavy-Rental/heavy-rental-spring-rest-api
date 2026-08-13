@@ -73,8 +73,11 @@ class BookingServiceTest {
 
         jwt = mock(Jwt.class);
         when(currentUserService.getUser(jwt)).thenReturn(customer);
+    }
 
-        // Simulates IDENTITY generation: a real save() assigns an id to a new row.
+    // Simulates IDENTITY generation: a real save() assigns an id to a new row. Only needed by
+    // tests that reach booking persistence (happy-path conversions), not the ones that throw first.
+    private void stubBookingPersistence() {
         when(bookingRepository.save(any(Booking.class))).thenAnswer(inv -> {
             Booking booking = inv.getArgument(0);
             booking.setId(100L);
@@ -164,6 +167,7 @@ class BookingServiceTest {
 
     @Test
     void createBooking_happyPath_derivesFromPlanAndConvertsIt() {
+        stubBookingPersistence();
         RentalPlan plan = quotedPlan(1L, LocalDateTime.now());
         when(rentalPlanRepository.findById(9L)).thenReturn(Optional.of(plan));
 
@@ -218,6 +222,7 @@ class BookingServiceTest {
     void createBooking_directItems_dayCountIsInclusiveOfBothEnds() {
         // Regression test for the day-math fix: DAYS.between had no +1, disagreeing with
         // DefaultPricingClient's quote-time math. Dec 1 -> Dec 4 must be 4 days, not 3.
+        stubBookingPersistence();
         Asset asset = new Asset();
         asset.setId(1L);
         asset.setBaseDailyRate(new BigDecimal("450.00"));
