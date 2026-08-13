@@ -5,7 +5,7 @@
 | **Document type** | Cross-cutting index — not a feature contract itself |
 | **Status** | As-built across `develop` (which now includes both former `HR-72` and `HR-80` work — see §3.1) + two branches merged in locally: `hr-27-payment-checkout` (§2.5) and `hr-40-equipment-utilization-tracker` (§2.4, this branch) |
 | **Module** | `heavy-rental-spring-rest-api` |
-| **Related specs** | [`SPEC-request-bearer-token.md`](./SPEC-request-bearer-token.md), [`SPEC-auth-login-logout.md`](./SPEC-auth-login-logout.md), [`SPEC-equipment-browse-api.md`](./SPEC-equipment-browse-api.md), [`SPEC-entity-repository.md`](./SPEC-entity-repository.md), [`SPEC-stripe.md`](./SPEC-stripe.md), [`SPEC-haystack-recommender-client.md`](./SPEC-haystack-recommender-client.md), [`SPEC-rental-plan-quote.md`](./SPEC-rental-plan-quote.md) |
+| **Related specs** | [`SPEC-request-bearer-token.md`](./SPEC-request-bearer-token.md), [`SPEC-auth-login-logout.md`](./SPEC-auth-login-logout.md), [`SPEC-equipment-browse-api.md`](./SPEC-equipment-browse-api.md), [`SPEC-entity-repository.md`](./SPEC-entity-repository.md), [`SPEC-stripe.md`](./SPEC-stripe.md), [`SPEC-haystack-recommender-client.md`](./SPEC-haystack-recommender-client.md), [`SPEC-rental-plan-quote.md`](./SPEC-rental-plan-quote.md), [`SPEC-admin-users-api.md`](./SPEC-admin-users-api.md) (§2.7 — branch-only, not merged), [`SPEC-pricing-estimate.md`](./SPEC-pricing-estimate.md) (§2.5.2 — design only, not built), [`SPEC-spring-proxy-endpoints.md`](./SPEC-spring-proxy-endpoints.md) (every route that does, or deliberately doesn't, call `haystack-fast-api`) |
 | **Environment context** | [`SPEC-project-environment.md`](./SPEC-project-environment.md) (read first) |
 
 This document is the **single place to see the entire REST surface** — every route, which client it's for, what branch it lives on, and which feature spec (if any) owns its detailed contract. It does not restate request/response shapes already documented elsewhere; it points to them.
@@ -39,22 +39,24 @@ Each feature-scoped SPEC (auth, equipment, …) remains the source of truth for 
 
 There is currently **one** login flow. No `platform`/`audience` field or web-vs-mobile distinction exists anywhere in the request, the JWT claims, or `SecurityConfig` — see §4.
 
-### 2.2 Mobile — bookings, deliveries, returns, payments
+**`POST /api/auth/logout` behavior, in brief (added 2026-08-13 — this route's server-side effect was previously only inferable by following the contract link, not visible from this index):** it is real **server-side token invalidation**, not a no-op and not merely an audit log. Confirmed against `AuthService.logout`/`TokenDenylist.java`: the caller's access-token `jti` is added to an in-memory denylist (keyed by `jti`, entry expires at the token's original `exp`), and `JwtDecoder` rejects any subsequently-presented denylisted `jti` — so the exact same access token cannot be reused after logout, verified end-to-end in `SPEC-auth-login-logout.md` §8 (reuse after logout → `401`). The denylist is process-local/in-memory (`SPEC-auth-login-logout.md` §10.3) — it does not survive an app restart and isn't shared across instances; that limitation is pre-existing and unchanged by this note. Full contract: [`SPEC-auth-login-logout.md`](./SPEC-auth-login-logout.md) §4.2 (denylist rules), §7.3 (logout processing), §6.2 (wire contract).
 
-Per branch author: every route in this section is for the **mobile** client.
+### 2.2 Mobile (+ two shared routes) — bookings, deliveries, returns, payments
 
-| Method | Path | Roles allowed | Status | Contract |
-|---|---|---|---|---|
-| `POST` | `/api/bookings` | `ROLE_USER`, `ROLE_ADMIN` (caller becomes the booking's customer) | 🧪 Branch `hr-27-payment-checkout` (local) | §2.2.1 below |
-| `GET` | `/api/bookings` | `ROLE_USER`, `ROLE_ADMIN` | ✅ Merged → `develop` | [`SPEC-booking-delivery-return-api.md`](./SPEC-booking-delivery-return-api.md) §5.2 |
-| `GET` | `/api/bookings/{bookingId}` | `ROLE_USER`, `ROLE_ADMIN` | ✅ Merged → `develop` | §5.2 |
-| `PUT` | `/api/bookings/{bookingId}` | `ROLE_USER`, `ROLE_ADMIN` | ✅ Merged → `develop` | §5.2 |
-| `GET` | `/api/deliveries` | `ROLE_USER`, `ROLE_ADMIN` | ✅ Merged → `develop` | §5.2 |
-| `PATCH` | `/api/deliveries/{bookingId}/status` | `ROLE_USER`, `ROLE_ADMIN` | ✅ Merged → `develop` | §5.2 |
-| `GET` | `/api/returns` | `ROLE_USER`, `ROLE_ADMIN` | ✅ Merged → `develop` | §5.2 |
-| `PATCH` | `/api/returns/{bookingId}/status` | `ROLE_USER`, `ROLE_ADMIN` | ✅ Merged → `develop` | §5.2 |
-| `POST` | `/api/payments/deposit-intent` | `ROLE_USER`, `ROLE_ADMIN` (booking owner or admin — enforced in `PaymentService`, not `SecurityConfig`) | 🧪 Branch `hr-27-payment-checkout` (local) | [`SPEC-stripe.md`](./SPEC-stripe.md) §6.1 |
-| `POST` | `/api/payments/webhook` | Public (Stripe-Signature verified) | 🧪 Branch `hr-27-payment-checkout` (local) | [`SPEC-stripe.md`](./SPEC-stripe.md) §6.2 |
+Per branch author: every route in this section was filed as **mobile**-only. **Corrected 2026-08-13** (web-portal audit): the React web portal calls `POST /api/bookings` and `POST /api/payments/deposit-intent` directly — confirmed against the portal's own request code, not inferred. Both are reclassified `Shared (mobile+web)` in the table below; the remaining eight routes are unaffected and stay mobile-only. Nothing server-side changes — `SecurityConfig`'s blanket rule already covers both clients equally (§4) — this is a documentation-ownership correction only.
+
+| Method | Path | Client | Roles allowed | Status | Contract |
+|---|---|---|---|---|---|
+| `POST` | `/api/bookings` | **Shared (mobile+web)** | `ROLE_USER`, `ROLE_ADMIN` (caller becomes the booking's customer) | 🧪 Branch `hr-27-payment-checkout` (local) | §2.2.1 below |
+| `GET` | `/api/bookings` | Mobile | `ROLE_USER`, `ROLE_ADMIN` | ✅ Merged → `develop` | [`SPEC-booking-delivery-return-api.md`](./SPEC-booking-delivery-return-api.md) §5.2 |
+| `GET` | `/api/bookings/{bookingId}` | Mobile | `ROLE_USER`, `ROLE_ADMIN` | ✅ Merged → `develop` | §5.2 |
+| `PUT` | `/api/bookings/{bookingId}` | Mobile | `ROLE_USER`, `ROLE_ADMIN` | ✅ Merged → `develop` | §5.2 |
+| `GET` | `/api/deliveries` | Mobile | `ROLE_USER`, `ROLE_ADMIN` | ✅ Merged → `develop` | §5.2 |
+| `PATCH` | `/api/deliveries/{bookingId}/status` | Mobile | `ROLE_USER`, `ROLE_ADMIN` | ✅ Merged → `develop` | §5.2 |
+| `GET` | `/api/returns` | Mobile | `ROLE_USER`, `ROLE_ADMIN` | ✅ Merged → `develop` | §5.2 |
+| `PATCH` | `/api/returns/{bookingId}/status` | Mobile | `ROLE_USER`, `ROLE_ADMIN` | ✅ Merged → `develop` | §5.2 |
+| `POST` | `/api/payments/deposit-intent` | **Shared (mobile+web)** | `ROLE_USER`, `ROLE_ADMIN` (booking owner or admin — enforced in `PaymentService`, not `SecurityConfig`) | 🧪 Branch `hr-27-payment-checkout` (local) | [`SPEC-stripe.md`](./SPEC-stripe.md) §6.1 |
+| `POST` | `/api/payments/webhook` | Mobile | Public (Stripe-Signature verified) | 🧪 Branch `hr-27-payment-checkout` (local) | [`SPEC-stripe.md`](./SPEC-stripe.md) §6.2 |
 
 All ten routes above now have a dedicated feature spec: the seven `develop`-merged ones via [`SPEC-booking-delivery-return-api.md`](./SPEC-booking-delivery-return-api.md) (written per the standalone-spec criterion in `SPEC-project-environment.md` §9.1), `POST /api/bookings` via §2.2.1 immediately below, and the two payments routes via [`SPEC-stripe.md`](./SPEC-stripe.md) (previously undocumented — see the correction below). `SPEC-entity-repository.md` still documents the underlying `Booking`/`Payment`/`DeliveryRecord`/`ReturnRecord` *entities* (§3.2/§10.7 of that file), but not their REST layer.
 
@@ -103,6 +105,8 @@ Per branch author: every route in this section is for the **web** client. `Equip
 
 No per-route restriction distinguishes admin-only write access on the equipment routes — any authenticated `ROLE_USER` or `ROLE_ADMIN` can create/edit/delete equipment, not just admins. Same blanket-rule caveat as everywhere else in this index (see §4).
 
+**`POST /api/rentalPlans/{id}/quote` does not call Haystack (corrected 2026-08-13).** A web-portal-facing reference document had separately stated this route proxies to Haystack; verified against `RentalPlanService`/`PricingClient`/`DefaultPricingClient` and found incorrect — see [`SPEC-rental-plan-quote.md`](./SPEC-rental-plan-quote.md) §5.0 for the full correction. Today this route is pure Spring-side arithmetic (`baseDailyRate × days`, summed from line items). A Haystack-backed `PricingClient` is designed but **not built** (same file, §5.1). Every Spring→Haystack proxy point (built or designed) is now tracked in one place: [`SPEC-spring-proxy-endpoints.md`](./SPEC-spring-proxy-endpoints.md).
+
 ### 2.4 Local, unpushed — `hr-27-payment-checkout` and `hr-40-equipment-utilization-tracker`
 
 `hr-27-payment-checkout` (see §2.2's payments rows) exists only on the machine it was rebased on as of 2026-08-11 — 8 commits ahead of `origin/hr-27-payment-checkout`, not pushed, not merged. It carries `develop`'s full route set (§2.1–§2.3) unchanged, plus the two payments routes and one fix made directly on this branch (CORS, below), not on `develop`. Two things worth knowing before treating this as equivalent to a `develop` merge:
@@ -124,7 +128,27 @@ Returns the trailing 6 calendar months' `{id, month, utilization, revenue}` (`Mo
 |---|---|---|
 | `platform` attribute on `LoginRequest` | ⏳ Not started | Branch `HR-85-implement-platform-attribute-in-login-request-body` exists but has **zero commits beyond `HR-77`** — it's an unstarted placeholder, not a design that's been written down anywhere yet. Likely the intended mechanism for distinguishing web vs mobile at login (see §4) once work begins. |
 
-**Removed 2026-08-13:** this table previously also listed `POST /api/pricing/estimate` and `POST /api/recommendations` as "⏳ Not started." Neither claim holds: `/api/pricing/estimate` was never built and has no matching Haystack endpoint to proxy — removed rather than left as a phantom placeholder. `/api/recommendations` was actually already implemented — under the real path `/api/recommendations/project-spec`, not bare `/api/recommendations` — see §2.6 below, which had already superseded this row without this row being deleted. (`SPEC-spring-proxy-endpoints.md`, the file that originally proposed both, was itself retired the same day — see [`SPEC-rental-plan-quote.md`](./SPEC-rental-plan-quote.md) §5.1/1.3.0 and [`SPEC-haystack-recommender-client.md`](./SPEC-haystack-recommender-client.md), which absorbed everything in it still relevant.)
+**Removed 2026-08-13:** this table previously also listed `POST /api/pricing/estimate` and `POST /api/recommendations` as "⏳ Not started." Neither claim held at the time: `/api/pricing/estimate` had never been built and had no matching Haystack endpoint to proxy — removed rather than left as a phantom placeholder. `/api/recommendations` was actually already implemented — under the real path `/api/recommendations/project-spec`, not bare `/api/recommendations` — see §2.6 below, which had already superseded this row without this row being deleted. (`SPEC-spring-proxy-endpoints.md`, the file that originally proposed both, was itself retired the same day — see [`SPEC-rental-plan-quote.md`](./SPEC-rental-plan-quote.md) §5.1/1.3.0 and [`SPEC-haystack-recommender-client.md`](./SPEC-haystack-recommender-client.md), which absorbed everything in it still relevant.) **`/api/pricing/estimate` reinstated below (2.5.2) as new, unrelated work** — a deliberate, Spring-only, non-Haystack pricing endpoint, not a resurrection of the phantom this note describes.
+
+### 2.5.1 Admin UI — write routes with no documented plan (not planned)
+
+**Added 2026-08-13** (web-portal audit): the admin UI needs write access on three resources where the backend currently only exposes reads (or nothing at all). Checked every branch in this repository (`git branch -a`, `git grep` for `@PutMapping`/`@PatchMapping`/`@DeleteMapping` across each) — none of the three below exist on any branch, merged or not, and no ticket/branch name references them. That makes them different from `HR-85` in §2.5 above (an unstarted branch at least *exists*, marking intent): these have **no plan anywhere**, not even a placeholder branch. Documented here as **explicitly not planned**, per the standing convention that a route gap must be recorded as either planned or not, never left silent.
+
+| Route(s) | Client | Status | Notes |
+|---|---|---|---|
+| `POST`/`PUT`/`PATCH`/`DELETE` `/api/depots` | Web (admin) | 🚫 Not planned | `DepotController` is a read-only stub (§2.3) — there is no `Depot` entity to write to; delivery-site fields live directly on `Booking`/`RentalPlan`. Adding writes here would mean designing a real `Depot` entity first, not just a new route. |
+| `PUT`/`PATCH`/`DELETE` `/api/rentalPlans/{id}` | Web (admin) | 🚫 Not planned | `RentalPlanController` (§2.3) has no admin-facing edit/cancel/delete on a plan itself — only customer-facing create/list/get/add-item/remove-item/quote (`SPEC-rental-plan-quote.md`) exist. |
+| `PATCH`/`DELETE` `/api/bookings/{id}` | Web (admin) | 🚫 Not planned | `BookingController` (§2.2) has `GET`/`PUT` only. `PUT` is a full-replace (§5, known issue), not a partial admin edit; there is no `DELETE`/cancel at all. |
+
+Recorded here rather than silently left out of this index, matching this index's own stated purpose (§0: "every route... which client it's for"). If/when the admin UI's write requirements for these three are scoped, replace the 🚫 row with a real branch/ticket reference per the §2.5 convention above.
+
+### 2.5.2 `POST /api/pricing/estimate` — new, Spring-only (not the removed phantom)
+
+See [`SPEC-pricing-estimate.md`](./SPEC-pricing-estimate.md) (new, 2026-08-13) for the full design. Distinct from both the phantom this section removed above and from `POST /api/rentalPlans/{id}/quote` (§2.3 — despite an external reference's claim otherwise, that route is *not* Haystack-backed either, see §5.0 correction in `SPEC-rental-plan-quote.md`) — this route is deliberately **pure Spring arithmetic, no Haystack call**, for a caller that wants a price without first creating/owning a `RentalPlan`.
+
+| Method | Path | Client | Status | Contract |
+|---|---|---|---|---|
+| `POST` | `/api/pricing/estimate` | Web | ⏳ Not started — design only | [`SPEC-pricing-estimate.md`](./SPEC-pricing-estimate.md) |
 
 ### 2.6 Web — recommender (S2b as-built)
 
@@ -142,6 +166,20 @@ Phase 2 / **S2b**: resilient Spring client for `haystack-fast-api`, saga, and th
 2. Call 2 `POST /internal/v1/recommendations/project-knowledge/getassetrecommendations`  
 then returns session handles + **Call 2 quote**.  
 Follow-up chatbot: Call 3 `POST .../project-knowledge/query` via knowledge-query. Also `GET /health` on the client.
+
+### 2.7 Admin — user management (`/api/users`, exists only on an unmerged remote branch)
+
+**Added 2026-08-13** (web-portal audit: "`/api/users` absent entirely — no route, no 'planned' entry, nothing"). That was true of this index, but not true of this repository: `/api/users` is fully designed, implemented, and manually verified end-to-end on `origin/36-link-rest-api-users-to-front-end` (latest commit `e79742d`) — it just never got a row here, and that branch is **not** merged into `develop` or rebased into this working tree (unlike `hr-27-payment-checkout`/`hr-40-equipment-utilization-tracker` in §2.4, whose code is actually present locally, this branch's `UserController`/`UserAdminService`/DTOs are not — confirmed via `git show <branch>:<path>`, not present in `src/main/java` on this branch).
+
+| Method | Path | Client | Roles allowed | Status | Contract |
+|---|---|---|---|---|---|
+| `GET` | `/api/users` | Web (admin) | `ROLE_ADMIN` only | 🌿 Branch `origin/36-link-rest-api-users-to-front-end`, not merged, not present in this working tree | [`SPEC-admin-users-api.md`](./SPEC-admin-users-api.md) |
+| `GET` | `/api/users/{id}` | Web (admin) | `ROLE_ADMIN` only | Same | Same |
+| `POST` | `/api/users` | Web (admin) | `ROLE_ADMIN` only | Same | Same |
+| `PATCH` | `/api/users/{id}` | Web (admin) | `ROLE_ADMIN` only | Same | Same |
+| `DELETE` | `/api/users/{id}` (soft-delete via `enabled=false`) | Web (admin) | `ROLE_ADMIN` only | Same | Same |
+
+[`SPEC-admin-users-api.md`](./SPEC-admin-users-api.md) is copied into this branch's `specification/` folder as of this change specifically to close this gap — its own header documents its provenance and the fact that the code it describes isn't in this working tree. This is the one route family in the whole index gated to `ROLE_ADMIN` alone rather than the usual `hasAnyAuthority("ROLE_USER","ROLE_ADMIN")` blanket rule (same precedent as `/api/monthly-utilization`, §2.4).
 
 ---
 
@@ -205,3 +243,4 @@ Moved to [`SPEC-booking-delivery-return-api.md`](./SPEC-booking-delivery-return-
 | 1.8.0 | 2026-08-12 | §2.6: project-spec runs Call 1 then Call 2 (`getassetrecommendations`); response carries Call 2 answer. |
 | 2.0.0 | 2026-08-12 | §2.6 Feasibility v2: Call 2 = recommend quote (`quoteRef`/`items`); knowledge-query = Call 3 `.../query` chatbot. |
 | 2.1.0 | 2026-08-13 | **Drift audit against source code.** §2.3: `RentalPlanController` was still described as a `🧱 Stub` at the old path `/api/rental-plans` returning `[]`; replaced with its real 6-route, camelCase `/api/rentalPlans` surface, cross-linked to [`SPEC-rental-plan-quote.md`](./SPEC-rental-plan-quote.md) (added to `Related specs`). §2.3's intro sentence, which still claimed none of `EquipmentController`/`DepotController`/`RentalPlanController` existed in the working tree, corrected to match §3.2's own finding that `HR-72` is merged. §2.4 retitled and extended to cover `hr-40-equipment-utilization-tracker` (the branch the header table already claimed lived there) and its `GET /api/monthly-utilization` route, previously undocumented anywhere in this index. §2.5: removed `POST /api/pricing/estimate` (never built, no matching Haystack endpoint) and `POST /api/recommendations` (stale — superseded by the real, already-implemented §2.6 routes). |
+| 2.2.0 | 2026-08-13 | **Web-portal API audit — nine items verified against source and documented.** (1) §2.2: `POST /api/bookings`/`POST /api/payments/deposit-intent` reclassified `Shared (mobile+web)`, confirmed the web portal calls both directly — were mislabeled mobile-only. (2) New §2.7 + new [`SPEC-admin-users-api.md`](./SPEC-admin-users-api.md): `/api/users` was absent from this index entirely; found fully built and verified on unmerged remote branch `origin/36-link-rest-api-users-to-front-end`, documented as branch-only, not present in this working tree. (3) New §2.5.1: `/api/depots` writes, `/api/rentalPlans/{id}` `PUT`/`PATCH`/`DELETE`, `/api/bookings/{id}` `PATCH`/`DELETE` — checked every branch in the repo, none exist anywhere; recorded as explicitly **not planned** rather than left silent. (4) §2.1: added an inline logout-behavior summary (denylist-based `jti` invalidation, confirmed against `TokenDenylist`/`AuthService`) so it's visible without following the link. (5)/(6) [`SPEC-haystack-recommender-client.md`](./SPEC-haystack-recommender-client.md) new §16: recorded that §5 of that file is the authoritative full portal contract (a separate portal-side doc only had a one-line gloss), and that no rental-date-range input exists in the Call 2 request path (`HR-111`, no branch yet). (7) [`SPEC-equipment-browse-api.md`](./SPEC-equipment-browse-api.md) 1.6.0: cross-checked `startDate`/`endDate` behavior against `EquipmentController`/`AssetService` directly — confirmed accurate, no divergence. (8) **Correction:** `POST /api/rentalPlans/{id}/quote` does **not** call Haystack — a portal-facing reference had stated otherwise; verified false against `RentalPlanService`/`PricingClient`, corrected here and in [`SPEC-rental-plan-quote.md`](./SPEC-rental-plan-quote.md) §5.0. (9) New §2.5.2 + new [`SPEC-pricing-estimate.md`](./SPEC-pricing-estimate.md) (design only, no code): a new, deliberate, Spring-only, non-Haystack `POST /api/pricing/estimate`, distinct from the phantom this index removed in 2.1.0 above; its availability-check-or-not question recorded as open, not resolved. |
