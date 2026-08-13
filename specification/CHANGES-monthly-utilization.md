@@ -91,3 +91,19 @@ Manual verification of the new per-asset `utilization` field (§4.2) caught `JLG
 **Result, verified live:** `JLG 460SJ Boom Lift` utilization dropped from `106.45161290322581%` to `96.7741935483871%` (`30/31 days`), and a fleet-wide sweep confirmed zero assets remain over `100%`. All previously-verified routes still `200` afterward.
 
 **Worth knowing:** this was one specific pair found by chance while spot-checking one asset. The underlying gap — `COMPLETED` bookings never blocking new bookings for the same window, with no separate "actual return date" tracked — is real in the live app too, not just this seed file, and could resurface for other assets or through genuine usage. Not fixed here; flagged for whoever owns booking/inventory logic next.
+
+### 4.5 `BookingItemLine` gained `assetId` — closes a real frontend crash risk
+
+Found while helping fix the web portal's admin `BookingsTab`/`AdminDataContext`: the real `GET /api/bookings`/`{id}` response's `items[]` only carried `assetName`/`serialNumber`, no numeric asset id at all. The frontend's `Booking` type assumed `equipmentIds: number[]`, which doesn't exist on the real response — `AdminDataContext.tsx`'s `mapBookingRow` called `b.equipmentIds.map(...)` directly, which throws `TypeError: Cannot read properties of undefined (reading 'map')` in real API mode. Matching an asset by name alone (the only other option) is fragile if two assets ever share a name.
+
+**Fix:** `BookingItemLine` (`dto/BookingItemLine.java`) gained a `Long assetId` field, populated from `item.getAsset().getId()` in `BookingMapper.toItemLines()` — the single shared method behind `BookingResponse`, `DeliveryItemResponse`, and `ReturnItemResponse`, so all three now carry it consistently. `BookingMapperTest.java`'s two affected assertions updated (`assetId` is `null` in those cases since the test `Asset` objects never set an id — not asserted on, so no behavior change).
+
+Verified live: `GET /api/bookings/1` now returns `"items": [{"assetId": 5, "assetName": "JLG 460SJ Boom Lift", ...}, ...]`. Full regression sweep after (`/api/users`, `/api/rentalPlans`, `/api/monthly-utilization`, `/api/equipment`, `/api/bookings`, `/api/depots`, `/api/deliveries`, `/api/returns`) — all still `200`.
+
+**Not fixed here, flagged for the frontend side:** this backend change unblocks the fix, but `AdminDataContext.tsx`/`BookingsTab.tsx`/`OverviewTab.tsx` still need their own rewrite to actually use `bookingId`/`bookingStatus`/`items[].assetName` instead of the old mock-shaped fields (`id`/`status`/`equipmentIds`) — held off on this branch since it might overlap with a teammate's in-progress booking work on the portal side.
+
+### 4.6 Frontend: `POST /api/auth/logout` now actually called (portal-side fix, verified against this backend)
+
+Not a change to this repo's code, but verified against this backend, so recorded here for traceability. The web portal's `handleLogout` (`src/App.tsx`) previously only cleared the local session — it never called the real, merged `POST /api/auth/logout` route, so a token remained valid server-side for its full 60-minute life even after a user "logged out." Portal-side fix: added `logout()` to `src/app/api.ts` (`POST /auth/logout`, reusing `request()`'s automatic `Authorization` header), and `handleLogout` now calls it when `MODE === "api"` — fire-and-forget (`.catch()`-swallowed, not awaited) and called *before* `setAuthToken(null)`, so the revoke request goes out authenticated.
+
+**Verified end-to-end against this backend**, not just that the call succeeds: logged in, confirmed the fresh token worked (`GET /api/equipment` → `200`), called `POST /api/auth/logout` with it (`200`, `"Logged out successfully"`), then reused the *same* token again — `401`. Confirms `TokenDenylist` (`security/TokenDenylist.java`) genuinely revokes the token immediately, not just that the endpoint returns success.

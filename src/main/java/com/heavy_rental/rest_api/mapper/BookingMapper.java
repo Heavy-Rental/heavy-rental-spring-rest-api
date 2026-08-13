@@ -57,6 +57,7 @@ public class BookingMapper {
         return items.stream()
                 .sorted(Comparator.comparing(BookingItem::getId))
                 .map(item -> new BookingItemLine(
+                        item.getAsset() != null ? item.getAsset().getId() : null,
                         item.getAsset() != null ? item.getAsset().getName() : "",
                         item.getAsset() != null ? item.getAsset().getSerialno() : ""))
                 .toList();
