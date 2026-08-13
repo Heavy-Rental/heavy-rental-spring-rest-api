@@ -168,6 +168,15 @@ public class BookingService {
         return toResponse(booking);
     }
 
+    @Transactional
+    public BookingResponse updateStatus(Long bookingId, String requestedStatus) {
+        Booking booking = findByIdOr404(bookingId);
+        Booking.BookingStatus status = parseStatusOr400(requestedStatus);
+        booking.setStatus(status);
+        bookingRepository.save(booking);
+        return toResponse(booking);
+    }
+
     private BookingResponse toResponse(Booking booking) {
         return mapper.toBookingResponse(booking, bookingItemRepository.findByBookingId(booking.getId()));
     }
