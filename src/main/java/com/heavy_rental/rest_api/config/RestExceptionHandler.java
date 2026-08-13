@@ -8,6 +8,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.core.AuthenticationException;
+import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.server.ResponseStatusException;
@@ -39,6 +40,15 @@ public class RestExceptionHandler {
 	public ResponseEntity<Map<String, String>> handleAuthentication(AuthenticationException ex) {
 		return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
 				.body(error("unauthorized", ex.getMessage() != null ? ex.getMessage() : "Authentication failed"));
+	}
+
+	@ExceptionHandler(MethodArgumentNotValidException.class)
+	public ResponseEntity<Map<String, String>> handleValidation(MethodArgumentNotValidException ex) {
+		String message = ex.getBindingResult().getFieldErrors().stream()
+				.findFirst()
+				.map(fe -> fe.getField() + " " + fe.getDefaultMessage())
+				.orElse("Validation failed");
+		return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error("bad_request", message));
 	}
 
 	@ExceptionHandler(ResponseStatusException.class)

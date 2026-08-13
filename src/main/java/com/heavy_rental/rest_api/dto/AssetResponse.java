@@ -1,9 +1,10 @@
 package com.heavy_rental.rest_api.dto;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.List;
 
-public record EquipmentResponse(
+public record AssetResponse(
         Long id,
         String name,
         String category,
@@ -18,6 +19,8 @@ public record EquipmentResponse(
         String desc,
         String img,
         String location,
-        List<String> tags) {
+        List<String> tags,
+        String serialno,
+        LocalDateTime lastConditionUpdatedAt) {
 
 }

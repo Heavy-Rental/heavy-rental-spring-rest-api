@@ -2,8 +2,10 @@ package com.heavy_rental.rest_api.service;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -13,8 +15,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
-import com.heavy_rental.rest_api.dto.EquipmentRequest;
-import com.heavy_rental.rest_api.dto.EquipmentResponse;
+import com.heavy_rental.rest_api.dto.AssetImageRequest;
+import com.heavy_rental.rest_api.dto.AssetRequest;
+import com.heavy_rental.rest_api.dto.AssetResponse;
 import com.heavy_rental.rest_api.entity.Asset;
 import com.heavy_rental.rest_api.entity.AssetCategory;
 import com.heavy_rental.rest_api.entity.AssetImage;
@@ -29,6 +32,7 @@ import com.heavy_rental.rest_api.repository.BookingItemRepository;
 public class AssetService {
 
     private static final String JPEG_DATA_URI_PREFIX = "data:image/jpeg;base64,";
+    private static final int MAX_IMAGE_BASE64_LENGTH = 7_000_000;
 
     private final AssetRepository assetRepository;
     private final AssetCategoryRepository assetCategoryRepository;
@@ -46,8 +50,8 @@ public class AssetService {
     }
 
     @Transactional(readOnly = true)
-    public List<EquipmentResponse> browse(String category, String search, String condition,
-                                           LocalDate startDate, LocalDate endDate) {
+    public List<AssetResponse> browse(String category, String search, String condition,
+                                       LocalDate startDate, LocalDate endDate) {
         List<Asset> assets;
         if (category != null) {
             AssetCategory found = assetCategoryRepository.findByName(category);
@@ -86,7 +90,7 @@ public class AssetService {
     }
 
     @Transactional(readOnly = true)
-    public EquipmentResponse getById(Long id, LocalDate startDate, LocalDate endDate) {
+    public AssetResponse getById(Long id, LocalDate startDate, LocalDate endDate) {
         Asset asset = assetRepository.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Asset not found"));
 
@@ -98,33 +102,53 @@ public class AssetService {
     }
 
     @Transactional
-    public EquipmentResponse create(EquipmentRequest request) {
+    public AssetResponse create(AssetRequest request) {
+        if (assetRepository.existsByName(request.name())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Asset name already in use: " + request.name());
+        }
         AssetCategory category = resolveCategory(request.categoryId());
 
         Asset asset = new Asset();
         applyRequest(asset, request, category);
+        if (asset.getCondition() != null) {
+            asset.setLastConditionUpdatedAt(LocalDateTime.now());
+        }
         Asset saved = assetRepository.save(asset);
 
         return toResponse(saved, null, true);
     }
 
     @Transactional
-    public EquipmentResponse replace(Long id, EquipmentRequest request) {
+    public AssetResponse replace(Long id, AssetRequest request) {
         Asset asset = assetRepository.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Asset not found"));
+        if (assetRepository.existsByNameAndIdNot(request.name(), id)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Asset name already in use: " + request.name());
+        }
         AssetCategory category = resolveCategory(request.categoryId());
+        ConditionType oldCondition = asset.getCondition();
         applyRequest(asset, request, category);
+        if (!Objects.equals(oldCondition, asset.getCondition())) {
+            asset.setLastConditionUpdatedAt(LocalDateTime.now());
+        }
         Asset saved = assetRepository.save(asset);
 
         return toResponse(saved, firstImage(id), true);
     }
 
     @Transactional
-    public EquipmentResponse patch(Long id, EquipmentRequest request) {
+    public AssetResponse patch(Long id, AssetRequest request) {
         Asset asset = assetRepository.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Asset not found"));
 
-        if (request.name() != null) asset.setName(request.name());
+        if (request.name() != null) {
+            if (!request.name().equals(asset.getName())
+                    && assetRepository.existsByNameAndIdNot(request.name(), id)) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT,
+                        "Asset name already in use: " + request.name());
+            }
+            asset.setName(request.name());
+        }
         if (request.serialno() != null) asset.setSerialno(request.serialno());
         if (request.categoryId() != null) asset.setCategory(resolveCategory(request.categoryId()));
         if (request.capacity() != null) asset.setCapacity(request.capacity());
@@ -133,7 +157,13 @@ public class AssetService {
         if (request.baseDailyRate() != null) asset.setBaseDailyRate(request.baseDailyRate());
         if (request.minDailyRate() != null) asset.setMinDailyRate(request.minDailyRate());
         if (request.maxDailyRate() != null) asset.setMaxDailyRate(request.maxDailyRate());
-        if (request.condition() != null) asset.setCondition(parseCondition(request.condition()));
+        if (request.condition() != null) {
+            ConditionType parsed = parseCondition(request.condition());
+            if (parsed != asset.getCondition()) {
+                asset.setLastConditionUpdatedAt(LocalDateTime.now());
+            }
+            asset.setCondition(parsed);
+        }
         if (request.purchaseYear() != null) asset.setPurchaseYear(request.purchaseYear());
         if (request.location() != null) asset.setLocation(request.location());
 
@@ -160,6 +190,32 @@ public class AssetService {
         }
     }
 
+    @Transactional
+    public AssetResponse uploadImage(Long id, AssetImageRequest request) {
+        Asset asset = assetRepository.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Asset not found"));
+
+        if (request.image() == null || request.image().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "image is required");
+        }
+        if (request.image().length() > MAX_IMAGE_BASE64_LENGTH) {
+            throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, "image payload too large");
+        }
+
+        List<AssetImage> existing = assetImageRepository.findByAssetId(id);
+        if (!existing.isEmpty()) {
+            assetImageRepository.deleteAll(existing);
+        }
+
+        AssetImage image = new AssetImage();
+        image.setAsset(asset);
+        image.setImage(request.image());
+        image.setUploadedAt(LocalDateTime.now());
+        AssetImage saved = assetImageRepository.save(image);
+
+        return toResponse(asset, saved, true);
+    }
+
     private AssetCategory resolveCategory(Long categoryId) {
         if (categoryId == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "categoryId is required");
@@ -169,7 +225,7 @@ public class AssetService {
                         "Unknown categoryId: " + categoryId));
     }
 
-    private void applyRequest(Asset asset, EquipmentRequest request, AssetCategory category) {
+    private void applyRequest(Asset asset, AssetRequest request, AssetCategory category) {
         asset.setName(request.name());
         asset.setSerialno(request.serialno());
         asset.setCategory(category);
@@ -229,8 +285,8 @@ public class AssetService {
         return image != null ? JPEG_DATA_URI_PREFIX + image.getImage() : null;
     }
 
-    private EquipmentResponse toResponse(Asset asset, AssetImage image, Boolean available) {
-        return new EquipmentResponse(
+    private AssetResponse toResponse(Asset asset, AssetImage image, Boolean available) {
+        return new AssetResponse(
                 asset.getId(),
                 asset.getName(),
                 asset.getCategory().getName(),
@@ -245,7 +301,9 @@ public class AssetService {
                 asset.getDescription(),
                 toDataUri(image),
                 asset.getLocation(),
-                List.of());
+                List.of(),
+                asset.getSerialno(),
+                asset.getLastConditionUpdatedAt());
 
     }
 }

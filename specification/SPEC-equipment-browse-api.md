@@ -3,14 +3,14 @@
 | Field | Value |
 |-------|--------|
 | **Feature** | REST API for browsing and managing rentable equipment (`Asset`), including photos |
-| **Status** | Implemented, build verified (`mvnw compile` exit 0); manual/curl verification against a running app not yet run — see §8 |
+| **Status** | Implemented, build + full test suite verified (`mvnw test`, 61/61 passing including new `AssetAdminIntegrationTest`) — see §8 |
 | **Module** | `heavy-rental-spring-rest-api` |
-| **Endpoints** | `GET/POST /api/equipment`, `GET/PUT/PATCH/DELETE /api/equipment/{id}` |
+| **Endpoints** | `GET/POST /api/assets`, `GET/PUT/PATCH/DELETE /api/assets/{id}`, `PUT /api/assets/{id}/image` |
 | **Depends on** | [`SPEC-entity-repository.md`](./SPEC-entity-repository.md) (`Asset`/`AssetCategory`/`AssetImage`/`Booking`/`BookingItem`), [`SPEC-seed-data.md`](./SPEC-seed-data.md) (image encoding provenance), [`SPEC-auth-login-logout.md`](./SPEC-auth-login-logout.md) (access token required to call these routes) |
 | **Environment context** | [`SPEC-project-environment.md`](./SPEC-project-environment.md) (read first) |
-| **Related code** | `controller/EquipmentController.java`, `service/AssetService.java`, `dto/EquipmentResponse.java`, `dto/EquipmentRequest.java`, `repository/AssetRepository.java`, `repository/AssetImageRepository.java`, `repository/BookingItemRepository.java` |
+| **Related code** | `controller/AssetController.java`, `service/AssetService.java`, `dto/AssetResponse.java`, `dto/AssetRequest.java`, `dto/AssetImageRequest.java`, `repository/AssetRepository.java`, `repository/AssetImageRepository.java`, `repository/BookingItemRepository.java` |
 
-This document is the **single source of truth** for the `/api/equipment` REST surface: what it returns, how equipment photos are encoded for the client, how availability is computed, and delete semantics given this codebase has no cascading deletes.
+This document is the **single source of truth** for the `/api/assets` REST surface (renamed from `/api/equipment` 2026-08-13 — see §9/§10): what it returns, how equipment photos are encoded for the client, how availability is computed, and delete semantics given this codebase has no cascading deletes.
 
 ---
 
@@ -20,10 +20,10 @@ Before this feature, the backend had no equipment-facing endpoint — the siblin
 
 When this feature is correct:
 
-1. `GET /api/equipment` returns every asset (optionally filtered) with a photo array the frontend can drop directly into `<img src="...">`, with no client-side transformation.
+1. `GET /api/assets` returns every asset (optionally filtered) with a photo array the frontend can drop directly into `<img src="...">`, with no client-side transformation.
 2. `available` reflects real booking overlap for a given date window, not a hardcoded value.
 3. Deleting an asset with dependent rows fails with a clear `409`, not a raw DB stack trace.
-4. All existing auth/security posture is reused unchanged — no `SecurityConfig` edits.
+4. Writes (`POST`/`PUT`/`PATCH`/`DELETE`/image upload) are restricted to `ROLE_ADMIN`; `GET` remains open to any authenticated user (**changed 2026-08-13** — see §9/§10; originally this feature reused the existing catch-all rule with no admin distinction).
 
 ---
 
@@ -31,21 +31,24 @@ When this feature is correct:
 
 ### 2.1 In scope
 
-- `GET /api/equipment` — list/browse with optional `category`, `search`, `condition`, `startDate`, `endDate` filters.
-- `GET /api/equipment/{id}` — single asset lookup.
-- `POST /api/equipment` — create.
-- `PUT /api/equipment/{id}` — full replace.
-- `PATCH /api/equipment/{id}` — partial update.
-- `DELETE /api/equipment/{id}` — delete, with dependent-row conflict handling.
+- `GET /api/assets` — list/browse with optional `category`, `search`, `condition`, `startDate`, `endDate` filters.
+- `GET /api/assets/{id}` — single asset lookup.
+- `POST /api/assets` — create (`ROLE_ADMIN` only).
+- `PUT /api/assets/{id}` — full replace (`ROLE_ADMIN` only).
+- `PATCH /api/assets/{id}` — partial update (`ROLE_ADMIN` only).
+- `DELETE /api/assets/{id}` — delete, with dependent-row conflict handling (`ROLE_ADMIN` only).
+- `PUT /api/assets/{id}/image` — upload/replace an asset's photo (`ROLE_ADMIN` only, added 2026-08-13 — see §7.6).
 - Server-side conversion of stored base64 image data into browser-renderable data URIs.
 - Availability computation from `BookingItem`/`Booking` overlap.
+- Duplicate-`name` conflict handling on create/replace/rename-via-patch (added 2026-08-13 — see §9).
+- Bean-validation on required `AssetRequest` fields (added 2026-08-13 — see §9).
 
 ### 2.2 Out of scope
 
-- `SecurityConfig` changes — the existing catch-all `hasAnyAuthority("ROLE_USER","ROLE_ADMIN")` rule already covers these new routes.
-- Frontend changes — pointing the React portal's `VITE_API_TARGET` at this backend and swapping its mock `issueSession()` for a real `/api/auth/login` call live in the separate `heavy-rental-web-portal` repo.
-- Pagination, thumbnails, or a separate image-only endpoint — every `browse()` call returns full-size images inline for all matching assets (~4.6MB total across the 27 seeded images per `SPEC-seed-data.md` §6.3, as of that spec's 2.0.0 reseed). Acceptable at this scale; flagged as a future concern if the catalog grows further.
+- Frontend changes — the React portal's `equipmentApi` still calls `/api/equipment` as of this change; updating it to `/api/assets` (and consuming the new `serialno`/`lastConditionUpdatedAt`/image-upload capability) is a separate, not-yet-scoped frontend change. See [`CHANGES-admin-asset-records.md`](./CHANGES-admin-asset-records.md).
+- Pagination, thumbnails, or a separate image-only *read* endpoint — every `browse()` call returns full-size images inline for all matching assets (~4.6MB total across the 27 seeded images per `SPEC-seed-data.md` §6.3, as of that spec's 2.0.0 reseed). Acceptable at this scale; flagged as a future concern if the catalog grows further.
 - An `AssetImage.mimeType` column — see §3.4.
+- Admin CRUD for `AssetCategory` — only reads exist today; out of scope for this change.
 
 ---
 
@@ -57,9 +60,9 @@ When this feature is correct:
 
 ### 3.2 Decision
 
-`EquipmentResponse.img` is a **single string** (`String`, not `List<String>`) — confirmed against the frontend's actual `Equipment` type (`src/app/types.ts` in `heavy-rental-react-web-portal`), which declares `img: string`. An earlier draft of this plan assumed an array without checking that type; corrected here.
+`AssetResponse.img` is a **single string** (`String`, not `List<String>`) — confirmed against the frontend's actual `Equipment` type (`src/app/types.ts` in `heavy-rental-react-web-portal`), which declares `img: string`. An earlier draft of this plan assumed an array without checking that type; corrected here.
 
-`AssetService` fetches one `AssetImage` per asset (`firstImage(assetId)` / a batched `loadImageByAssetId` for `browse()`) and prepends `data:image/jpeg;base64,` when mapping to `EquipmentResponse.img`:
+`AssetService` fetches one `AssetImage` per asset (`firstImage(assetId)` / a batched `loadImageByAssetId` for `browse()`) and prepends `data:image/jpeg;base64,` when mapping to `AssetResponse.img`:
 
 ```java
 private static final String JPEG_DATA_URI_PREFIX = "data:image/jpeg;base64,";
@@ -75,7 +78,11 @@ An asset with no image row returns `img: null`.
 
 `asset_images` originally seeded 2 rows for CAT 320 Excavator (asset id 1) and 1 row for every other asset. Since the API now exposes exactly one photo per equipment item, the second CAT 320 row was deleted from `data.sql` rather than kept-but-unused — every asset now has exactly 1 `asset_images` row, 8 rows total (down from 9). See `SPEC-seed-data.md` §6.3 (updated in the same change).
 
-This keeps `AssetImage` a pure persistence mapping (no HTTP-representation logic on the entity, consistent with every other entity in this codebase) and keeps `EquipmentResponse` a plain, behavior-free record (consistent with `LoginResponse`/`MessageResponse`). The service — which already owns all `Asset → EquipmentResponse` mapping — is where this one extra line belongs.
+This keeps `AssetImage` a pure persistence mapping (no HTTP-representation logic on the entity, consistent with every other entity in this codebase) and keeps `AssetResponse` a plain, behavior-free record (consistent with `LoginResponse`/`MessageResponse`). The service — which already owns all `Asset → AssetResponse` mapping — is where this one extra line belongs.
+
+### 3.2.2 `AssetImage` write path (added 2026-08-13)
+
+Before this change, `AssetImage` rows only ever came from seed data — there was no endpoint to create, replace, or remove one. `PUT /api/assets/{id}/image` (§7.6) closes that gap: `AssetService.uploadImage(id, request)` deletes any existing `AssetImage` row(s) for that asset (enforcing "at most one image per asset," matching `firstImage()`'s existing "first found" assumption) and inserts the new one. Request body is `{"image": "<raw base64, no data: prefix>"}` — a plain JSON string, consistent with how `AssetImage.image` is already stored, and consistent with this codebase using no multipart uploads anywhere else. Capped at 7,000,000 base64 characters (~5MB raw image) — `413 Payload Too Large` beyond that, enforced in `AssetService` and backed by `server.tomcat.max-http-form-post-size=10MB` in `application.properties` so Tomcat doesn't reject the request body before it reaches the controller.
 
 ### 3.3 Why hardcoding `image/jpeg` is correct today
 
@@ -122,7 +129,7 @@ Set<Long> findAssetIdsWithOverlappingBooking(...);
 | Both | Uses the given window; `available` is `true`/`false` |
 | Only one | `400 Bad Request` — "Both startDate and endDate must be provided together" |
 
-`resolveAvailabilityWindow(startDate, endDate)` (`AssetService.java`) returns `null`, not a two-`LocalDate.now()` window, when both params are omitted — `browse()`/`getById()` then pass `available = null` straight through to `EquipmentResponse` rather than computing today's overlap. `EquipmentResponse.available` is `Boolean` (nullable), not `boolean`, to carry that third state.
+`resolveAvailabilityWindow(startDate, endDate)` (`AssetService.java`) returns `null`, not a two-`LocalDate.now()` window, when both params are omitted — `browse()`/`getById()` then pass `available = null` straight through to `AssetResponse` rather than computing today's overlap. `AssetResponse.available` is `Boolean` (nullable), not `boolean`, to carry that third state.
 
 ---
 
@@ -157,16 +164,18 @@ No entity in this data model has `@OneToMany`/cascade (`SPEC-entity-repository.m
 
 ## 7. API contracts
 
-### 7.1 `GET /api/equipment`
+### 7.1 `GET /api/assets`
 
 ```http
-GET /api/equipment?category=Excavator&search=cat&condition=GOOD&startDate=2026-08-10&endDate=2026-08-15 HTTP/1.1
+GET /api/assets?category=Excavator&search=cat&condition=GOOD&startDate=2026-08-10&endDate=2026-08-15 HTTP/1.1
 Authorization: Bearer <access-jwt>
 ```
 
+Roles: `ROLE_USER`, `ROLE_ADMIN` (unrestricted read, unchanged by the 2026-08-13 admin-gating change — see §9).
+
 All query params optional. `category` matches `AssetCategory.name` exactly (400 if unknown); `search` is a case-insensitive substring match on `Asset.name`; `condition` matches `ConditionType` case-insensitively (400 if invalid); `startDate`/`endDate` are ISO dates, must be given together or omitted together (see §4.3).
 
-**Success `200`** — array of `EquipmentResponse`:
+**Success `200`** — array of `AssetResponse`:
 
 ```json
 [
@@ -185,7 +194,9 @@ All query params optional. `category` matches `AssetCategory.name` exactly (400 
     "desc": "...",
     "img": "data:image/jpeg;base64,/9j/4AAQSkZJRg...",
     "location": "Tuas",
-    "tags": []
+    "tags": [],
+    "serialno": "SN-EXC-2021-0001",
+    "lastConditionUpdatedAt": "2026-08-13T09:15:00"
   }
 ]
 ```
@@ -194,17 +205,21 @@ All query params optional. `category` matches `AssetCategory.name` exactly (400 
 
 `img` is `null` for an asset with no image row (e.g. a freshly created one — see §7.3).
 
-`tags` is always `[]` today — `EquipmentResponse.tags` exists on the DTO but `AssetService` never populates it from anything (`Asset` has no tags column/relation). Present in every response for forward-compatibility; not yet backed by real data.
+`tags` is always `[]` today — `AssetResponse.tags` exists on the DTO but `AssetService` never populates it from anything (`Asset` has no tags column/relation). Present in every response for forward-compatibility; not yet backed by real data.
 
-### 7.2 `GET /api/equipment/{id}`
+`serialno` and `lastConditionUpdatedAt` **added 2026-08-13** — both were already columns on the `Asset` entity but were never returned by the response DTO before this change (the frontend's admin "Asset Records" tab had been synthesizing both client-side as a workaround). `lastConditionUpdatedAt` is `null` until `condition` is first set, then auto-stamped server-side (never client-supplied) whenever `condition` actually changes — see §9.
 
-Same optional `startDate`/`endDate` params. `404` if the id doesn't exist. Returns a single `EquipmentResponse`.
+### 7.2 `GET /api/assets/{id}`
 
-### 7.3 `POST /api/equipment`
+Roles: `ROLE_USER`, `ROLE_ADMIN`. Same optional `startDate`/`endDate` params. `404` if the id doesn't exist. Returns a single `AssetResponse`.
+
+### 7.3 `POST /api/assets`
+
+Roles: **`ROLE_ADMIN` only** (changed 2026-08-13 — previously any authenticated user; see §9).
 
 ```http
-POST /api/equipment HTTP/1.1
-Authorization: Bearer <access-jwt>
+POST /api/assets HTTP/1.1
+Authorization: Bearer <admin-access-jwt>
 Content-Type: application/json
 
 {
@@ -223,19 +238,41 @@ Content-Type: application/json
 }
 ```
 
-**DTO:** `EquipmentRequest(name, serialno, categoryId, baseDailyRate, minDailyRate, maxDailyRate, capacity, platformHeight, purchaseYear, condition, desc, location)`
+**DTO:** `AssetRequest(name, serialno, categoryId, baseDailyRate, minDailyRate, maxDailyRate, capacity, platformHeight, purchaseYear, condition, desc, location)` — `name`/`serialno` (`@NotBlank`) and `categoryId`/`baseDailyRate`/`minDailyRate`/`maxDailyRate` (`@NotNull`) are now bean-validated on `POST`/`PUT` (added 2026-08-13; not on `PATCH` — see §9).
 
-`201 Created` — `EquipmentResponse` with `img: null` and `available: true` (no image/bookings exist yet for a newly created asset). `400` if `categoryId` is missing or unknown.
+`201 Created` — `AssetResponse` with `img: null` and `available: true` (no image/bookings exist yet for a newly created asset); `lastConditionUpdatedAt` set to the creation time if `condition` was given, else `null`. `400` if `categoryId` is missing/unknown, or if a `@NotBlank`/`@NotNull` field is missing. `409` if `name` collides with an existing asset (added 2026-08-13).
 
-### 7.4 `PUT /api/equipment/{id}` / `PATCH /api/equipment/{id}`
+### 7.4 `PUT /api/assets/{id}` / `PATCH /api/assets/{id}`
 
-Same `EquipmentRequest` body. `PUT` replaces every field unconditionally; `PATCH` only overwrites fields present (non-null) in the request body. Both return `200` with the updated `EquipmentResponse` (images unchanged, `available` hardcoded `true` — same as `POST`, not date-window-computed; corrected 2026-08-13, was previously documented as "recomputed for today"). `404` if the id doesn't exist; `400` if `categoryId`/`condition` given but invalid.
+Roles: **`ROLE_ADMIN` only** (changed 2026-08-13 — previously any authenticated user; see §9).
 
-### 7.5 `DELETE /api/equipment/{id}`
+Same `AssetRequest` body (`PUT` is bean-validated like `POST`; `PATCH` deliberately is not, since its "null means unchanged" contract is incompatible with required-field validation). `PUT` replaces every field unconditionally; `PATCH` only overwrites fields present (non-null) in the request body. Both return `200` with the updated `AssetResponse` (images unchanged, `available` hardcoded `true` — same as `POST`, not date-window-computed; corrected 2026-08-13, was previously documented as "recomputed for today"). `404` if the id doesn't exist; `400` if `categoryId`/`condition` given but invalid; `409` if the (new) `name` collides with a different existing asset (added 2026-08-13 — applies to both a `PUT` rename and a `PATCH` that includes `name`).
+
+Condition-change stamping (added 2026-08-13): if the request's `condition` differs from the asset's current condition, `lastConditionUpdatedAt` is set to the current server time; if it's the same value (or omitted on `PATCH`), the timestamp is left untouched.
+
+### 7.5 `DELETE /api/assets/{id}`
+
+Roles: **`ROLE_ADMIN` only** (changed 2026-08-13 — previously any authenticated user; see §9).
 
 `204 No Content` on success. `404` if the id doesn't exist. `409` if dependent rows block the delete (see §6).
 
-### 7.6 Shared errors
+### 7.6 `PUT /api/assets/{id}/image` (added 2026-08-13)
+
+Roles: **`ROLE_ADMIN` only**.
+
+```http
+PUT /api/assets/1/image HTTP/1.1
+Authorization: Bearer <admin-access-jwt>
+Content-Type: application/json
+
+{ "image": "<raw base64, no data: prefix>" }
+```
+
+**DTO:** `AssetImageRequest(image)` — `image` is `@NotBlank`.
+
+Replaces any existing photo(s) for the asset (at most one is kept — see §3.2.2) and returns `200` with the updated `AssetResponse`, whose `img` reflects the newly uploaded photo as a `data:image/jpeg;base64,...` URI. `404` if the asset doesn't exist. `400` if `image` is missing/blank. `413 Payload Too Large` if the base64 payload exceeds ~7,000,000 characters (~5MB raw image).
+
+### 7.7 Shared errors
 
 ```json
 { "error": "<code>", "message": "<reason>" }
@@ -245,8 +282,10 @@ Same `EquipmentRequest` body. `PUT` replaces every field unconditionally; `PATCH
 |------|-----------------|
 | `400` | `bad_request` |
 | `401` | `unauthorized` (no/invalid Bearer — same posture as every other route) |
+| `403` | `forbidden` (non-admin token on an admin-only write route — added 2026-08-13) |
 | `404` | `not_found` |
 | `409` | `conflict` |
+| `413` | `payload_too_large` (image upload only) |
 
 ---
 
@@ -256,13 +295,17 @@ Same `EquipmentRequest` body. `PUT` replaces every field unconditionally; `PATCH
 
 - [ ] `./mvnw compile` (or `spring-boot:run`) builds with no errors.
 - [ ] No Bearer → `401` on every route.
-- [ ] `GET /api/equipment` with valid access token → `200`, 27 seeded assets, each `img` value starts with `data:image/jpeg;base64,`.
+- [ ] `GET /api/assets` with valid access token → `200`, 27 seeded assets, each `img` value starts with `data:image/jpeg;base64,`.
 - [ ] An `img` value, base64-decoded after stripping the prefix, is a valid JPEG (including asset id 4 — previously the mislabeled PNG).
-- [ ] `GET /api/equipment/{id}?startDate=...&endDate=...` reflects real booking overlap (seeded `booking_items`/`bookings` data — see `SPEC-seed-data.md` §6.6/§6.7 — should show `available:false` for an asset/date window matching an active seeded booking).
+- [ ] `GET /api/assets/{id}?startDate=...&endDate=...` reflects real booking overlap (seeded `booking_items`/`bookings` data — see `SPEC-seed-data.md` §6.6/§6.7 — should show `available:false` for an asset/date window matching an active seeded booking).
 - [ ] `category=<unknown>` → `400`.
 - [ ] `startDate` given without `endDate` (or vice versa) → `400`.
 - [ ] `DELETE` on an asset referenced by seeded `booking_items` → `409`, not a raw DB error.
 - [ ] `DELETE` on an asset with no dependents → `204`, then a subsequent `GET` on that id → `404`.
+- [ ] A non-admin (`ROLE_USER`) token: `GET /api/assets` → `200`; `POST`/`PUT`/`PATCH`/`DELETE /api/assets*` and `PUT /api/assets/{id}/image` → `403` (added 2026-08-13).
+- [ ] An admin (`ROLE_ADMIN`) token: all six write verbs succeed (added 2026-08-13).
+- [ ] Duplicate `name` on `POST`/`PUT` → `409` (added 2026-08-13).
+- [ ] Automated coverage for all of the above: `./mvnw test -Dtest=AssetAdminIntegrationTest` (added 2026-08-13, 15 tests).
 
 ### 8.2 Manual test with curl
 
@@ -271,7 +314,7 @@ cd heavy-rental-spring-rest-api
 ./mvnw spring-boot:run
 
 # no auth -> 401
-curl -i http://localhost:8080/api/equipment
+curl -i http://localhost:8080/api/assets
 
 # auth flow (see SPEC-auth-login-logout.md for the two-step interim -> access flow)
 INTERIM=$(curl -s http://localhost:8080/api/auth/getBearerToken)
@@ -279,20 +322,34 @@ ACCESS=$(curl -s -X POST http://localhost:8080/api/auth/login \
   -H "Authorization: Bearer $INTERIM" -H "Content-Type: application/json" \
   -d '{"email":"alex.tan@example.sg","password":"customer123"}' | jq -r .accessToken)
 
+# admin token (writes require ROLE_ADMIN as of 2026-08-13)
+ADMIN_INTERIM=$(curl -s http://localhost:8080/api/auth/getBearerToken)
+ADMIN_ACCESS=$(curl -s -X POST http://localhost:8080/api/auth/login \
+  -H "Authorization: Bearer $ADMIN_INTERIM" -H "Content-Type: application/json" \
+  -d '{"email":"ravi.kumar@example.sg","password":"admin123"}' | jq -r .accessToken)
+
 # browse -> confirm 27 assets, each img value starts with "data:image/jpeg;base64,"
-curl -s http://localhost:8080/api/equipment -H "Authorization: Bearer $ACCESS" | jq '.[0]'
+curl -s http://localhost:8080/api/assets -H "Authorization: Bearer $ACCESS" | jq '.[0]'
 
 # confirm an image actually decodes to a real JPEG
-curl -s http://localhost:8080/api/equipment -H "Authorization: Bearer $ACCESS" \
+curl -s http://localhost:8080/api/assets -H "Authorization: Bearer $ACCESS" \
   | jq -r '.[0].img[0]' | sed 's/^data:image\/jpeg;base64,//' | base64 -d > /tmp/check.jpg
 file /tmp/check.jpg   # expect: JPEG image data
 
 # single asset + availability window
-curl -s "http://localhost:8080/api/equipment/1?startDate=2026-08-10&endDate=2026-08-15" \
+curl -s "http://localhost:8080/api/assets/1?startDate=2026-08-10&endDate=2026-08-15" \
   -H "Authorization: Bearer $ACCESS" | jq .
 
+# non-admin write attempt -> expect 403
+curl -i -X POST http://localhost:8080/api/assets -H "Authorization: Bearer $ACCESS" \
+  -H "Content-Type: application/json" -d '{"name":"x","serialno":"x","categoryId":1,"baseDailyRate":1,"minDailyRate":1,"maxDailyRate":1}'
+
+# admin image upload
+curl -s -X PUT http://localhost:8080/api/assets/1/image -H "Authorization: Bearer $ADMIN_ACCESS" \
+  -H "Content-Type: application/json" -d "{\"image\":\"$(base64 -w0 some-photo.jpg)\"}" | jq '.img[0:40]'
+
 # delete-with-dependents -> expect 409
-curl -i -X DELETE http://localhost:8080/api/equipment/1 -H "Authorization: Bearer $ACCESS"
+curl -i -X DELETE http://localhost:8080/api/assets/1 -H "Authorization: Bearer $ADMIN_ACCESS"
 ```
 
 ### 8.3 Frontend integration check (once the frontend repo is pointed at this backend)
@@ -312,11 +369,15 @@ Confirm the "Browse Equipment" cards render real photos directly from `img` with
 | Fixed the mislabeled PNG (asset id 4) by re-encoding to real JPEG, not by adding per-image MIME tracking | Simpler fix given only one file was wrong; a `mimeType` column is still the right call *if* a non-JPEG asset is ever legitimately added (see §3.4) |
 | Overlap query lives on `BookingItemRepository`, not `BookingRepository` | Only `BookingItem` has an `asset_id` FK |
 | `PENDING_DEPOSIT`/`PENDING_CONFIRMED`/`CONFIRMED`/`MOBILISED` block availability; `COMPLETED`/`CANCELLED` don't | Matches real-world booking lifecycle — a completed or cancelled booking no longer holds the asset |
-| `available` is `null` (not defaulted to "today") when no date window is given | `EquipmentResponse.available` is nullable specifically to let the frontend distinguish "no availability computed" from a real `true`/`false` — corrected 2026-08-13, this row previously described a `LocalDate.now()` default that isn't what the code does |
+| `available` is `null` (not defaulted to "today") when no date window is given | `AssetResponse.available` is nullable specifically to let the frontend distinguish "no availability computed" from a real `true`/`false` — corrected 2026-08-13, this row previously described a `LocalDate.now()` default that isn't what the code does |
 | Batch image/availability lookups instead of per-asset loops | `open-in-view=false` already forces careful transaction-scoped mapping; batching is barely more code and cuts query count from ~17 to 3 |
 | Delete asset's own images first, then catch `DataIntegrityViolationException` | No cascade exists anywhere in this schema; this is the only path to a clean `409` instead of a raw DB error |
-| Contract paths match the frontend's existing mock exactly (`/api/equipment`, `/api/equipment/{id}`) | Zero frontend path changes required |
-| No `SecurityConfig` changes | Existing catch-all `hasAnyAuthority("ROLE_USER","ROLE_ADMIN")` rule already covers new routes |
+| **(2026-08-13)** Route family renamed `/api/equipment` → `/api/assets`; `EquipmentController`/`EquipmentRequest`/`EquipmentResponse` → `AssetController`/`AssetRequest`/`AssetResponse` | Unifies naming with the `Asset`/`AssetService`/`AssetRepository` names already used underneath; user-directed rename, done as part of formalizing this as an admin feature rather than leaving the split "equipment" (API) / "asset" (code) terminology in place |
+| **(2026-08-13)** Write verbs gated `ROLE_ADMIN`; `GET` stays open to any authenticated user via a new set of `SecurityConfig` per-method matchers | Closes a real authorization gap — previously any authenticated customer could create/edit/delete assets, not just admins (flagged in `SPEC-api-index.md` §2.3); `GET` stays open since it also serves the public customer-facing browse feature |
+| **(2026-08-13)** Duplicate-`name` conflict handled via an explicit `existsByName`/`existsByNameAndIdNot` pre-check → `409`, not a caught `DataIntegrityViolationException` | Mirrors `UserAdminService.create`'s `existsByEmail` idiom (the pattern `SPEC-admin-users-api.md` establishes for this codebase) rather than the delete path's catch-the-DB-exception approach — gives a clearer, field-specific error message |
+| **(2026-08-13)** `lastConditionUpdatedAt` auto-stamped server-side only when `condition` actually changes, never client-supplied | Keeps the timestamp trustworthy as a real "last inspected/updated" signal; a no-op `PATCH` re-sending the same condition must not look like a fresh inspection |
+| **(2026-08-13)** New `PUT /api/assets/{id}/image`, JSON body with a raw base64 string, not multipart | Nothing else in this codebase uses multipart uploads; a small JSON DTO (`AssetImageRequest`) is more consistent and keeps the request shape uniform with every other write endpoint here |
+| **(2026-08-13)** `AssetRequest` gets `@NotBlank`/`@NotNull` on `POST`/`PUT` only, not `PATCH` | `PATCH`'s "null means unchanged" contract is incompatible with required-field validation; validating `POST`/`PUT` (which previously had none) closes a real gap where a malformed admin request could NPE deep in the service or silently persist nulls into `NOT NULL` columns |
 
 ---
 
@@ -332,3 +393,4 @@ Confirm the "Browse Equipment" cards render real photos directly from `img` with
 | 1.4.0 | 2026-08-11 | The planned reseed executed: `data.sql` now seeds 27 assets (up from 8), per `SPEC-seed-data.md` 2.0.0. §2.2/§5 updated from planned/ceiling language to the actual current numbers (27 assets, ~4.6MB embedded images). §8 QA checklist and curl script's "8 seeded assets" updated to 27 — no longer deferred, since the fleet this doc describes is now real. `specification/temporary/data-seeding-spec`/`design.md` removed as part of the same change (their content is now durably captured in `SPEC-seed-data.md`). No code change. |
 | 1.5.0 | 2026-08-13 | **Doc-only corrections against `AssetService.java`, no code change.** §4.3/§7.1/§9 previously said the availability window defaults to `LocalDate.now()`/"today" when neither `startDate` nor `endDate` is given; `resolveAvailabilityWindow` actually returns `null` in that case and `browse()`/`getById()` pass `available: null` straight through — never a computed "today" value. §7.4 previously said `PUT`/`PATCH` "recompute" `available` for today; they actually hardcode `true`, same as `POST` (§7.3), with no date logic at all. §7.1's example response and DTO discussion updated to note the always-empty `tags` field, present on `EquipmentResponse` but never populated by `AssetService` (no backing column on `Asset`) — previously undocumented. |
 | 1.6.0 | 2026-08-13 | **Cross-check requested by a web-portal API audit, re-verified — no divergence found.** `GET /api/equipment`'s `startDate`/`endDate` query params (`EquipmentController.browse`/`getById`, both `@RequestParam(required = false) @DateTimeFormat(iso = ISO.DATE) LocalDate`) were read directly against this file's §4.3/§7.1/§7.2 line by line: `resolveAvailabilityWindow` (`AssetService.java:195`) returns `null` on neither param, throws `400 Bad Request` "Both startDate and endDate must be provided together" on exactly one, and returns the real `[startDate, endDate]` window on both — matching §4.3's table exactly, including the two corrections already made in 1.5.0 above. No code change; this entry exists to record that the cross-check happened and passed, closing the "never cross-checked" gap the audit flagged. |
+| 2.0.0 | 2026-08-13 | **Admin asset records: route renamed, writes gated `ROLE_ADMIN`, new image endpoint, missing fields returned.** `/api/equipment` → `/api/assets`; `EquipmentController`/`EquipmentRequest`/`EquipmentResponse` → `AssetController`/`AssetRequest`/`AssetResponse`. `SecurityConfig` now restricts `POST`/`PUT`/`PATCH`/`DELETE /api/assets/**` to `ROLE_ADMIN` (previously the unrestricted catch-all — closes the gap `SPEC-api-index.md` §2.3 flagged); `GET` unchanged. New `PUT /api/assets/{id}/image` (§7.6, §3.2.2) persists an admin-uploaded photo as an `AssetImage` row — no write path existed for this before. `AssetResponse` now returns `serialno`/`lastConditionUpdatedAt` (§7.1), both previously on the entity but never surfaced; `lastConditionUpdatedAt` auto-stamps only on a real condition change (§7.4). Duplicate-`name` pre-check added on create/replace/rename-via-patch → `409` (§7.3/§7.4). Bean validation (`@NotBlank`/`@NotNull`) added to `AssetRequest` for `POST`/`PUT` (§7.3/§7.4), backed by a new `MethodArgumentNotValidException` handler in `RestExceptionHandler`. New `AssetAdminIntegrationTest` (15 tests) covers admin-vs-non-admin access on every write verb, the image endpoint, the condition-stamp behavior (including the no-op-patch case), and duplicate-name conflicts — first automated test coverage this route family has ever had. Full narrative in new [`CHANGES-admin-asset-records.md`](./CHANGES-admin-asset-records.md). Frontend (`equipmentApi`, still pointed at `/api/equipment`) intentionally not updated in this change — backend-only pass, per user direction. |

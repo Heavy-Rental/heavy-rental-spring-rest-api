@@ -287,17 +287,17 @@
       ]
     },
     {
-      "name": "3. Equipment (web)",
+      "name": "3. Assets (web)",
       "item": [
         {
-          "name": "Browse equipment",
+          "name": "Browse assets",
           "request": {
             "method": "GET",
             "header": [{ "key": "Accept", "value": "application/json" }],
             "url": {
-              "raw": "{{baseUrl}}/api/equipment?category=&search=&condition=&startDate=&endDate=",
+              "raw": "{{baseUrl}}/api/assets?category=&search=&condition=&startDate=&endDate=",
               "host": ["{{baseUrl}}"],
-              "path": ["api", "equipment"],
+              "path": ["api", "assets"],
               "query": [
                 { "key": "category", "value": "", "description": "Optional category filter", "disabled": true },
                 { "key": "search", "value": "", "disabled": true },
@@ -306,22 +306,22 @@
                 { "key": "endDate", "value": "2026-09-12", "disabled": true }
               ]
             },
-            "description": "List equipment. Optional query: category, search, condition, startDate, endDate."
+            "description": "List assets. Optional query: category, search, condition, startDate, endDate. Open to any authenticated user."
           },
           "response": []
         },
         {
-          "name": "Get equipment by id",
+          "name": "Get asset by id",
           "request": {
             "method": "GET",
             "header": [{ "key": "Accept", "value": "application/json" }],
-            "url": "{{baseUrl}}/api/equipment/{{equipmentId}}",
-            "description": "Single asset by id."
+            "url": "{{baseUrl}}/api/assets/{{equipmentId}}",
+            "description": "Single asset by id. Open to any authenticated user."
           },
           "response": []
         },
         {
-          "name": "Create equipment",
+          "name": "Create asset (admin)",
           "request": {
             "method": "POST",
             "header": [
@@ -332,13 +332,13 @@
               "mode": "raw",
               "raw": "{\n  \"name\": \"Postman Test Excavator\",\n  \"serialno\": \"PM-EX-001\",\n  \"categoryId\": 1,\n  \"baseDailyRate\": 450.00,\n  \"minDailyRate\": 400.00,\n  \"maxDailyRate\": 550.00,\n  \"capacity\": 20,\n  \"platformHeight\": null,\n  \"purchaseYear\": 2022,\n  \"condition\": \"GOOD\",\n  \"desc\": \"Created from Postman collection\",\n  \"location\": \"Tuas Depot\"\n}"
             },
-            "url": "{{baseUrl}}/api/equipment",
-            "description": "Create asset. Adjust `categoryId` / `condition` to match seed enums."
+            "url": "{{baseUrl}}/api/assets",
+            "description": "Create asset. Adjust `categoryId` / `condition` to match seed enums. Requires a ROLE_ADMIN access token — a ROLE_USER token gets 403."
           },
           "response": []
         },
         {
-          "name": "Update equipment (PUT)",
+          "name": "Update asset (PUT, admin)",
           "request": {
             "method": "PUT",
             "header": [
@@ -349,13 +349,13 @@
               "mode": "raw",
               "raw": "{\n  \"name\": \"Postman Test Excavator (updated)\",\n  \"serialno\": \"PM-EX-001\",\n  \"categoryId\": 1,\n  \"baseDailyRate\": 460.00,\n  \"minDailyRate\": 400.00,\n  \"maxDailyRate\": 560.00,\n  \"capacity\": 20,\n  \"platformHeight\": null,\n  \"purchaseYear\": 2022,\n  \"condition\": \"GOOD\",\n  \"desc\": \"Updated from Postman\",\n  \"location\": \"Tuas Depot\"\n}"
             },
-            "url": "{{baseUrl}}/api/equipment/{{equipmentId}}",
-            "description": "Full replace of equipment fields."
+            "url": "{{baseUrl}}/api/assets/{{equipmentId}}",
+            "description": "Full replace of asset fields. Requires a ROLE_ADMIN access token — a ROLE_USER token gets 403."
           },
           "response": []
         },
         {
-          "name": "Patch equipment",
+          "name": "Patch asset (admin)",
           "request": {
             "method": "PATCH",
             "header": [
@@ -366,18 +366,35 @@
               "mode": "raw",
               "raw": "{\n  \"name\": \"Postman Test Excavator (patched)\",\n  \"serialno\": null,\n  \"categoryId\": null,\n  \"baseDailyRate\": 470.00,\n  \"minDailyRate\": null,\n  \"maxDailyRate\": null,\n  \"capacity\": null,\n  \"platformHeight\": null,\n  \"purchaseYear\": null,\n  \"condition\": null,\n  \"desc\": null,\n  \"location\": null\n}"
             },
-            "url": "{{baseUrl}}/api/equipment/{{equipmentId}}",
-            "description": "Partial update (same request type as create; nulls may be ignored depending on service)."
+            "url": "{{baseUrl}}/api/assets/{{equipmentId}}",
+            "description": "Partial update (same request type as create; null fields are left unchanged). Requires a ROLE_ADMIN access token — a ROLE_USER token gets 403."
           },
           "response": []
         },
         {
-          "name": "Delete equipment",
+          "name": "Upload asset image (admin)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"image\": \"<raw base64, no data: prefix>\"\n}"
+            },
+            "url": "{{baseUrl}}/api/assets/{{equipmentId}}/image",
+            "description": "Replace the asset's photo (at most one photo is kept per asset). Requires a ROLE_ADMIN access token — a ROLE_USER token gets 403. 413 if the base64 payload exceeds ~7,000,000 characters."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete asset (admin)",
           "request": {
             "method": "DELETE",
             "header": [],
-            "url": "{{baseUrl}}/api/equipment/{{equipmentId}}",
-            "description": "Delete asset by id. Prefer a non-seeded id created via Create."
+            "url": "{{baseUrl}}/api/assets/{{equipmentId}}",
+            "description": "Delete asset by id. Prefer a non-seeded id created via Create. Requires a ROLE_ADMIN access token — a ROLE_USER token gets 403."
           },
           "response": []
         }
