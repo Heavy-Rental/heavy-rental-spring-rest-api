@@ -1,5 +1,6 @@
 package com.heavy_rental.rest_api.service;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -25,12 +26,14 @@ import com.heavy_rental.rest_api.client.haystack.dto.IngestFromProjectSpecRespon
 import com.heavy_rental.rest_api.client.haystack.dto.NeedSummaryDto;
 import com.heavy_rental.rest_api.client.haystack.dto.ProjectKnowledgeQueryRequest;
 import com.heavy_rental.rest_api.client.haystack.dto.ProjectKnowledgeQueryResponse;
+import com.heavy_rental.rest_api.client.haystack.dto.RecommendEquipmentDto;
 import com.heavy_rental.rest_api.client.haystack.dto.RecommendItemDto;
 import com.heavy_rental.rest_api.dto.ExpectedBudgetResponse;
 import com.heavy_rental.rest_api.dto.NeedSummaryResponse;
 import com.heavy_rental.rest_api.dto.ProjectKnowledgeQueryPortalRequest;
 import com.heavy_rental.rest_api.dto.ProjectKnowledgeQueryPortalResponse;
 import com.heavy_rental.rest_api.dto.ProjectSpecSubmitCommand;
+import com.heavy_rental.rest_api.dto.RecommendEquipmentResponse;
 import com.heavy_rental.rest_api.dto.RecommendItemResponse;
 import com.heavy_rental.rest_api.dto.RecommendationSessionResponse;
 import com.heavy_rental.rest_api.dto.SubmitProjectSpecRequest;
@@ -319,20 +322,62 @@ public class RecommenderSagaService {
 			return List.of();
 		}
 		return items.stream()
-				.map(i -> {
-					String equipId = i.equipment() != null ? i.equipment().id() : null;
-					String equipName = i.equipment() != null ? i.equipment().name() : null;
-					String category = i.equipment() != null ? i.equipment().category() : null;
-					return new RecommendItemResponse(
-							i.rankOrder(),
-							equipId,
-							equipName,
-							category,
-							i.baseDailyRate(),
-							i.lineTotal(),
-							i.matchScore());
-				})
+				.map(i -> new RecommendItemResponse(
+						i.rankOrder(),
+						i.matchScore(),
+						i.reason(),
+						i.lineTotal(),
+						i.quantity(),
+						mapEquipment(i.equipment(), i.baseDailyRate())))
 				.collect(Collectors.toList());
+	}
+
+	/**
+	 * Nested equipment for portal quote lines. Pass-through only — never invent catalog data.
+	 * If haystack puts {@code baseDailyRate} on the item, copy it onto equipment when missing.
+	 */
+	private static RecommendEquipmentResponse mapEquipment(
+			RecommendEquipmentDto e, BigDecimal itemBaseDailyRate) {
+		if (e == null) {
+			return null;
+		}
+		BigDecimal baseDailyRate = e.baseDailyRate() != null ? e.baseDailyRate() : itemBaseDailyRate;
+		List<String> tags = e.tags() != null ? e.tags() : List.of();
+		return new RecommendEquipmentResponse(
+				normalizeEquipmentId(e.id()),
+				e.name(),
+				e.category(),
+				baseDailyRate,
+				e.weekly(),
+				e.capacity(),
+				e.purchaseYear(),
+				e.location(),
+				e.available(),
+				e.img(),
+				e.desc(),
+				tags);
+	}
+
+	/** Prefer numeric catalog ids as {@link Long}; keep non-numeric strings as-is. */
+	private static Object normalizeEquipmentId(Object id) {
+		if (id == null) {
+			return null;
+		}
+		if (id instanceof Number n) {
+			return n.longValue();
+		}
+		if (id instanceof String s) {
+			String trimmed = s.trim();
+			if (trimmed.isEmpty()) {
+				return null;
+			}
+			try {
+				return Long.parseLong(trimmed);
+			} catch (NumberFormatException ignored) {
+				return trimmed;
+			}
+		}
+		return id;
 	}
 
 	private static List<String> mergeWarnings(List<String> call1, List<String> call2) {

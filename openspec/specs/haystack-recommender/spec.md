@@ -12,7 +12,11 @@ Spring Boot is the orchestrating client of `haystack-fast-api` for:
 
 Resilience, saga orchestration, and portal REST for the recommender journey live here.
 
-**Status:** **As-built** (S2b on branch HR-106). Requirements below match Feasibility_Study_Spring v2 and runtime code.
+**Status:** **As-built** (S2b). Requirements below match Feasibility_Study_Spring v2, runtime code, and portal nested quote items.
+
+**Portal HTTP fields:** [`contracts/portal-api.md`](./contracts/portal-api.md)  
+**Upstream wire (read-only):** [haystack-fast-api](https://github.com/Heavy-Rental/haystack-fast-api) OpenSpec Call 1/2/3 contracts  
+**OpenSPDD canvas:** [`../../../spdd/prompt/S2b-resilient-haystack-recommender-client.md`](../../../spdd/prompt/S2b-resilient-haystack-recommender-client.md)
 
 ## Requirements
 
@@ -132,6 +136,28 @@ The system MUST include automated tests (WireMock or equivalent) covering timeou
 - WHEN the saga completes successfully
 - THEN the portal response includes `quoteRef` and mapped `items`
 - AND Call 3 was not required for submit
+
+### Requirement: FR-S2B-010 Nested portal quote items
+
+The system MUST map Call 2 quote lines to the portal as nested objects: each item includes `rankOrder`, optional `matchScore` / `reason` / `quantity` / `lineTotal`, and nested `equipment` (id, name, category, rates, and optional catalog fields). The system MUST NOT flatten equipment into `equipmentId` / `equipmentName` top-level item fields. The system MUST pass through haystack values only and MUST NOT invent equipment, rates, scores, or reasons when omitted upstream.
+
+#### Scenario: Submit response exposes nested equipment
+- GIVEN Call 2 returns an item with nested `equipment` and optional `reason` / `quantity` / `matchScore`
+- WHEN the portal project-spec response is built
+- THEN each item has nested `equipment` with catalog fields present when provided by haystack
+- AND missing optional fields are null or empty (not fabricated)
+
+#### Scenario: Item-level baseDailyRate falls back onto equipment
+- GIVEN haystack places `baseDailyRate` on the item and omits it on `equipment`
+- WHEN the item is mapped for the portal
+- THEN `equipment.baseDailyRate` receives that value when equipment is present
+- AND no other rates are invented
+
+**Automated evidence (BDD JUnit scenarios):**  
+`RecommenderSagaServiceTest` — DisplayNames containing `(FR-S2B-010)`;  
+`RecommenderSagaWireMockTest` dual-hop nested items;  
+`RecommendationControllerIntegrationTest` nested JSON + no flattened `equipmentId`/`equipmentName`;  
+`HaystackRecommenderClientTest` Call 2 DTO fields.
 
 ## Out of scope (this capability baseline)
 

@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
+import java.math.BigDecimal;
 import java.time.Duration;
 
 import org.junit.jupiter.api.AfterEach;
@@ -112,7 +113,7 @@ class RecommenderSagaWireMockTest {
 		wireMock.stop();
 	}
 
-	@DisplayName("Scenario: Dual-hop happy path — one ingest + one getassetrecommendations with shared correlation and quote body")
+	@DisplayName("Scenario: Dual-hop happy path — nested quote items (FR-S2B-010) + shared correlation")
 	@Test
 	void dualHop_happyPath_quoteBody_sharedCorrelation_correctPaths() {
 		when(currentUserService.getUser(jwt)).thenReturn(user);
@@ -156,9 +157,12 @@ class RecommenderSagaWireMockTest {
 								  "items": [
 								    {
 								      "rankOrder": 1,
+								      "matchScore": 0.88,
+								      "reason": "CAT 320 class excavator",
+								      "quantity": 1,
+								      "lineTotal": 4500.00,
 								      "equipment": { "id": "asset-1", "name": "CAT 320", "category": "Excavator" },
-								      "baseDailyRate": 450.00,
-								      "lineTotal": 4500.00
+								      "baseDailyRate": 450.00
 								    }
 								  ],
 								  "warnings": []
@@ -178,7 +182,15 @@ class RecommenderSagaWireMockTest {
 		assertEquals("QUO-WIRE-1", resp.quoteRef());
 		assertNotNull(resp.items());
 		assertEquals(1, resp.items().size());
-		assertEquals("asset-1", resp.items().get(0).equipmentId());
+		// FR-S2B-010 nested item + item-level baseDailyRate fallback through real client
+		assertEquals(1, resp.items().get(0).rankOrder());
+		assertEquals(new BigDecimal("0.88"), resp.items().get(0).matchScore());
+		assertEquals("CAT 320 class excavator", resp.items().get(0).reason());
+		assertEquals(Integer.valueOf(1), resp.items().get(0).quantity());
+		assertEquals("asset-1", resp.items().get(0).equipment().id());
+		assertEquals("CAT 320", resp.items().get(0).equipment().name());
+		assertEquals(new BigDecimal("450.00"), resp.items().get(0).equipment().baseDailyRate());
+		assertEquals(new BigDecimal("4500.00"), resp.items().get(0).lineTotal());
 
 		// Exactly one Call 1 and one Call 2 on correct paths
 		wireMock.verify(1, postRequestedFor(urlEqualTo(HaystackRecommenderClient.PATH_INGEST))

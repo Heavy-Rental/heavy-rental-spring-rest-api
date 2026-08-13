@@ -8,7 +8,7 @@
 | **Date** | 2026-08-12 |
 | **Discipline** | If reality diverges: **update this canvas first**, then code. Refactors without behavior change: code first, then sync canvas. |
 
-**Linked specs:** OpenSpec change · Spec-Kit pack · `SPEC-haystack-recommender-client.md` · `Feasibility_Study_Spring/`
+**Linked:** OpenSpec [`openspec/specs/haystack-recommender/`](../../openspec/specs/haystack-recommender/) · portal contract [`contracts/portal-api.md`](../../openspec/specs/haystack-recommender/contracts/portal-api.md) · archived change `openspec/changes/archive/2026-08-12-s2b-resilient-haystack-client/` · [`Feasibility_Study_Spring/`](../../Feasibility_Study_Spring/) · OpenSPDD [`../README.md`](../README.md)
 
 ---
 
@@ -18,7 +18,7 @@
 Spring must orchestrate haystack-fast-api **Call 1 (ingest)**, **Call 2 (recommend / quote)**, and **Call 3 (chatbot Q&A)** with timeouts, Resilience4j, idempotent ingest retries, correlation, saga persistence of `ingest_id`, and thin portal REST — without inventing equipment when the recommender is down.
 
 ### Definition of Done
-- FR-S2B-001…009 implemented and covered by WireMock (or equivalent) tests
+- FR-S2B-001…010 implemented and covered by WireMock (or equivalent) tests (incl. nested portal `items[].equipment`)
 - Portal: `POST /api/recommendations/project-spec` (Call 1+2 → **quote**), `POST .../knowledge-query` (Call 3 → **answer**), `GET .../{id}`
 - Prod default: `haystack.retry.ingest-enabled=false` until S2a confirmed
 - Shared error JSON; no re-ingest on Call 2/3 failure; same `Idempotency-Key` on ingest retry
@@ -35,10 +35,12 @@ C2 202/SSE, C3 gRPC/queues, C/W/D in Spring, Q&A history table, Flyway, `recomme
 | Recommendation session | `AIRecommendation` (+ `ingest_id`, `haystack_user_id`, `idempotency_key`, `correlation_id`, budget/date/warnings; optional `confidenceScore` from Call 2) |
 | Portal user | existing `User` / JWT via `CurrentUserService` |
 | Haystack ingest response | lean FR-IX-023 DTO |
-| Haystack recommend (Call 2) | `GetAssetRecommendationsResponse` — `quoteRef`, `items[]`, rates |
+| Haystack recommend (Call 2) | `GetAssetRecommendationsResponse` — `quoteRef`, nested `items[]` |
+| Portal quote item | `RecommendItemResponse` — `rankOrder`, `matchScore`, `reason`, `lineTotal`, `quantity`, nested `equipment` |
+| Portal equipment | `RecommendEquipmentResponse` — `id`, `name`, `category`, `baseDailyRate`, `weekly`, `capacity`, `purchaseYear`, `location`, `available`, `img`, `desc`, `tags` (pass-through; never invent) |
 | Haystack Q&A (Call 3) | `ProjectKnowledgeQueryResponse` — `answer`, `sources_used`; not persisted in S2b |
 | Haystack error | `{error, message}` |
-| Ranked assets | Returned in portal JSON from Call 2; **`RecommendationItem` rows not written in S2b** |
+| Ranked assets | Nested portal JSON from Call 2 only; **`RecommendationItem` rows not written in S2b** |
 
 ---
 

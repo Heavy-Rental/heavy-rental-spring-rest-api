@@ -1,6 +1,8 @@
 package com.heavy_rental.rest_api.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -44,10 +46,11 @@ import com.heavy_rental.rest_api.entity.User;
 import com.heavy_rental.rest_api.repository.AIRecommendationRepository;
 
 /**
- * BDD: FR-S2B-005/007 — dual-hop quote, multipart path, no re-ingest, Call 3 only for knowledge-query.
+ * BDD scenarios for recommender saga: FR-S2B-005/007 (dual-hop, no re-ingest, Call 3)
+ * and FR-S2B-010 (nested portal quote items).
  */
 @ExtendWith(MockitoExtension.class)
-@DisplayName("RecommenderSagaService — dual-hop rules")
+@DisplayName("RecommenderSagaService — dual-hop + FR-S2B-010 nested items")
 class RecommenderSagaServiceTest {
 
 	@Mock
@@ -100,7 +103,14 @@ class RecommenderSagaServiceTest {
 		assertEquals("corr-1", resp.correlationId());
 		assertEquals("QUO-9", resp.quoteRef());
 		assertEquals(1, resp.items().size());
-		assertEquals("asset-1", resp.items().get(0).equipmentId());
+		assertEquals(1, resp.items().get(0).rankOrder());
+		assertEquals(new BigDecimal("0.95"), resp.items().get(0).matchScore());
+		assertEquals("Fits indoor height requirement", resp.items().get(0).reason());
+		assertEquals(Integer.valueOf(1), resp.items().get(0).quantity());
+		assertEquals("asset-1", resp.items().get(0).equipment().id());
+		assertEquals("Genie GS-1930", resp.items().get(0).equipment().name());
+		assertEquals(new BigDecimal("150.00"), resp.items().get(0).equipment().baseDailyRate());
+		assertEquals(new BigDecimal("1500.00"), resp.items().get(0).lineTotal());
 
 		verify(haystackClient, times(1)).ingest(any(), anyString(), anyString());
 		ArgumentCaptor<GetAssetRecommendationsRequest> recCap =
@@ -266,8 +276,214 @@ class RecommenderSagaServiceTest {
 				RecommenderSagaService.resolveCall2Query("  ", "  "));
 	}
 
+	@DisplayName("Scenario: Submit response exposes nested equipment (FR-S2B-010)")
+	@Test
+	void submitProjectSpec_exposesNestedEquipment_withOptionalFields() {
+		// GIVEN Call 2 returns nested equipment + reason / quantity / matchScore
+		stubIngestAndSave(99L);
+		when(haystackClient.recommend(any(), eq("corr-nested"))).thenReturn(quoteWithItems(
+				List.of(new RecommendItemDto(
+						1,
+						new BigDecimal("0.91"),
+						"135ft reach covers elevation",
+						new BigDecimal("12180"),
+						1,
+						new RecommendEquipmentDto(
+								1,
+								"JLG 1350SJP Telescopic Boom",
+								"Boom Lift",
+								new BigDecimal("580"),
+								new BigDecimal("2600"),
+								1,
+								2023,
+								"Jurong Port",
+								true,
+								"photo-abc",
+								"Telescopic boom",
+								List.of("135ft Reach", "4WD")),
+						null))));
+
+		// WHEN the portal project-spec response is built
+		SubmitProjectSpecResponse resp = saga.submitProjectSpec(
+				jwt,
+				new SubmitProjectSpecRequest("Need boom lift", null, null, null, null, null),
+				"corr-nested");
+
+		// THEN nested equipment and optional item fields are present; no fabrication of empties into rates
+		var item = resp.items().get(0);
+		assertEquals(1, item.rankOrder());
+		assertEquals(new BigDecimal("0.91"), item.matchScore());
+		assertEquals("135ft reach covers elevation", item.reason());
+		assertEquals(new BigDecimal("12180"), item.lineTotal());
+		assertEquals(Integer.valueOf(1), item.quantity());
+		assertNotNull(item.equipment());
+		assertEquals(1L, item.equipment().id());
+		assertEquals("JLG 1350SJP Telescopic Boom", item.equipment().name());
+		assertEquals("Boom Lift", item.equipment().category());
+		assertEquals(new BigDecimal("580"), item.equipment().baseDailyRate());
+		assertEquals(new BigDecimal("2600"), item.equipment().weekly());
+		assertEquals(Integer.valueOf(1), item.equipment().capacity());
+		assertEquals(Integer.valueOf(2023), item.equipment().purchaseYear());
+		assertEquals("Jurong Port", item.equipment().location());
+		assertEquals(Boolean.TRUE, item.equipment().available());
+		assertEquals("photo-abc", item.equipment().img());
+		assertEquals("Telescopic boom", item.equipment().desc());
+		assertEquals(List.of("135ft Reach", "4WD"), item.equipment().tags());
+	}
+
+	@DisplayName("Scenario: Item-level baseDailyRate falls back onto equipment (FR-S2B-010)")
+	@Test
+	void submitProjectSpec_itemBaseDailyRateFallsBackOntoEquipment() {
+		// GIVEN haystack places baseDailyRate on the item and omits it on equipment
+		stubIngestAndSave(10L);
+		when(haystackClient.recommend(any(), anyString())).thenReturn(quoteWithItems(
+				List.of(new RecommendItemDto(
+						1,
+						null,
+						null,
+						new BigDecimal("1500.00"),
+						null,
+						new RecommendEquipmentDto(
+								"asset-1",
+								"Genie GS-1930",
+								"Scissor Lift",
+								null,
+								null,
+								null,
+								null,
+								null,
+								null,
+								null,
+								null,
+								null),
+						new BigDecimal("150.00")))));
+
+		// WHEN mapped for the portal
+		SubmitProjectSpecResponse resp = saga.submitProjectSpec(
+				jwt,
+				new SubmitProjectSpecRequest("Need scissors", null, null, null, null, null),
+				"corr-fb");
+
+		// THEN equipment.baseDailyRate receives the item rate; other rates stay null (not invented)
+		var equip = resp.items().get(0).equipment();
+		assertEquals(new BigDecimal("150.00"), equip.baseDailyRate());
+		assertNull(equip.weekly());
+		assertNull(equip.capacity());
+		assertNull(equip.purchaseYear());
+		assertNull(equip.location());
+		assertNull(equip.available());
+		assertEquals(List.of(), equip.tags());
+	}
+
+	@DisplayName("Scenario: Null equipment and omitted scores are not invented (FR-S2B-010)")
+	@Test
+	void submitProjectSpec_doesNotInventEquipmentOrScoresWhenOmitted() {
+		// GIVEN Call 2 item with no equipment and no matchScore/reason
+		stubIngestAndSave(11L);
+		when(haystackClient.recommend(any(), anyString())).thenReturn(quoteWithItems(
+				List.of(new RecommendItemDto(
+						2,
+						null,
+						null,
+						new BigDecimal("100.00"),
+						null,
+						null,
+						null))));
+
+		// WHEN portal response is built
+		SubmitProjectSpecResponse resp = saga.submitProjectSpec(
+				jwt,
+				new SubmitProjectSpecRequest("Need something", null, null, null, null, null),
+				"corr-null");
+
+		// THEN nulls stay null — no synthetic equipment object or scores
+		var item = resp.items().get(0);
+		assertEquals(2, item.rankOrder());
+		assertNull(item.matchScore());
+		assertNull(item.reason());
+		assertNull(item.quantity());
+		assertNull(item.equipment());
+		assertEquals(new BigDecimal("100.00"), item.lineTotal());
+	}
+
+	@DisplayName("Scenario: Numeric string equipment id normalizes to Long (FR-S2B-010)")
+	@Test
+	void submitProjectSpec_numericStringEquipmentIdBecomesLong() {
+		// GIVEN haystack equipment.id is the string "1"
+		stubIngestAndSave(12L);
+		when(haystackClient.recommend(any(), anyString())).thenReturn(quoteWithItems(
+				List.of(new RecommendItemDto(
+						1,
+						null,
+						null,
+						null,
+						1,
+						new RecommendEquipmentDto(
+								"1",
+								"CAT 320",
+								"Excavator",
+								null, null, null, null, null, null, null, null, null),
+						null))));
+
+		// WHEN mapped
+		SubmitProjectSpecResponse resp = saga.submitProjectSpec(
+				jwt,
+				new SubmitProjectSpecRequest("Need excavator", null, null, null, null, null),
+				"corr-id");
+
+		// THEN portal equipment.id is Long 1 (catalog-friendly JSON number)
+		assertEquals(1L, resp.items().get(0).equipment().id());
+	}
+
+	private void stubIngestAndSave(long recommendationId) {
+		when(currentUserService.getUser(jwt)).thenReturn(user);
+		when(haystackClient.ingest(any(), anyString(), anyString())).thenReturn(
+				new IngestFromProjectSpecResponse(
+						"ing_fr", "7", "summary", null, null, List.of(), null, List.of()));
+		when(recommendationRepository.save(any())).thenAnswer(inv -> {
+			AIRecommendation r = inv.getArgument(0);
+			if (r.getId() == null) {
+				r.setId(recommendationId);
+			}
+			return r;
+		});
+	}
+
 	private static GetAssetRecommendationsResponse sampleQuote(
 			String quoteRef, String query, String ingestId, String userId) {
+		return quoteWithItems(
+				userId,
+				ingestId,
+				query,
+				quoteRef,
+				List.of(new RecommendItemDto(
+						1,
+						new BigDecimal("0.95"),
+						"Fits indoor height requirement",
+						new BigDecimal("1500.00"),
+						1,
+						new RecommendEquipmentDto(
+								"asset-1",
+								"Genie GS-1930",
+								"Scissor Lift",
+								null,
+								null,
+								null,
+								null,
+								null,
+								null,
+								null,
+								null,
+								null),
+						new BigDecimal("150.00"))));
+	}
+
+	private static GetAssetRecommendationsResponse quoteWithItems(List<RecommendItemDto> items) {
+		return quoteWithItems("7", "ing_fr", "summary", "QUO-FR", items);
+	}
+
+	private static GetAssetRecommendationsResponse quoteWithItems(
+			String userId, String ingestId, String query, String quoteRef, List<RecommendItemDto> items) {
 		return new GetAssetRecommendationsResponse(
 				userId,
 				ingestId,
@@ -278,12 +494,7 @@ class RecommenderSagaServiceTest {
 				new BigDecimal("1500.00"),
 				"Indoor elevated access",
 				"Scissor lift fits",
-				List.of(new RecommendItemDto(
-						1,
-						new RecommendEquipmentDto("asset-1", "Genie GS-1930", "Scissor Lift"),
-						new BigDecimal("150.00"),
-						new BigDecimal("1500.00"),
-						null)),
+				items,
 				List.of());
 	}
 

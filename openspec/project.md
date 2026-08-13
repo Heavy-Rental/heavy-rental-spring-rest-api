@@ -5,34 +5,73 @@
 | **Module** | `heavy-rental-spring-rest-api` |
 | **Base package** | `com.heavy_rental.rest_api` |
 | **Stack** | Java 21 · Spring Boot 4.1 · PostgreSQL · OAuth2 Resource Server JWT |
-| **Living contracts** | [`specification/`](../specification/) (`SPEC-*.md`) |
-| **Environment constitution** | [`specification/SPEC-project-environment.md`](../specification/SPEC-project-environment.md) |
-| **Feasibility (S2b)** | [`Feasibility_Study_Spring/`](../Feasibility_Study_Spring/) |
-| **Spec-Kit feature pack** | [`specification/features/s2b-haystack-recommender-client/`](../specification/features/s2b-haystack-recommender-client/) |
-| **SPDD prompts** | [`spdd/prompt/`](../spdd/prompt/) |
+| **Process** | **OpenSpec primary** — migration complete for living contracts |
+| **OpenSPDD** | [`spdd/`](../spdd/) — REASONS canvases only |
+| **Haystack notes** | [`Feasibility_Study_Spring/`](../Feasibility_Study_Spring/) |
+| **Upstream (read-only)** | [Heavy-Rental/haystack-fast-api](https://github.com/Heavy-Rental/haystack-fast-api) |
+| **Contracts** | `openspec/specs/` only — former `specification/` tree removed after migration |
 
 ## Purpose
 
-OpenSpec holds **behavior source-of-truth** (`specs/`) and **proposed changes** (`changes/`) for capabilities that evolve via ADDED/MODIFIED/REMOVED deltas.
+Behavior SoT: `specs/<capability>/spec.md`.  
+Proposed work: `changes/<id>/` with ADDED/MODIFIED/REMOVED deltas.  
+HTTP tables: `specs/<capability>/contracts/`.
 
-This is a **brownfield hybrid**: existing feature contracts remain under `specification/SPEC-*.md`. OpenSpec does not replace them; after a change is implemented and verified, deltas archive into `openspec/specs/` and the matching `SPEC-*.md` is marked as-built.
+## Constitution
 
-## Domains
+[`specs/project-environment/spec.md`](./specs/project-environment/spec.md)
 
-| Domain path | Capability |
-|-------------|------------|
-| `haystack-recommender` | Spring → haystack-fast-api resilient client, saga, portal REST (S2b: Call 1 ingest · Call 2 recommend · Call 3 Q&A) |
+| Topic | Rule |
+|-------|------|
+| DB | PostgreSQL only; no H2 default |
+| Auth | JWT resource server; `{ "error", "message" }` |
+| Layering | Thin controllers; no external HTTP from controllers |
+| Schema | `ddl-auto=update` |
+| Seed | `data.sql` after DDL |
+| Process | New work → OpenSpec only |
+
+## Living domains
+
+| Domain | Capability |
+|--------|------------|
+| [`project-environment`](./specs/project-environment/spec.md) | Stack / process |
+| [`api-index`](./specs/api-index/spec.md) | Route discovery |
+| [`auth-interim-token`](./specs/auth-interim-token/spec.md) | Interim mint |
+| [`auth-login-logout`](./specs/auth-login-logout/spec.md) | Login / logout |
+| [`entity-repository`](./specs/entity-repository/spec.md) | JPA model |
+| [`seed-data`](./specs/seed-data/spec.md) | Seed data |
+| [`testing`](./specs/testing/spec.md) | Tests |
+| [`equipment-browse`](./specs/equipment-browse/spec.md) | Equipment API |
+| [`booking-delivery-return`](./specs/booking-delivery-return/spec.md) | Bookings / ops |
+| [`payments-stripe`](./specs/payments-stripe/spec.md) | Stripe payments |
+| [`rental-plan-quote`](./specs/rental-plan-quote/spec.md) | Rental plans |
+| [`admin-users`](./specs/admin-users/spec.md) | Admin users |
+| [`monthly-utilization`](./specs/monthly-utilization/spec.md) | Admin utilization |
+| [`haystack-recommender`](./specs/haystack-recommender/spec.md) | S2b recommender |
+| [`spring-proxy-endpoints`](./specs/spring-proxy-endpoints/spec.md) | Haystack hop map |
 
 ## Active changes
 
-| Change folder | Status |
-|---------------|--------|
-| [`changes/s2b-resilient-haystack-client/`](./changes/s2b-resilient-haystack-client/) | **As-built** — runtime + WireMock; Feasibility v2 Call 1/2/3 |
+| Change | Status |
+|--------|--------|
+| [`changes/pricing-estimate/`](./changes/pricing-estimate/) | **Design only** — open availability decision; not implemented |
+
+## Archives
+
+| Archive | Contents |
+|---------|----------|
+| [`changes/archive/2026-08-12-s2b-resilient-haystack-client/`](./changes/archive/2026-08-12-s2b-resilient-haystack-client/) | Completed S2b change |
+| [`changes/archive/2026-08-docs-changelog/`](./changes/archive/2026-08-docs-changelog/) | Historical CHANGES-*.md |
 
 ## Conventions
 
-1. Requirements use RFC 2119 (**MUST** / **SHALL** / **SHOULD** / **MAY**).
-2. Scenarios use **GIVEN / WHEN / THEN**.
-3. Specs describe observable behavior, not class names (implementation lives in `design.md` / Spec-Kit `plan.md` / SPDD canvas).
-4. Controllers stay thin; services orchestrate; shared error JSON is `{ "error", "message" }`.
-5. Do not restate Postgres/JWT defaults — see environment SPEC.
+1. RFC 2119 MUST/SHALL/SHOULD/MAY  
+2. GIVEN / WHEN / THEN  
+3. Observable behavior over class names  
+4. Keep auth interim vs login/logout split  
+5. OpenSPDD for generation only (`spdd/`)  
+6. Never invent equipment/rates on recommender failure  
+
+## Reading order
+
+[`AGENTS.md`](./AGENTS.md)
