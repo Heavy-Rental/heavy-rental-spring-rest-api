@@ -30,7 +30,7 @@ Routes other than interim token, login, health, and Stripe webhook need an **acc
 
 | Email | Password | Role |
 |-------|----------|------|
-| `alex.tan@example.sg` | `customer123` | USER (default in env; has active plans) |
+| `alex.tan@example.sg` | `customer123` | USER (default in env; has one active QUOTED plan, plus CONVERTED/CANCELLED history) |
 | `mei.lin@example.sg` | `customer456` | USER (no plans — cart → quote → checkout) |
 | `admin@localhost` | `admin1234` | ADMIN |
 
