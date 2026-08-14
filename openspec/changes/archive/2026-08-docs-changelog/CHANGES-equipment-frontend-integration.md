@@ -80,6 +80,8 @@ Only `/api/equipment`, `/api/auth/*`, and the two empty stubs above exist on thi
 
 **Update, 2026-08-11:** as of `hr-19-request-quote` (see §1.3's note above), rental plans/quoting is real and built — only `/api/depots` remains an empty stub today. Bookings, checkout/payment, admin asset management, and AI recommendations are still not built, as originally stated.
 
+**Update, 2026-08-13:** admin asset management is now built — see [`CHANGES-admin-asset-records.md`](./CHANGES-admin-asset-records.md). The route this section describes was also renamed in that change: `/api/equipment` is `/api/assets` as of that date (`EquipmentController`/`EquipmentRequest`/`EquipmentResponse` → `AssetController`/`AssetRequest`/`AssetResponse`); this file's `/api/equipment` references above describe the route as it was built at the time and are left as a historical record, not updated in place.
+
 ---
 
 ## 3. How to run both sides

@@ -34,8 +34,11 @@ Legend: **Shared** = web + mobile; **Web** / **Mobile** / **Admin** = primary cl
 
 | Method | Path | Client | Roles | Contract |
 |--------|------|--------|-------|----------|
-| `GET/POST` | `/api/equipment` | Web | USER/ADMIN | [equipment-browse](../../equipment-browse/) |
-| `GET/PUT/PATCH/DELETE` | `/api/equipment/{id}` | Web | USER/ADMIN | same |
+| `GET` | `/api/assets` | Web | USER/ADMIN | [equipment-browse](../../equipment-browse/) |
+| `GET` | `/api/assets/{id}` | Web | USER/ADMIN | same |
+| `POST` | `/api/assets` | Web | `ROLE_ADMIN` only | same |
+| `PUT`/`PATCH`/`DELETE` | `/api/assets/{id}` | Web | `ROLE_ADMIN` only | same |
+| `PUT` | `/api/assets/{id}/image` | Web | `ROLE_ADMIN` only | same — photo upload |
 | `GET` | `/api/depots` | Web | USER/ADMIN | Stub `[]` (no Depot entity) |
 | `POST/GET` | `/api/rentalPlans` | Web | USER/ADMIN | [rental-plan-quote](../../rental-plan-quote/) |
 | `GET` | `/api/rentalPlans/{id}` | Web | owner | same |

@@ -14,6 +14,7 @@
 |------|------------|
 | Auth | `auth-interim-token` → `auth-login-logout` |
 | Equipment | `equipment-browse` |
+| Admin asset records | `admin-portal` |
 | Bookings / mobile | `booking-delivery-return` |
 | Payments | `payments-stripe` |
 | Rental plans | `rental-plan-quote` + `spring-proxy-endpoints` |

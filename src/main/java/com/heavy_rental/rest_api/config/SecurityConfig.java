@@ -83,6 +83,10 @@ public class SecurityConfig {
 				.requestMatchers("/actuator/health", "/actuator/info").permitAll()
 				.requestMatchers("/api/monthly-utilization").hasAuthority("ROLE_ADMIN")
 				.requestMatchers("/api/users/**").hasAuthority("ROLE_ADMIN")
+				.requestMatchers(HttpMethod.POST, "/api/assets").hasAuthority("ROLE_ADMIN")
+				.requestMatchers(HttpMethod.PUT, "/api/assets/**").hasAuthority("ROLE_ADMIN")
+				.requestMatchers(HttpMethod.PATCH, "/api/assets/**").hasAuthority("ROLE_ADMIN")
+				.requestMatchers(HttpMethod.DELETE, "/api/assets/**").hasAuthority("ROLE_ADMIN")
 				// Stripe cannot present a JWT; the Stripe-Signature check inside the
 				// controller is the auth mechanism for this one route.
 				.requestMatchers(HttpMethod.POST, "/api/payments/webhook").permitAll()

@@ -8,22 +8,25 @@ import org.springframework.format.annotation.DateTimeFormat.ISO;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
-import com.heavy_rental.rest_api.dto.EquipmentRequest;
-import com.heavy_rental.rest_api.dto.EquipmentResponse;
+import com.heavy_rental.rest_api.dto.AssetImageRequest;
+import com.heavy_rental.rest_api.dto.AssetRequest;
+import com.heavy_rental.rest_api.dto.AssetResponse;
 import com.heavy_rental.rest_api.service.AssetService;
 
+import jakarta.validation.Valid;
+
 @RestController
-@RequestMapping("/api/equipment")
-public class EquipmentController {
+@RequestMapping("/api/assets")
+public class AssetController {
 
     private final AssetService assetService;
 
-    public EquipmentController(AssetService assetService) {
+    public AssetController(AssetService assetService) {
         this.assetService = assetService;
     }
 
     @GetMapping
-    public List<EquipmentResponse> browse(
+    public List<AssetResponse> browse(
             @RequestParam(required = false) String category,
             @RequestParam(required = false) String search,
             @RequestParam(required = false) String condition,
@@ -33,7 +36,7 @@ public class EquipmentController {
     }
 
     @GetMapping("/{id}")
-    public EquipmentResponse getById(
+    public AssetResponse getById(
             @PathVariable Long id,
             @RequestParam(required = false) @DateTimeFormat(iso = ISO.DATE) LocalDate startDate,
             @RequestParam(required = false) @DateTimeFormat(iso = ISO.DATE) LocalDate endDate) {
@@ -42,17 +45,17 @@ public class EquipmentController {
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    public EquipmentResponse create(@RequestBody EquipmentRequest request) {
+    public AssetResponse create(@Valid @RequestBody AssetRequest request) {
         return assetService.create(request);
     }
 
     @PutMapping("/{id}")
-    public EquipmentResponse replace(@PathVariable Long id, @RequestBody EquipmentRequest request) {
+    public AssetResponse replace(@PathVariable Long id, @Valid @RequestBody AssetRequest request) {
         return assetService.replace(id, request);
     }
 
     @PatchMapping("/{id}")
-    public EquipmentResponse patch(@PathVariable Long id, @RequestBody EquipmentRequest request) {
+    public AssetResponse patch(@PathVariable Long id, @RequestBody AssetRequest request) {
         return assetService.patch(id, request);
     }
 
@@ -60,5 +63,10 @@ public class EquipmentController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void delete(@PathVariable Long id) {
         assetService.delete(id);
+    }
+
+    @PutMapping("/{id}/image")
+    public AssetResponse uploadImage(@PathVariable Long id, @Valid @RequestBody AssetImageRequest request) {
+        return assetService.uploadImage(id, request);
     }
 }

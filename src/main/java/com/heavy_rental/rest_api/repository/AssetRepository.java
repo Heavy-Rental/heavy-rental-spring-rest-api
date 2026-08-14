@@ -11,6 +11,8 @@ public interface AssetRepository extends JpaRepository<Asset, Long> {
   List<Asset> findByCategoryId(Long categoryId);
   List<Asset> findByNameContainingIgnoreCase(String name);
   List<Asset> findByCondition(ConditionType condition);
+  boolean existsByName(String name);
+  boolean existsByNameAndIdNot(String name, Long id);
 
   @Query("SELECT a FROM Asset a JOIN FETCH a.category")
   List<Asset> findAllWithCategory();

@@ -14,7 +14,7 @@ Discovery layer for the full Spring REST surface: every route, client audience, 
 The system documentation MUST maintain one route index that lists method, path, client (web/mobile/shared/admin), roles, and owning capability. When a route is added, removed, or reassigned, this index MUST be updated in the same change set.
 
 #### Scenario: Find contract for a path
-- GIVEN an engineer needs the contract for `/api/equipment`
+- GIVEN an engineer needs the contract for `/api/assets`
 - WHEN they open this capability's route table
 - THEN they find a pointer to equipment-browse (not a second full copy of the contract)
 

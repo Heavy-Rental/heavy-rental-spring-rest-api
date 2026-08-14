@@ -31,7 +31,7 @@ public class RestExceptionHandler {
 				.reduce((a, b) -> a + "; " + b)
 				.orElse("Invalid request");
 		return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-				.body(error("validation_failed", message));
+				.body(error("bad_request", message));
 	}
 
 	@ExceptionHandler(ObjectOptimisticLockingFailureException.class)
