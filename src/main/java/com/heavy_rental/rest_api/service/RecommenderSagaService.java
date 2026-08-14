@@ -1,10 +1,13 @@
 package com.heavy_rental.rest_api.service;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -25,12 +28,14 @@ import com.heavy_rental.rest_api.client.haystack.dto.IngestFromProjectSpecRespon
 import com.heavy_rental.rest_api.client.haystack.dto.NeedSummaryDto;
 import com.heavy_rental.rest_api.client.haystack.dto.ProjectKnowledgeQueryRequest;
 import com.heavy_rental.rest_api.client.haystack.dto.ProjectKnowledgeQueryResponse;
+import com.heavy_rental.rest_api.client.haystack.dto.RecommendEquipmentDto;
 import com.heavy_rental.rest_api.client.haystack.dto.RecommendItemDto;
 import com.heavy_rental.rest_api.dto.ExpectedBudgetResponse;
 import com.heavy_rental.rest_api.dto.NeedSummaryResponse;
 import com.heavy_rental.rest_api.dto.ProjectKnowledgeQueryPortalRequest;
 import com.heavy_rental.rest_api.dto.ProjectKnowledgeQueryPortalResponse;
 import com.heavy_rental.rest_api.dto.ProjectSpecSubmitCommand;
+import com.heavy_rental.rest_api.dto.RecommendEquipmentResponse;
 import com.heavy_rental.rest_api.dto.RecommendItemResponse;
 import com.heavy_rental.rest_api.dto.RecommendationSessionResponse;
 import com.heavy_rental.rest_api.dto.SubmitProjectSpecRequest;
@@ -38,6 +43,7 @@ import com.heavy_rental.rest_api.dto.SubmitProjectSpecResponse;
 import com.heavy_rental.rest_api.entity.AIRecommendation;
 import com.heavy_rental.rest_api.entity.User;
 import com.heavy_rental.rest_api.repository.AIRecommendationRepository;
+import com.heavy_rental.rest_api.repository.AssetImageRepository;
 
 /**
  * Application saga for the portal recommender journey (S2b).
@@ -72,17 +78,22 @@ public class RecommenderSagaService {
 	public static final String DEFAULT_ASSET_QUERY =
 			"Summarize equipment needs and recommend suitable assets for this project specification.";
 
+	private static final String JPEG_DATA_URI_PREFIX = "data:image/jpeg;base64,";
+
 	private final HaystackRecommenderClient haystackClient;
 	private final AIRecommendationRepository recommendationRepository;
 	private final CurrentUserService currentUserService;
+	private final AssetImageRepository assetImageRepository;
 
 	public RecommenderSagaService(
 			HaystackRecommenderClient haystackClient,
 			AIRecommendationRepository recommendationRepository,
-			CurrentUserService currentUserService) {
+			CurrentUserService currentUserService,
+			AssetImageRepository assetImageRepository) {
 		this.haystackClient = haystackClient;
 		this.recommendationRepository = recommendationRepository;
 		this.currentUserService = currentUserService;
+		this.assetImageRepository = assetImageRepository;
 	}
 
 	/**
@@ -314,25 +325,107 @@ public class RecommenderSagaService {
 		return new ExpectedBudgetResponse(b.amount(), b.currency(), b.source());
 	}
 
-	private static List<RecommendItemResponse> mapItems(List<RecommendItemDto> items) {
+	private List<RecommendItemResponse> mapItems(List<RecommendItemDto> items) {
 		if (items == null || items.isEmpty()) {
 			return List.of();
 		}
+		List<Long> catalogIds = items.stream()
+				.map(i -> i.equipment() != null ? catalogAssetId(i.equipment().id()) : null)
+				.filter(Objects::nonNull)
+				.distinct()
+				.toList();
+		Map<Long, String> imgByAssetId = loadCatalogImages(catalogIds);
 		return items.stream()
-				.map(i -> {
-					String equipId = i.equipment() != null ? i.equipment().id() : null;
-					String equipName = i.equipment() != null ? i.equipment().name() : null;
-					String category = i.equipment() != null ? i.equipment().category() : null;
-					return new RecommendItemResponse(
-							i.rankOrder(),
-							equipId,
-							equipName,
-							category,
-							i.baseDailyRate(),
-							i.lineTotal(),
-							i.matchScore());
-				})
+				.map(i -> new RecommendItemResponse(
+						i.rankOrder(),
+						i.matchScore(),
+						i.reason(),
+						i.lineTotal(),
+						i.quantity(),
+						mapEquipment(i.equipment(), i.baseDailyRate(), imgByAssetId)))
 				.collect(Collectors.toList());
+	}
+
+	/**
+	 * Nested equipment for portal quote lines. Catalog fields are pass-through — never invent.
+	 * {@code img} is the catalog JPEG data URI when {@code id} matches {@code asset_images};
+	 * otherwise haystack {@code img} is kept. If haystack puts {@code baseDailyRate} on the
+	 * item, copy it onto equipment when missing.
+	 */
+	private static RecommendEquipmentResponse mapEquipment(
+			RecommendEquipmentDto e,
+			BigDecimal itemBaseDailyRate,
+			Map<Long, String> imgByAssetId) {
+		if (e == null) {
+			return null;
+		}
+		Object id = normalizeEquipmentId(e.id());
+		BigDecimal baseDailyRate = e.baseDailyRate() != null ? e.baseDailyRate() : itemBaseDailyRate;
+		List<String> tags = e.tags() != null ? e.tags() : List.of();
+		String img = e.img();
+		if (id instanceof Long catalogId) {
+			String catalogImg = imgByAssetId.get(catalogId);
+			if (catalogImg != null) {
+				img = catalogImg;
+			}
+		}
+		return new RecommendEquipmentResponse(
+				id,
+				e.name(),
+				e.category(),
+				baseDailyRate,
+				e.weekly(),
+				e.capacity(),
+				e.platformHeight(),
+				e.purchaseYear(),
+				e.location(),
+				e.available(),
+				img,
+				e.desc(),
+				tags);
+	}
+
+	private Map<Long, String> loadCatalogImages(List<Long> catalogIds) {
+		if (catalogIds.isEmpty()) {
+			return Map.of();
+		}
+		return assetImageRepository.findByAssetIdIn(catalogIds).stream()
+				.filter(image -> image.getAsset() != null
+						&& image.getAsset().getId() != null
+						&& image.getImage() != null
+						&& !image.getImage().isBlank())
+				.collect(Collectors.toMap(
+						image -> image.getAsset().getId(),
+						image -> JPEG_DATA_URI_PREFIX + image.getImage(),
+						(first, second) -> first));
+	}
+
+	/** Numeric catalog asset id, or {@code null} when haystack id is not a catalog PK. */
+	private static Long catalogAssetId(Object id) {
+		Object normalized = normalizeEquipmentId(id);
+		return normalized instanceof Long catalogId ? catalogId : null;
+	}
+
+	/** Prefer numeric catalog ids as {@link Long}; keep non-numeric strings as-is. */
+	private static Object normalizeEquipmentId(Object id) {
+		if (id == null) {
+			return null;
+		}
+		if (id instanceof Number n) {
+			return n.longValue();
+		}
+		if (id instanceof String s) {
+			String trimmed = s.trim();
+			if (trimmed.isEmpty()) {
+				return null;
+			}
+			try {
+				return Long.parseLong(trimmed);
+			} catch (NumberFormatException ignored) {
+				return trimmed;
+			}
+		}
+		return id;
 	}
 
 	private static List<String> mergeWarnings(List<String> call1, List<String> call2) {

@@ -58,7 +58,7 @@ class AuthenticationIntegrationTest {
 	@BeforeEach
 	void createUser() {
 		email = "user_" + UUID.randomUUID().toString().substring(0, 8) + "@example.com";
-		password = "password123";
+		password = "password123"; // nosemgrep: generic.secrets.security.detected-generic-secret
 		userRepository.save(User.builder()
 				.name("Test User " + UUID.randomUUID().toString().substring(0, 8))
 				.password(passwordEncoder.encode(password))

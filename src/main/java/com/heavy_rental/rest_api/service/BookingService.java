@@ -36,7 +36,7 @@ public class BookingService {
      * The customer's up-front deposit as a fraction of the booking total. This is the
      * single source of truth for the deposit rate — PaymentService only ever reads the
      * persisted Booking.depositAmount this produces, it never computes a rate itself
-     * (see SPEC-stripe.md §4.3).
+     * (see openspec/specs/payments-stripe/).
      */
     private static final BigDecimal DEPOSIT_RATE = new BigDecimal("0.30");
 
@@ -164,6 +164,15 @@ public class BookingService {
         booking.setSiteAddress(request.siteAddress());
         booking.setDeliveryNotes(request.deliveryNotes());
 
+        bookingRepository.save(booking);
+        return toResponse(booking);
+    }
+
+    @Transactional
+    public BookingResponse updateStatus(Long bookingId, String requestedStatus) {
+        Booking booking = findByIdOr404(bookingId);
+        Booking.BookingStatus status = parseStatusOr400(requestedStatus);
+        booking.setStatus(status);
         bookingRepository.save(booking);
         return toResponse(booking);
     }

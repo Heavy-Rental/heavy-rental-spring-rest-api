@@ -21,6 +21,7 @@ public record AssetResponse(
         String location,
         List<String> tags,
         String serialno,
-        LocalDateTime lastConditionUpdatedAt) {
+        LocalDateTime lastConditionUpdatedAt,
+        Double utilization) {
 
 }

@@ -8,10 +8,9 @@ import java.math.BigDecimal;
  */
 public record RecommendItemResponse(
 		Integer rankOrder,
-		String equipmentId,
-		String equipmentName,
-		String category,
-		BigDecimal baseDailyRate,
+		BigDecimal matchScore,
+		String reason,
 		BigDecimal lineTotal,
-		BigDecimal matchScore) {
+		Integer quantity,
+		RecommendEquipmentResponse equipment) {
 }

@@ -8,6 +8,7 @@ import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.wireMoc
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.hamcrest.Matchers.startsWith;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -154,9 +155,17 @@ class RecommendationControllerIntegrationTest {
 								  "items": [
 								    {
 								      "rankOrder": 1,
-								      "equipment": { "id": "1", "name": "CAT 320", "category": "Excavator" },
-								      "baseDailyRate": 400.00,
-								      "lineTotal": 2000.00
+								      "matchScore": 0.9,
+								      "reason": "Matches capacity",
+								      "quantity": 1,
+								      "lineTotal": 2000.00,
+								      "equipment": {
+								        "id": "1",
+								        "name": "CAT 320",
+								        "category": "Excavator",
+								        "baseDailyRate": 400.00,
+								        "platformHeight": 6.10
+								      }
 								    }
 								  ],
 								  "warnings": []
@@ -187,7 +196,7 @@ class RecommendationControllerIntegrationTest {
 				.andExpect(status().isUnauthorized());
 	}
 
-	@DisplayName("Scenario: JSON submit returns quote, persists session, knowledge-query is Call 3")
+	@DisplayName("Scenario: JSON submit returns nested quote items (FR-S2B-010), persists session, knowledge-query is Call 3")
 	@Test
 	void jsonSubmit_returnsQuote_andPersistsSession() throws Exception {
 		MvcResult result = mockMvc.perform(post("/api/recommendations/project-spec")
@@ -206,7 +215,21 @@ class RecommendationControllerIntegrationTest {
 				.andExpect(jsonPath("$.recommendationId").isNumber())
 				.andExpect(jsonPath("$.ingestId").value("ing_it_1"))
 				.andExpect(jsonPath("$.quoteRef").value("QUO-IT-1"))
-				.andExpect(jsonPath("$.items[0].equipmentId").value("1"))
+				.andExpect(jsonPath("$.items[0].rankOrder").value(1))
+				.andExpect(jsonPath("$.items[0].matchScore").value(0.9))
+				.andExpect(jsonPath("$.items[0].reason").value("Matches capacity"))
+				.andExpect(jsonPath("$.items[0].quantity").value(1))
+				.andExpect(jsonPath("$.items[0].lineTotal").value(2000.00))
+				.andExpect(jsonPath("$.items[0].equipment.id").value(1))
+				.andExpect(jsonPath("$.items[0].equipment.name").value("CAT 320"))
+				.andExpect(jsonPath("$.items[0].equipment.category").value("Excavator"))
+				.andExpect(jsonPath("$.items[0].equipment.baseDailyRate").value(400.00))
+				.andExpect(jsonPath("$.items[0].equipment.platformHeight").value(6.10))
+				.andExpect(jsonPath("$.items[0].equipment.img")
+						.value(startsWith("data:image/jpeg;base64,")))
+				// FR-S2B-010: must not flatten equipment into legacy top-level fields
+				.andExpect(jsonPath("$.items[0].equipmentId").doesNotExist())
+				.andExpect(jsonPath("$.items[0].equipmentName").doesNotExist())
 				.andExpect(jsonPath("$.answer").doesNotExist())
 				.andReturn();
 
@@ -232,6 +255,52 @@ class RecommendationControllerIntegrationTest {
 				.andExpect(jsonPath("$.answer").value("Working height depends on platform choice."));
 
 		WIRE_MOCK.verify(1, postRequestedFor(urlEqualTo(HaystackRecommenderClient.PATH_QUERY)));
+	}
+
+	@DisplayName("Scenario: Null platformHeight is omitted from portal equipment JSON")
+	@Test
+	void jsonSubmit_omitsNullPlatformHeight() throws Exception {
+		WIRE_MOCK.stubFor(com.github.tomakehurst.wiremock.client.WireMock.post(
+						urlEqualTo(HaystackRecommenderClient.PATH_RECOMMEND))
+				.willReturn(aResponse()
+						.withStatus(200)
+						.withHeader("Content-Type", "application/json")
+						.withBody("""
+								{
+								  "user_id": "u1",
+								  "ingest_id": "ing_it_1",
+								  "quoteRef": "QUO-IT-1",
+								  "confidenceScore": 0.9,
+								  "days": 5,
+								  "estimatedTotal": 2000.00,
+								  "specSummary": "Excavation",
+								  "rationale": "Matches capacity",
+								  "items": [
+								    {
+								      "rankOrder": 1,
+								      "matchScore": 0.9,
+								      "reason": "Matches capacity",
+								      "quantity": 1,
+								      "lineTotal": 2000.00,
+								      "equipment": {
+								        "id": "1",
+								        "name": "CAT 320",
+								        "category": "Excavator",
+								        "baseDailyRate": 400.00
+								      }
+								    }
+								  ],
+								  "warnings": []
+								}
+								""")));
+
+		mockMvc.perform(post("/api/recommendations/project-spec")
+						.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("{\"projectText\":\"Need excavator for foundation dig\"}"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.items[0].equipment.name").value("CAT 320"))
+				.andExpect(jsonPath("$.items[0].equipment.platformHeight").doesNotExist());
 	}
 
 	@DisplayName("Scenario: Multipart project-spec submit returns Call 2 quote")

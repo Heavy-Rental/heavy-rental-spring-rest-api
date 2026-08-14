@@ -3,9 +3,11 @@
 | Field | Value |
 |-------|--------|
 | **Package** | `Feasibility_Study_Spring/` |
-| **Version** | **2.1.0** |
-| **Date** | 2026-08-12 |
+| **Version** | **2.1.1** |
+| **Date** | 2026-08-13 |
 | **S2b in this Spring repo** | **As-built** (HR-106) |
+| **Upstream repo** | [Heavy-Rental/haystack-fast-api](https://github.com/Heavy-Rental/haystack-fast-api) (**read-only**) |
+| **Synced from** | `develop` @ `12f89dda9b27ba0196c7a37f7f4310459731cb1e` |
 
 ---
 
@@ -35,7 +37,7 @@ Use [`phase2-s2b-spring-implementation-plan.md`](./phase2-s2b-spring-implementat
 | **S2b-5** | Ops runbook + config docs | ✅ |
 
 **Minimum combine:** S2b-1 + S2b-2 + headers in one PR; portal dual-hop saga second; docs third.  
-**Shipped as one capability** under OpenSpec change `s2b-resilient-haystack-client`.
+**Shipped as one capability** under archived OpenSpec change `openspec/changes/archive/2026-08-12-s2b-resilient-haystack-client/`.
 
 ---
 
@@ -59,9 +61,11 @@ Use [`phase2-s2b-spring-implementation-plan.md`](./phase2-s2b-spring-implementat
 
 | Item | Location |
 |------|----------|
-| Living SPEC | `specification/SPEC-haystack-recommender-client.md` |
 | OpenSpec SoT | `openspec/specs/haystack-recommender/spec.md` |
-| SPDD canvas | `spdd/prompt/S2b-resilient-haystack-recommender-client.md` |
+| Portal API contract | `openspec/specs/haystack-recommender/contracts/portal-api.md` |
+| Proxy hop map | `openspec/specs/spring-proxy-endpoints/spec.md` |
+| OpenSPDD canvas | `spdd/prompt/S2b-resilient-haystack-recommender-client.md` |
+| Archived Spec-Kit pack | `openspec/changes/archive/2026-08-12-s2b-resilient-haystack-client/spec-kit/` |
 | Client | `…/client/haystack/HaystackRecommenderClient.java` |
 | Saga | `…/service/RecommenderSagaService.java` |
 | Portal | `…/controller/RecommendationController.java` |

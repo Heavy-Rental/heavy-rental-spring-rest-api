@@ -24,6 +24,16 @@ import org.springframework.web.server.ResponseStatusException;
 @RestControllerAdvice
 public class RestExceptionHandler {
 
+	@ExceptionHandler(MethodArgumentNotValidException.class)
+	public ResponseEntity<Map<String, String>> handleValidation(MethodArgumentNotValidException ex) {
+		String message = ex.getBindingResult().getFieldErrors().stream()
+				.map(fe -> fe.getField() + ": " + fe.getDefaultMessage())
+				.reduce((a, b) -> a + "; " + b)
+				.orElse("Invalid request");
+		return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+				.body(error("bad_request", message));
+	}
+
 	@ExceptionHandler(ObjectOptimisticLockingFailureException.class)
 	public ResponseEntity<Map<String, String>> handleOptimisticLocking() {
 		return ResponseEntity.status(HttpStatus.CONFLICT)
@@ -40,15 +50,6 @@ public class RestExceptionHandler {
 	public ResponseEntity<Map<String, String>> handleAuthentication(AuthenticationException ex) {
 		return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
 				.body(error("unauthorized", ex.getMessage() != null ? ex.getMessage() : "Authentication failed"));
-	}
-
-	@ExceptionHandler(MethodArgumentNotValidException.class)
-	public ResponseEntity<Map<String, String>> handleValidation(MethodArgumentNotValidException ex) {
-		String message = ex.getBindingResult().getFieldErrors().stream()
-				.findFirst()
-				.map(fe -> fe.getField() + " " + fe.getDefaultMessage())
-				.orElse("Validation failed");
-		return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error("bad_request", message));
 	}
 
 	@ExceptionHandler(ResponseStatusException.class)
