@@ -45,7 +45,7 @@ No entity/schema change — columns already exist.
 |------|-------------|
 | B1–B3 timestamps, day math, derive booking | In |
 | B4 preview endpoint | Not needed — `POST .../quote` is the freeze |
-| B5 `POST /api/pricing/estimate` | **Dropped** — see [`../pricing-estimate/`](../pricing-estimate/) if a server estimate is still wanted |
+| B5 `POST /api/pricing/estimate` | **Dropped** — see [`../../pricing-estimate/`](../../pricing-estimate/) if a server estimate is still wanted |
 | B6 deposit → `PENDING_CONFIRMED` | Already as-built in `PaymentWebhookService` |
 | B7 quote refreshes `updatedAt` | In (step 1) |
 | B8 response timestamps | In (step 5) |

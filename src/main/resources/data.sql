@@ -136,13 +136,16 @@ SELECT setval(pg_get_serial_sequence('asset_images', 'id'), COALESCE((SELECT MAX
 -- ============================================================
 -- 4. rental_plan
 -- ============================================================
+-- Exactly one ACTIVE plan (DRAFT/SAVED/QUOTED) per customer — everything else MUST be
+-- CONVERTED or CANCELLED (FR-RP-001/FR-RP-010). Only plan 3 (QUOTED) is active here;
+-- 1/4/5 are CONVERTED and 2/6 are CANCELLED to demonstrate both terminal states.
 INSERT INTO rental_plan (id, customer_id, start_date, end_date, total_amount, status, site_address, site_postal_code, created_at, updated_at, version) VALUES
-  (1, (SELECT id FROM users WHERE name = 'Alex Tan'), '2026-08-20', '2026-08-25', 1050.00, 'DRAFT',    '88 Tuas South Ave 3',              'S(637311)', '2026-08-01 09:00:00', '2026-08-01 09:00:00', 0),
-  (2, (SELECT id FROM users WHERE name = 'Alex Tan'), '2026-08-18', '2026-08-22', 480.00,  'SAVED',    '15 Pioneer Sector 1',              'S(628413)', '2026-08-02 10:00:00', '2026-08-02 10:00:00', 0),
+  (1, (SELECT id FROM users WHERE name = 'Alex Tan'), '2026-08-20', '2026-08-25', 1050.00, 'CONVERTED','88 Tuas South Ave 3',              'S(637311)', '2026-08-01 09:00:00', '2026-08-01 09:00:00', 0),
+  (2, (SELECT id FROM users WHERE name = 'Alex Tan'), '2026-08-18', '2026-08-22', NULL,    'CANCELLED','15 Pioneer Sector 1',              'S(628413)', '2026-08-02 10:00:00', '2026-08-02 14:00:00', 0),
   (3, (SELECT id FROM users WHERE name = 'Alex Tan'), '2026-09-01', '2026-09-05', 1440.00, 'QUOTED',   '20 Jurong Port Road',              'S(619094)', '2026-08-03 11:00:00', '2026-08-03 15:00:00', 0),
   (4, (SELECT id FROM users WHERE name = 'Alex Tan'), '2026-07-20', '2026-07-22', 900.00,  'CONVERTED','12 Commercial Avenue, Marina South','S(018982)', '2026-07-15 10:30:00', '2026-07-15 10:30:00', 0),
   (5, (SELECT id FROM users WHERE name = 'Alex Tan'), '2026-08-10', '2026-08-14', 1440.00, 'CONVERTED','20 Jurong Port Road',              'S(619094)', '2026-08-01 09:00:00', '2026-08-01 09:00:00', 0),
-  (6, (SELECT id FROM users WHERE name = 'Alex Tan'), '2026-10-05', '2026-10-09', 2400.00, 'DRAFT',    '5 Tampines Industrial Ave',        'S(528896)', '2026-08-04 09:00:00', '2026-08-04 09:00:00', 0)
+  (6, (SELECT id FROM users WHERE name = 'Alex Tan'), '2026-10-05', '2026-10-09', NULL,    'CANCELLED','5 Tampines Industrial Ave',        'S(528896)', '2026-08-04 09:00:00', '2026-08-04 09:30:00', 0)
 ON CONFLICT (id) DO NOTHING;
 
 -- Sync sequence so runtime inserts don't collide with the explicit ids above

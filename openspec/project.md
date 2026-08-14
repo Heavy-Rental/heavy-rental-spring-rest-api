@@ -44,7 +44,7 @@ HTTP tables: `specs/<capability>/contracts/`.
 | [`equipment-browse`](./specs/equipment-browse/spec.md) | Equipment API |
 | [`booking-delivery-return`](./specs/booking-delivery-return/spec.md) | Bookings / ops |
 | [`payments-stripe`](./specs/payments-stripe/spec.md) | Stripe payments |
-| [`rental-plan-quote`](./specs/rental-plan-quote/spec.md) | Rental plans |
+| [`rental-plan-quote`](./specs/rental-plan-quote/spec.md) | Rental plans + checkout |
 | [`admin-users`](./specs/admin-users/spec.md) | Admin users |
 | [`monthly-utilization`](./specs/monthly-utilization/spec.md) | Admin utilization |
 | [`haystack-recommender`](./specs/haystack-recommender/spec.md) | S2b recommender |
@@ -55,13 +55,13 @@ HTTP tables: `specs/<capability>/contracts/`.
 | Change | Status |
 |--------|--------|
 | [`changes/pricing-estimate/`](./changes/pricing-estimate/) | **Design only** — open availability decision; not implemented |
-| [`changes/rental-plan-checkout-conversion/`](./changes/rental-plan-checkout-conversion/) | **Design only** — plan → booking checkout; not implemented |
 
 ## Archives
 
 | Archive | Contents |
 |---------|----------|
 | [`changes/archive/2026-08-12-s2b-resilient-haystack-client/`](./changes/archive/2026-08-12-s2b-resilient-haystack-client/) | Completed S2b change |
+| [`changes/archive/2026-08-13-rental-plan-checkout-conversion/`](./changes/archive/2026-08-13-rental-plan-checkout-conversion/) | Completed plan → booking checkout (now living SoT) |
 | [`changes/archive/2026-08-docs-changelog/`](./changes/archive/2026-08-docs-changelog/) | Historical CHANGES-*.md |
 
 ## Conventions

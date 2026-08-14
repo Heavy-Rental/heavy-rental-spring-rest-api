@@ -33,6 +33,6 @@ Recorded unresolved so it is not decided by omission.
 ## Related
 
 - Living rental plan pricing: [`../../specs/rental-plan-quote/`](../../specs/rental-plan-quote/)  
-- Plan checkout (separate change): [`../rental-plan-checkout-conversion/`](../rental-plan-checkout-conversion/)  
+- Plan checkout (as-built): [`../../specs/rental-plan-quote/contracts/checkout.md`](../../specs/rental-plan-quote/contracts/checkout.md)  
 - Proxy map: [`../../specs/spring-proxy-endpoints/`](../../specs/spring-proxy-endpoints/)  
 - Route index: [`../../specs/api-index/contracts/routes.md`](../../specs/api-index/contracts/routes.md)  

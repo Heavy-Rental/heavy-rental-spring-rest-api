@@ -23,7 +23,7 @@
 | Recommender | `haystack-recommender` + portal contract + `../Feasibility_Study_Spring/` |
 | Data / seed / tests | `entity-repository`, `seed-data`, `testing` |
 | Estimate (not built) | `changes/pricing-estimate/` |
-| Plan checkout (not built) | `changes/rental-plan-checkout-conversion/` |
+| Plan checkout | `rental-plan-quote` + `booking-delivery-return` (as-built); archive `changes/archive/2026-08-13-rental-plan-checkout-conversion/` |
 
 ## Haystack upstream (read-only)
 
@@ -36,4 +36,5 @@ https://github.com/Heavy-Rental/haystack-fast-api — Call 1/2/3 contracts under
 ## Archives
 
 - S2b change + Spec-Kit pack: [`changes/archive/2026-08-12-s2b-resilient-haystack-client/`](./changes/archive/2026-08-12-s2b-resilient-haystack-client/)
+- Plan checkout: [`changes/archive/2026-08-13-rental-plan-checkout-conversion/`](./changes/archive/2026-08-13-rental-plan-checkout-conversion/)
 - Doc changelogs: [`changes/archive/2026-08-docs-changelog/`](./changes/archive/2026-08-docs-changelog/)

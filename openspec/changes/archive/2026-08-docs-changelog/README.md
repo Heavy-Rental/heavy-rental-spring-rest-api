@@ -9,4 +9,4 @@ Historical plain-language change logs migrated out of `specification/` during Op
 
 These files are **audit history only** — do not treat as living contracts.
 
-Leftover long-form `specification/SPEC-*.md` files (api-index, booking-delivery-return, entity-repository, project-environment, rental-plan-quote) were retired after this archive era. As-built SoT is `openspec/specs/`. Unbuilt checkout work is [`../../rental-plan-checkout-conversion/`](../../rental-plan-checkout-conversion/). Full SDD narratives remain in git history.
+Leftover long-form `specification/SPEC-*.md` files (api-index, booking-delivery-return, entity-repository, project-environment, rental-plan-quote) were retired after this archive era. As-built SoT is `openspec/specs/`. Checkout work is as-built under [`../../../specs/rental-plan-quote/`](../../../specs/rental-plan-quote/); design archive: [`../2026-08-13-rental-plan-checkout-conversion/`](../2026-08-13-rental-plan-checkout-conversion/). Full SDD narratives remain in git history.

@@ -19,7 +19,7 @@ Legend: **Shared** = web + mobile; **Web** / **Mobile** / **Admin** = primary cl
 
 | Method | Path | Client | Roles | Contract |
 |--------|------|--------|-------|----------|
-| `POST` | `/api/bookings` | Shared | USER/ADMIN (caller = customer) | booking create (see payments branch / booking service); list/update [booking-delivery-return](../../booking-delivery-return/). Plan-backed checkout: design-only [`../../../changes/rental-plan-checkout-conversion/`](../../../changes/rental-plan-checkout-conversion/) |
+| `POST` | `/api/bookings` | Shared | USER/ADMIN (caller = customer) | create + plan-backed checkout [booking-delivery-return](../../booking-delivery-return/) · [checkout](../../rental-plan-quote/contracts/checkout.md) |
 | `GET` | `/api/bookings` | Mobile+ | USER/ADMIN | [booking-delivery-return](../../booking-delivery-return/) |
 | `GET` | `/api/bookings/{id}` | Mobile+ | USER/ADMIN | same |
 | `PUT` | `/api/bookings/{id}` | Mobile+ | USER/ADMIN | same |
@@ -45,6 +45,7 @@ Legend: **Shared** = web + mobile; **Web** / **Mobile** / **Admin** = primary cl
 | `POST` | `/api/rentalPlans/{id}/items` | Web | owner | same |
 | `DELETE` | `/api/rentalPlans/{id}/items/{itemId}` | Web | owner | same |
 | `POST` | `/api/rentalPlans/{id}/quote` | Web | owner | same — **Spring-only**, not haystack |
+| `POST` | `/api/rentalPlans/{id}/cancel` | Web | owner | same |
 
 ## Recommender (S2b)
 
@@ -67,7 +68,6 @@ Legend: **Shared** = web + mobile; **Web** / **Mobile** / **Admin** = primary cl
 | Method | Path | Notes |
 |--------|------|--------|
 | `POST` | `/api/pricing/estimate` | Design only — active change [`../../../changes/pricing-estimate/`](../../../changes/pricing-estimate/) |
-| `POST` | `/api/bookings` (`rentalPlanId`) | Design only behavior on existing route — [`../../../changes/rental-plan-checkout-conversion/`](../../../changes/rental-plan-checkout-conversion/) |
 
 ## Haystack proxy map
 

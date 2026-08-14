@@ -47,4 +47,4 @@ May also include amount fields when booking-create branch is present (`totalAmou
 
 Errors: shared `{ "error", "message" }` — `400` invalid transition/enum or `validation_failed` (bad `siteAddress`), `404` missing.
 
-`POST /api/bookings` (create) uses the same `siteAddress` postal-code rule on `CreateBookingRequest`. Plan-backed checkout is proposed in [`../../../changes/rental-plan-checkout-conversion/`](../../../changes/rental-plan-checkout-conversion/).
+`POST /api/bookings` (create): `siteAddress` postal-code rule on `CreateBookingRequest`. With `rentalPlanId`, items/dates are ignored and the booking is derived from the plan — [`../../rental-plan-quote/contracts/checkout.md`](../../rental-plan-quote/contracts/checkout.md). Direct create uses inclusive day count (FR-BDR-010). Extra `409` codes: `quote_not_ready`, `quote_expired`.

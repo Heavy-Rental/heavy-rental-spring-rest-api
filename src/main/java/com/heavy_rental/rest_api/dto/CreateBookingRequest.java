@@ -6,6 +6,12 @@ import java.util.List;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 
+/**
+ * {@code items}/{@code startDate}/{@code endDate} are only required when {@code rentalPlanId}
+ * is absent (direct booking). When {@code rentalPlanId} is present, items/dates/pricing are
+ * derived from the plan's own persisted records instead — any of these three fields sent
+ * alongside it are ignored, not merged or validated against (BookingService.createFromRentalPlan).
+ */
 public record CreateBookingRequest(
         List<CreateBookingItemRequest> items,
         LocalDate startDate,

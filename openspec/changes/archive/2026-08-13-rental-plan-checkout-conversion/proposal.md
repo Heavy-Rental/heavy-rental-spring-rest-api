@@ -3,7 +3,7 @@
 | Field | Value |
 |-------|--------|
 | **Change id** | `rental-plan-checkout-conversion` |
-| **Status** | **Proposed / design only — not implemented** |
+| **Status** | **Archived — implemented** (living SoT: `openspec/specs/rental-plan-quote/` + `booking-delivery-return`) |
 | **Date** | 2026-08-13 |
 | **Routes** | Existing `POST /api/bookings`, `POST/DELETE /api/rentalPlans/{id}/items`, `POST /api/rentalPlans/{id}/quote` |
 
@@ -27,14 +27,14 @@ Cart → quote → checkout is incomplete on the as-built path:
 
 ## Out of scope
 
-- `POST /api/pricing/estimate` — separate change [`../pricing-estimate/`](../pricing-estimate/); this pack treats single-item preview as client-side `baseDailyRate × (days + 1)`
+- `POST /api/pricing/estimate` — separate change [`../../pricing-estimate/`](../../pricing-estimate/); this pack treats single-item preview as client-side `baseDailyRate × (days + 1)`
 - Haystack-backed quoting
 - New list-filter for “active plan only”
 - Implementation in this documentation change
 
 ## Related
 
-- Living quote SoT: [`../../specs/rental-plan-quote/`](../../specs/rental-plan-quote/)
-- Living booking SoT: [`../../specs/booking-delivery-return/`](../../specs/booking-delivery-return/)
-- Frontend wire: [`contracts/portal-api.md`](./contracts/portal-api.md)
-- Route index: [`../../specs/api-index/contracts/routes.md`](../../specs/api-index/contracts/routes.md)
+- Living quote SoT: [`../../../specs/rental-plan-quote/`](../../../specs/rental-plan-quote/)
+- Living booking SoT: [`../../../specs/booking-delivery-return/`](../../../specs/booking-delivery-return/)
+- Frontend wire (as-built): [`../../../specs/rental-plan-quote/contracts/checkout.md`](../../../specs/rental-plan-quote/contracts/checkout.md)
+- Route index: [`../../../specs/api-index/contracts/routes.md`](../../../specs/api-index/contracts/routes.md)

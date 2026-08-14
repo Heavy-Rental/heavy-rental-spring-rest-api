@@ -60,4 +60,9 @@ public class RentalPlanController {
         return rentalPlanService.requestQuote(id, jwt.getSubject());
     }
 
+    @PostMapping("/{id}/cancel")
+    public RentalPlanResponse cancel(@PathVariable Long id, @AuthenticationPrincipal Jwt jwt) {
+        return rentalPlanService.cancel(id, jwt.getSubject());
+    }
+
 }

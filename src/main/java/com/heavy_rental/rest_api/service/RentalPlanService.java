@@ -16,6 +16,7 @@ import com.heavy_rental.rest_api.repository.RentalPlanRepository;
 import com.heavy_rental.rest_api.repository.UserRepository;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 
 import com.heavy_rental.rest_api.dto.RentalPlanItemRequest;
 import com.heavy_rental.rest_api.entity.Asset;
@@ -65,6 +66,7 @@ public class RentalPlanService {
         plan.setEndDate(request.endDate());
         plan.setSiteAddress(request.siteAddress());
         plan.setStatus(RentalPlan.PlanStatus.DRAFT);
+        plan.setCreatedAt(LocalDateTime.now());
 
         rentalPlanRepository.save(plan);
         return toResponse(plan);
@@ -87,10 +89,6 @@ public class RentalPlanService {
     public RentalPlanResponse addItem(Long planId, RentalPlanItemRequest request, String customerEmail) {
         RentalPlan plan = loadOwnedPlan(planId, customerEmail);
 
-        if (plan.getStatus() == RentalPlan.PlanStatus.QUOTED) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Plan is already quoted — items are locked");
-        }
-
         Asset asset = assetRepository.findById(request.assetId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown assetId"));
 
@@ -103,16 +101,13 @@ public class RentalPlanService {
         item.setSubtotal(price.subtotal());
         rentalPlanRecordRepository.save(item);
 
+        revertQuoteIfNeeded(plan);
         return toResponse(plan);
     }
 
     @Transactional
     public RentalPlanResponse removeItem(Long planId, Long itemId, String customerEmail) {
         RentalPlan plan = loadOwnedPlan(planId, customerEmail);
-
-        if (plan.getStatus() == RentalPlan.PlanStatus.QUOTED) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Plan is already quoted — items are locked");
-        }
 
         RentalPlanRecord item = rentalPlanRecordRepository.findById(itemId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Line item not found"));
@@ -122,15 +117,36 @@ public class RentalPlanService {
         }
 
         rentalPlanRecordRepository.delete(item);
+
+        revertQuoteIfNeeded(plan);
         return toResponse(plan);
+    }
+
+    /**
+     * A QUOTED plan's frozen totalAmount only reflects the item set at the moment it was
+     * quoted. If the cart changes afterward, that price is stale — rather than leaving a
+     * QUOTED plan whose price doesn't match its items, revert to DRAFT (clearing the stale
+     * total) and require a fresh quote before checkout. Deliberate reversal of the previous
+     * "items locked once quoted" behavior — see SPEC-rental-plan-quote.md REQ-2/REQ-3.
+     */
+    private void revertQuoteIfNeeded(RentalPlan plan) {
+        if (plan.getStatus() == RentalPlan.PlanStatus.QUOTED) {
+            plan.setStatus(RentalPlan.PlanStatus.DRAFT);
+            plan.setTotalAmount(null);
+            plan.setUpdatedAt(LocalDateTime.now());
+            rentalPlanRepository.save(plan);
+        }
     }
 
     @Transactional
     public RentalPlanResponse requestQuote(Long planId, String customerEmail) {
         RentalPlan plan = loadOwnedPlan(planId, customerEmail);
 
-        if (plan.getStatus() != RentalPlan.PlanStatus.DRAFT && plan.getStatus() != RentalPlan.PlanStatus.SAVED) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Plan is already quoted");
+        // Re-quoting a QUOTED plan is allowed — it's how a customer refreshes a stale quote
+        // (BookingService's 24-hour freshness check, REQ-6) before checkout. Only a CONVERTED
+        // plan is truly final and can never be quoted again.
+        if (plan.getStatus() == RentalPlan.PlanStatus.CONVERTED) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Plan has already been converted to a booking");
         }
 
         List<RentalPlanRecord> items = rentalPlanRecordRepository.findByRentalPlanId(plan.getId());
@@ -144,6 +160,27 @@ public class RentalPlanService {
 
         plan.setTotalAmount(total);
         plan.setStatus(RentalPlan.PlanStatus.QUOTED);
+        plan.setUpdatedAt(LocalDateTime.now());
+        rentalPlanRepository.save(plan);
+
+        return toResponse(plan);
+    }
+
+    @Transactional
+    public RentalPlanResponse cancel(Long planId, String customerEmail) {
+        RentalPlan plan = loadOwnedPlan(planId, customerEmail);
+
+        if (plan.getStatus() == RentalPlan.PlanStatus.CONVERTED) {
+            throw new RentalPlanConflictException("already_converted",
+                    "Rental plan has already been converted to a booking and cannot be cancelled");
+        }
+        if (plan.getStatus() == RentalPlan.PlanStatus.CANCELLED) {
+            throw new RentalPlanConflictException("already_cancelled", "Rental plan has already been cancelled");
+        }
+
+        plan.setStatus(RentalPlan.PlanStatus.CANCELLED);
+        plan.setTotalAmount(null);
+        plan.setUpdatedAt(LocalDateTime.now());
         rentalPlanRepository.save(plan);
 
         return toResponse(plan);
@@ -177,7 +214,8 @@ public class RentalPlanService {
 
         return new RentalPlanResponse(
                 plan.getId(), plan.getStartDate(), plan.getEndDate(), plan.getSiteAddress(),
-                plan.getStatus().name(), plan.getTotalAmount(), items);
+                plan.getStatus().name(), plan.getTotalAmount(), items,
+                plan.getUpdatedAt(), plan.getCreatedAt());
 
 
                 

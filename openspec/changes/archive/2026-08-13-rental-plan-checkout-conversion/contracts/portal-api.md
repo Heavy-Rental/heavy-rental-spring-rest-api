@@ -2,11 +2,9 @@
 
 | Field | Value |
 |-------|--------|
-| **Change** | `rental-plan-checkout-conversion` |
-| **Status** | **Proposed** — not as-built |
+| **Change** | `rental-plan-checkout-conversion` (archived) |
+| **Status** | **As-built** — living contract: [`../../../../specs/rental-plan-quote/contracts/checkout.md`](../../../../specs/rental-plan-quote/contracts/checkout.md) |
 | **Behavior** | [`../proposal.md`](../proposal.md) · [`../design.md`](../design.md) |
-
-Literal request/response for the web portal once this change is implemented. As-built quote/booking contracts remain in [`../../../specs/rental-plan-quote/`](../../../specs/rental-plan-quote/) and [`../../../specs/booking-delivery-return/`](../../../specs/booking-delivery-return/).
 
 ## Status enum — wire format is UPPERCASE
 
@@ -97,7 +95,7 @@ Filter client-side: at most one plan with `status != "CONVERTED"` (FR-RP-001).
 
 ## Single-item price preview — no new endpoint
 
-This change does **not** add `POST /api/pricing/estimate` (see [`../../pricing-estimate/`](../../pricing-estimate/) if that route is still wanted). Client-side:
+This change does **not** add `POST /api/pricing/estimate` (see [`../../../pricing-estimate/`](../../../pricing-estimate/) if that route is still wanted). Client-side:
 
 ```
 price = asset.baseDailyRate × days

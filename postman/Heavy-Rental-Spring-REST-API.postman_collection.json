@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
     "name": "Heavy Rental Spring REST API",
-    "description": "Manual API tests for `heavy-rental-spring-rest-api` (port 8080).\n\n## Auth flow (required for most routes)\n1. Run **Auth → 1. Get interim Bearer token** — saves `interimToken`.\n2. Run **Auth → 2. Login** — saves `accessToken` (Bearer for other folders).\n3. Run protected requests (collection auth uses `{{accessToken}}`).\n\n## Seed users (local / data.sql)\n| Email | Password | Role |\n|-------|----------|------|\n| admin@localhost | admin1234 | ADMIN |\n| alex.tan@example.sg | customer123 | USER |\n\n## Recommender (S2b)\n- `POST /project-spec` → Call 1 ingest + Call 2 recommend quote (`quoteRef`, `items`).\n- `POST .../knowledge-query` → Call 3 chatbot (`answer`, `sourcesUsed`).\n- Requires haystack at `haystack.base-url` (default `http://localhost:8000`).\n\nSee OpenSpec `openspec/specs/api-index/contracts/routes.md` and `openspec/specs/haystack-recommender/` (portal: `contracts/portal-api.md`).",
+    "description": "Manual API tests for `heavy-rental-spring-rest-api` (port 8080).\n\n## Auth flow (required for most routes)\n1. Run **Auth → 1. Get interim Bearer token** — saves `interimToken`.\n2. Run **Auth → 2. Login** — saves `accessToken` (Bearer for other folders).\n3. Run protected requests (collection auth uses `{{accessToken}}`).\n\n## Seed users (local / data.sql)\n| Email | Password | Role |\n|-------|----------|------|\n| admin@localhost | admin1234 | ADMIN |\n| alex.tan@example.sg | customer123 | USER (has an active QUOTED plan `3` — `POST /rentalPlans` → 409) |\n| mei.lin@example.sg | customer456 | USER (no plans — use for cart → quote → checkout) |\n\n## Rental plans + checkout\n1. Login as **Mei Lin** (or re-quote Alex Tan plan `3` first).\n2. **Rental Plans → Create** → add item → quote. Saves `rentalPlanId`.\n3. **Bookings → Checkout from rental plan** — `rentalPlanId` only; items/dates ignored.\n4. `409 quote_expired` → re-run **Request quote**, then checkout again.\n5. `siteAddress` MUST end with a 6-digit postal code (`400 validation_failed` otherwise).\n\n## Recommender (S2b)\n- `POST /project-spec` → Call 1 ingest + Call 2 recommend quote (`quoteRef`, `items`).\n- `POST .../knowledge-query` → Call 3 chatbot (`answer`, `sourcesUsed`).\n- Requires haystack at `haystack.base-url` (default `http://localhost:8000`).\n\nSee OpenSpec `openspec/specs/api-index/contracts/routes.md`, `openspec/specs/rental-plan-quote/contracts/checkout.md`, and `openspec/specs/haystack-recommender/`.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -23,6 +23,8 @@
     { "key": "password", "value": "customer123" },
     { "key": "recommendationId", "value": "1" },
     { "key": "bookingId", "value": "1" },
+    { "key": "rentalPlanId", "value": "3" },
+    { "key": "rentalPlanItemId", "value": "1" },
     { "key": "equipmentId", "value": "1" },
     { "key": "correlationId", "value": "postman-corr-001" }
   ],
@@ -428,10 +430,46 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"items\": [{ \"assetId\": 1 }],\n  \"startDate\": \"2026-10-01\",\n  \"endDate\": \"2026-10-10\",\n  \"rentalPlanId\": null,\n  \"siteAddress\": \"1 Marina South, Singapore S018989\",\n  \"deliveryNotes\": \"Call site contact 30 min before arrival\"\n}"
+              "raw": "{\n  \"items\": [{ \"assetId\": 1 }],\n  \"startDate\": \"2026-10-01\",\n  \"endDate\": \"2026-10-10\",\n  \"siteAddress\": \"20 Jurong Port Road, 619094\",\n  \"deliveryNotes\": \"Call site contact 30 min before arrival\"\n}"
             },
             "url": "{{baseUrl}}/api/bookings",
-            "description": "Creates booking for JWT user. May 409 if asset overlaps active booking."
+            "description": "Direct booking (no `rentalPlanId`). Prices with inclusive days (`end − start + 1`). `siteAddress` MUST end with a 6-digit postal code. May 409 if the asset overlaps an active booking."
+          },
+          "response": []
+        },
+        {
+          "name": "Checkout from rental plan",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200 || pm.response.code === 201) {",
+                  "  const body = pm.response.json();",
+                  "  if (body.bookingId != null) pm.collectionVariables.set('bookingId', String(body.bookingId));",
+                  "  if (body.id != null) pm.collectionVariables.set('bookingId', String(body.id));",
+                  "}",
+                  "if (pm.response.code === 409) {",
+                  "  const body = pm.response.json();",
+                  "  console.log('checkout 409 error=' + body.error + ' message=' + body.message);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"rentalPlanId\": {{rentalPlanId}},\n  \"siteAddress\": \"20 Jurong Port Road, 619094\",\n  \"deliveryNotes\": \"Checkout from quoted plan\"\n}"
+            },
+            "url": "{{baseUrl}}/api/bookings",
+            "description": "Plan-backed checkout (HR-140). Plan must be `QUOTED` and `updatedAt` within 24h.\n\n- `items`/`startDate`/`endDate` are ignored — derived from the plan.\n- Success: booking `PENDING_DEPOSIT`, plan → `CONVERTED` (saves `bookingId`).\n- `404` plan missing or not yours.\n- `409 quote_not_ready` if not QUOTED.\n- `409 quote_expired` if quote older than 24h — run **Rental Plans → Request quote**, then retry.\n- Seeded Alex Tan plan `3` is QUOTED but likely stale; re-quote first, or walk create→item→quote as Mei Lin."
           },
           "response": []
         },
@@ -465,10 +503,10 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"startDate\": \"2026-10-02\",\n  \"endDate\": \"2026-10-12\",\n  \"siteAddress\": \"1 Marina South, Singapore S018989\",\n  \"deliveryNotes\": \"Updated notes from Postman\"\n}"
+              "raw": "{\n  \"startDate\": \"2026-10-02\",\n  \"endDate\": \"2026-10-12\",\n  \"siteAddress\": \"20 Jurong Port Road, 619094\",\n  \"deliveryNotes\": \"Updated notes from Postman\"\n}"
             },
             "url": "{{baseUrl}}/api/bookings/{{bookingId}}",
-            "description": "Update booking dates/site fields."
+            "description": "Full-replace PUT of dates/site/notes. Does not change status. `siteAddress` MUST end with a 6-digit postal code."
           },
           "response": []
         }
@@ -496,10 +534,10 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"bookingStatus\": \"CONFIRMED\"\n}"
+              "raw": "{\n  \"bookingStatus\": \"MOBILISED\"\n}"
             },
             "url": "{{baseUrl}}/api/deliveries/{{bookingId}}/status",
-            "description": "Body: `{ \"bookingStatus\": \"...\" }` — use a valid `BookingStatus` enum value for your branch."
+            "description": "Only legal transition: current `CONFIRMED` → `MOBILISED`. Other pairs → 400."
           },
           "response": []
         },
@@ -522,10 +560,10 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"bookingStatus\": \"COMPLETED\"\n}"
+              "raw": "{\n  \"bookingStatus\": \"COMPLETED\",\n  \"returnNotes\": \"Returned from Postman\"\n}"
             },
             "url": "{{baseUrl}}/api/returns/{{bookingId}}/status",
-            "description": "Body: `{ \"bookingStatus\": \"...\" }`."
+            "description": "Only legal transition: `MOBILISED` → `COMPLETED`. Optional `returnNotes`."
           },
           "response": []
         }
@@ -572,7 +610,158 @@
       ]
     },
     {
-      "name": "7. Stubs (web)",
+      "name": "7. Rental Plans",
+      "description": "As-built `/api/rentalPlans` (camelCase). Ownership-scoped (`404` not `403`).\n\nWalk (prefer **mei.lin@example.sg** / `customer456`): Create → Add item → Request quote → Bookings → Checkout from rental plan.\n\nAlex Tan already has an active QUOTED plan (`3`), so Create → 409 until it's converted or cancelled. Either run **Request quote** (refresh `updatedAt`) then checkout, or **Cancel plan** to free the one-active-plan slot and Create a fresh one. Plans `2` and `6` are seeded `CANCELLED` for reference.",
+      "item": [
+        {
+          "name": "Create plan",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "  const body = pm.response.json();",
+                  "  if (body.id != null) pm.collectionVariables.set('rentalPlanId', String(body.id));",
+                  "  console.log('rentalPlanId=' + body.id + ' status=' + body.status);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"startDate\": \"2026-11-01\",\n  \"endDate\": \"2026-11-05\",\n  \"siteAddress\": \"20 Jurong Port Road, 619094\"\n}"
+            },
+            "url": "{{baseUrl}}/api/rentalPlans",
+            "description": "`201 DRAFT`. One active plan (DRAFT/SAVED/QUOTED) per customer — second create → `409`. `siteAddress` MUST end with a 6-digit postal code (`400 validation_failed`). Saves `rentalPlanId`."
+          },
+          "response": []
+        },
+        {
+          "name": "List my plans",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/rentalPlans",
+            "description": "Caller's plans only. Includes `createdAt`/`updatedAt`."
+          },
+          "response": []
+        },
+        {
+          "name": "Get plan by id",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/rentalPlans/{{rentalPlanId}}",
+            "description": "Owner or `404`."
+          },
+          "response": []
+        },
+        {
+          "name": "Add item",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201 || pm.response.code === 200) {",
+                  "  const body = pm.response.json();",
+                  "  if (body.items && body.items.length) {",
+                  "    const last = body.items[body.items.length - 1];",
+                  "    if (last.id != null) pm.collectionVariables.set('rentalPlanItemId', String(last.id));",
+                  "  }",
+                  "  console.log('plan status=' + body.status + ' totalAmount=' + body.totalAmount);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"assetId\": 1\n}"
+            },
+            "url": "{{baseUrl}}/api/rentalPlans/{{rentalPlanId}}/items",
+            "description": "Snapshots `Asset.baseDailyRate`. On a `QUOTED` plan this succeeds and reverts status to `DRAFT` (`totalAmount` null). Saves `rentalPlanItemId`."
+          },
+          "response": []
+        },
+        {
+          "name": "Remove item",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/rentalPlans/{{rentalPlanId}}/items/{{rentalPlanItemId}}",
+            "description": "Same revert-to-`DRAFT` behavior if the plan was `QUOTED`."
+          },
+          "response": []
+        },
+        {
+          "name": "Request quote",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  const body = pm.response.json();",
+                  "  console.log('quoted totalAmount=' + body.totalAmount + ' updatedAt=' + body.updatedAt);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/rentalPlans/{{rentalPlanId}}/quote",
+            "description": "Spring-only sum of line subtotals. Sets `QUOTED` and refreshes `updatedAt` (24h checkout window). Re-quote of `QUOTED` is allowed. Empty plan → 400. `CONVERTED` → 409. Then run **Bookings → Checkout from rental plan**."
+          },
+          "response": []
+        },
+        {
+          "name": "Cancel plan",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  const body = pm.response.json();",
+                  "  console.log('plan status=' + body.status + ' totalAmount=' + body.totalAmount);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/rentalPlans/{{rentalPlanId}}/cancel",
+            "description": "Sets `CANCELLED`, clears `totalAmount`, refreshes `updatedAt`. Allowed from `DRAFT`/`SAVED`/`QUOTED`. `CONVERTED` → `409 already_converted`; already `CANCELLED` → `409 already_cancelled`. `CANCELLED` does not count toward the one-active-plan rule, so **Create plan** works again afterward."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "8. Stubs (web)",
       "item": [
         {
           "name": "List depots (stub)",
@@ -580,17 +769,7 @@
             "method": "GET",
             "header": [{ "key": "Accept", "value": "application/json" }],
             "url": "{{baseUrl}}/api/depots",
-            "description": "Always returns `[]` — stub for React portal."
-          },
-          "response": []
-        },
-        {
-          "name": "List rental plans (stub)",
-          "request": {
-            "method": "GET",
-            "header": [{ "key": "Accept", "value": "application/json" }],
-            "url": "{{baseUrl}}/api/rental-plans",
-            "description": "Currently returns `[]` — stub for React portal."
+            "description": "Always returns `[]` — stub for React portal. Rental plans are real under folder 7 (`/api/rentalPlans`)."
           },
           "response": []
         }

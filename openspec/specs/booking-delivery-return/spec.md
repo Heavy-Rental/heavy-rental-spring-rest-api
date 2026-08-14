@@ -59,6 +59,51 @@ The system MUST provide `GET /api/bookings` and `GET /api/bookings/{id}` returni
 
 Responses that include booking equipment MUST list **all** `BookingItem` rows for the booking, not a single asset only.
 
+### Requirement: FR-BDR-009 Plan-backed booking create
+
+When `POST /api/bookings` includes `rentalPlanId`, the system MUST:
+
+1. Load the plan; missing or not owned → `404` (not `403`).
+2. Status ≠ `QUOTED` → `409` with `error` = `quote_not_ready`.
+3. Quote age (`now - plan.updatedAt`) > 24 hours → `409` with `error` = `quote_expired`.
+4. Derive booking items, dates, and `totalAmount` from the plan’s records — MUST NOT recompute from request `items` / dates.
+5. Re-check asset availability overlap before persist.
+6. Persist booking + items (`PENDING_DEPOSIT`) and set the plan `CONVERTED` in the same transaction.
+7. Keep `siteAddress` required (FR-BDR-008). Request `items`/`startDate`/`endDate` MUST be ignored when `rentalPlanId` is present.
+
+`quote_not_ready` and `quote_expired` MUST NOT be collapsed to generic `conflict`.
+
+#### Scenario: Checkout from quoted plan
+- GIVEN the caller owns a QUOTED plan quoted within 24 hours
+- WHEN they POST `/api/bookings` with that `rentalPlanId`
+- THEN `201` booking `totalAmount` equals the plan’s quoted total
+- AND plan status is `CONVERTED`
+
+#### Scenario: Other customer’s plan
+- GIVEN `rentalPlanId` belongs to another customer
+- WHEN checkout is posted
+- THEN `404`
+
+#### Scenario: Unquoted plan
+- GIVEN the plan is `DRAFT`
+- WHEN checkout is posted
+- THEN `409` `quote_not_ready`
+
+#### Scenario: Stale quote
+- GIVEN the plan is `QUOTED` and `updatedAt` is older than 24 hours
+- WHEN checkout is posted
+- THEN `409` `quote_expired`
+- AND the plan is not converted
+
+### Requirement: FR-BDR-010 Inclusive day count on direct booking create
+
+When `rentalPlanId` is absent, `POST /api/bookings` MUST price with inclusive days `ChronoUnit.DAYS.between(start, end) + 1`, the same convention as `DefaultPricingClient`.
+
+#### Scenario: Direct booking day math matches quote
+- GIVEN start `2026-09-01` and end `2026-09-05` and a known `baseDailyRate`
+- WHEN a booking is created without `rentalPlanId`
+- THEN `totalAmount` uses 5 days, not 4
+
 ### Requirement: FR-BDR-008 Site address ends with a 6-digit postal code
 
 `PUT /api/bookings/{id}` and `POST /api/bookings` `siteAddress` MUST be non-blank and MUST end with a 6-digit postal code (`^.*\d{6}$`). Leading/trailing whitespace MUST be stripped before validation. Invalid or missing address MUST return `400` with `error` = `validation_failed` before any write. The `Booking.siteAddress` column itself remains an unconstrained nullable string (seed/direct writes are not DTO-validated).
@@ -73,10 +118,8 @@ Responses that include booking equipment MUST list **all** `BookingItem` rows fo
 
 - List/get not ownership-scoped beyond blanket JWT roles  
 - `DeliveryRecord` / `ReturnRecord` not written by these status endpoints  
-- Booking create is separate (`POST /api/bookings` when present on payment branch / api-index)
 
 ## Out of scope
 
 - Full lifecycle to CONFIRMED / CANCELLED via these routes  
-- Payments  
-- Plan → booking conversion (proposed: [`../../../changes/rental-plan-checkout-conversion/`](../../../changes/rental-plan-checkout-conversion/))
+- Payments
