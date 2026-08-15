@@ -117,6 +117,57 @@ class RentalPlanServiceTest {
     }
 
     @Test
+    void requestQuote_withDynamicPricingEnabled_usesRefreshedPricesFromDynamicPricingService() {
+        RentalPlan plan = ownedPlan(9L, RentalPlan.PlanStatus.DRAFT);
+        when(rentalPlanRepository.findById(9L)).thenReturn(Optional.of(plan));
+
+        RentalPlanRecord item = new RentalPlanRecord();
+        item.setId(1L);
+        Asset asset = new Asset();
+        asset.setId(1L);
+        asset.setName("CAT 320 Excavator");
+        item.setAsset(asset);
+        item.setDailyRate(new BigDecimal("450.00"));
+        item.setSubtotal(new BigDecimal("2250.00"));
+        when(rentalPlanRecordRepository.findByRentalPlanId(9L)).thenReturn(List.of(item));
+
+        when(dynamicPricingService.isEnabled()).thenReturn(true);
+        when(dynamicPricingService.priceItems(eq(plan), eq(List.of(item))))
+                .thenReturn(List.of(new PricingClient.ItemPrice(new BigDecimal("500.00"), new BigDecimal("2500.00"))));
+
+        RentalPlanResponse response = service.requestQuote(9L, EMAIL);
+
+        assertThat(response.status()).isEqualTo("QUOTED");
+        assertThat(response.totalAmount()).isEqualByComparingTo("2500.00");
+        assertThat(item.getDailyRate()).isEqualByComparingTo("500.00");
+        assertThat(item.getSubtotal()).isEqualByComparingTo("2500.00");
+        verify(rentalPlanRecordRepository).save(item);
+    }
+
+    @Test
+    void requestQuote_withDynamicPricingDisabled_neverCallsDynamicPricingServiceForPrices() {
+        // dynamicPricingService.isEnabled() defaults to false on the unstubbed mock — this is
+        // the same path exercised by requestQuote_onAlreadyQuotedPlan_succeedsAndRefreshesUpdatedAt,
+        // asserted explicitly here so the flag-off contract has its own regression test.
+        RentalPlan plan = ownedPlan(9L, RentalPlan.PlanStatus.DRAFT);
+        when(rentalPlanRepository.findById(9L)).thenReturn(Optional.of(plan));
+
+        RentalPlanRecord item = new RentalPlanRecord();
+        item.setId(1L);
+        Asset asset = new Asset();
+        asset.setId(1L);
+        item.setAsset(asset);
+        item.setDailyRate(new BigDecimal("450.00"));
+        item.setSubtotal(new BigDecimal("2250.00"));
+        when(rentalPlanRecordRepository.findByRentalPlanId(9L)).thenReturn(List.of(item));
+
+        RentalPlanResponse response = service.requestQuote(9L, EMAIL);
+
+        assertThat(response.totalAmount()).isEqualByComparingTo("2250.00");
+        verify(dynamicPricingService, never()).priceItems(any(), any());
+    }
+
+    @Test
     void requestQuote_emptyPlan_rejectedWith400() {
         RentalPlan plan = ownedPlan(9L, RentalPlan.PlanStatus.DRAFT);
         when(rentalPlanRepository.findById(9L)).thenReturn(Optional.of(plan));
