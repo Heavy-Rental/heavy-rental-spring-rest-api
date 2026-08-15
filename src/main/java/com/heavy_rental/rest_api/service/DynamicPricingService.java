@@ -1,0 +1,102 @@
+package com.heavy_rental.rest_api.service;
+
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
+
+import com.heavy_rental.rest_api.client.haystack.HaystackException;
+import com.heavy_rental.rest_api.client.haystack.HaystackPricingClient;
+import com.heavy_rental.rest_api.client.haystack.dto.PricingQuoteRequest;
+import com.heavy_rental.rest_api.client.haystack.dto.PricingQuoteRequestItem;
+import com.heavy_rental.rest_api.client.haystack.dto.PricingQuoteResponse;
+import com.heavy_rental.rest_api.client.haystack.dto.PricingQuoteResponseItem;
+import com.heavy_rental.rest_api.config.PricingProperties;
+import com.heavy_rental.rest_api.entity.RentalPlan;
+import com.heavy_rental.rest_api.entity.RentalPlanRecord;
+
+/**
+ * Prices a rental plan's line items via {@code haystack-fast-api}'s
+ * {@code POST /internal/v1/pricing/quote} (see {@code openspec/changes/dynamic-plan-quote-pricing/}),
+ * with a per-item fallback to {@link DefaultPricingClient} ({@code Asset.baseDailyRate}) so a
+ * quote request is never blocked by the pricing service being unavailable or unable to resolve
+ * a specific item.
+ * <p>
+ * Deliberately independent of the recommender saga — only called from
+ * {@link RentalPlanService#requestQuote}, never from cart-building ({@code addItem}).
+ */
+@Service
+public class DynamicPricingService {
+
+	private static final Logger log = LoggerFactory.getLogger(DynamicPricingService.class);
+
+	private final HaystackPricingClient haystackPricingClient;
+	private final DefaultPricingClient defaultPricingClient;
+	private final PricingProperties pricingProperties;
+
+	public DynamicPricingService(
+			HaystackPricingClient haystackPricingClient,
+			DefaultPricingClient defaultPricingClient,
+			PricingProperties pricingProperties) {
+		this.haystackPricingClient = haystackPricingClient;
+		this.defaultPricingClient = defaultPricingClient;
+		this.pricingProperties = pricingProperties;
+	}
+
+	/** Rollout flag for {@code RentalPlanService.requestQuote()} — see {@code PricingProperties}. */
+	public boolean isEnabled() {
+		return pricingProperties.dynamicEnabled();
+	}
+
+	/**
+	 * Prices every item in {@code items} for {@code plan}'s dates, in the same order as
+	 * {@code items}. Never throws for pricing-service failures — falls back per item.
+	 */
+	public List<PricingClient.ItemPrice> priceItems(RentalPlan plan, List<RentalPlanRecord> items) {
+		Map<Long, PricingQuoteResponseItem> results = fetchResults(plan, items);
+
+		return items.stream()
+				.map(item -> {
+					PricingQuoteResponseItem result = results.get(item.getId());
+					if (result != null && result.isUsable()) {
+						return new PricingClient.ItemPrice(result.dailyRate(), result.totalPrice());
+					}
+					if (result != null && result.error() != null) {
+						log.warn("Dynamic pricing unusable for plan {} item {}: {} — falling back to base rate",
+								plan.getId(), item.getId(), result.error());
+					}
+					return defaultPricingClient.priceItem(item.getAsset(), plan.getStartDate(), plan.getEndDate());
+				})
+				.toList();
+	}
+
+	private Map<Long, PricingQuoteResponseItem> fetchResults(RentalPlan plan, List<RentalPlanRecord> items) {
+		List<PricingQuoteRequestItem> requestItems = items.stream()
+				.map(item -> new PricingQuoteRequestItem(item.getId(), item.getAsset().getId()))
+				.toList();
+
+		PricingQuoteRequest request = new PricingQuoteRequest(
+				plan.getId(),
+				plan.getStartDate(),
+				plan.getEndDate(),
+				pricingProperties.defaultDistanceKm(),
+				requestItems);
+
+		try {
+			PricingQuoteResponse response = haystackPricingClient.quote(request, UUID.randomUUID().toString());
+			Map<Long, PricingQuoteResponseItem> byItemId = new HashMap<>();
+			if (response != null && response.results() != null) {
+				response.results().forEach(result -> byItemId.put(result.itemId(), result));
+			}
+			return byItemId;
+		} catch (HaystackException ex) {
+			log.warn("Dynamic pricing unavailable for plan {} ({}: {}) — falling back to base rate for all items",
+					plan.getId(), ex.getErrorCode(), ex.getMessage());
+			return Map.of();
+		}
+	}
+}

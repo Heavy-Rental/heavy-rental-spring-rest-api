@@ -48,14 +48,18 @@ class RentalPlanServiceTest {
     @Mock private UserRepository userRepository;
     @Mock private AssetRepository assetRepository;
     @Mock private PricingClient pricingClient;
+    @Mock private DynamicPricingService dynamicPricingService;
 
     private RentalPlanService service;
     private User customer;
 
     @BeforeEach
     void setUp() {
+        // dynamicPricingService.isEnabled() defaults to false (unstubbed boolean mock), so these
+        // existing tests exercise the pre-dynamic-pricing behavior unchanged.
         service = new RentalPlanService(
-                rentalPlanRepository, rentalPlanRecordRepository, userRepository, assetRepository, pricingClient);
+                rentalPlanRepository, rentalPlanRecordRepository, userRepository, assetRepository, pricingClient,
+                dynamicPricingService);
 
         customer = new User();
         customer.setId(1L);

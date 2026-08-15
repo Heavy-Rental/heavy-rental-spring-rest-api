@@ -9,6 +9,7 @@ import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
 
 import tools.jackson.databind.ObjectMapper;
+import com.heavy_rental.rest_api.config.PricingProperties;
 
 import io.github.resilience4j.bulkhead.Bulkhead;
 import io.github.resilience4j.bulkhead.BulkheadConfig;
@@ -27,7 +28,7 @@ import io.github.resilience4j.retry.RetryConfig;
  * {@link HaystackRecommenderClient} with distinct read timeouts.
  */
 @Configuration
-@EnableConfigurationProperties(HaystackProperties.class)
+@EnableConfigurationProperties({HaystackProperties.class, PricingProperties.class})
 public class HaystackClientConfig {
 
 	/** Shared RestClient.Builder seed (base URL and timeouts applied per op in the client). */
@@ -86,6 +87,16 @@ public class HaystackClientConfig {
 		return Bulkhead.of("haystackQa", config);
 	}
 
+	/** Rental-plan quote pricing (dynamic-plan-quote-pricing) — separate from the recommender saga. */
+	@Bean
+	Bulkhead haystackPricingBulkhead(HaystackProperties props) {
+		BulkheadConfig config = BulkheadConfig.custom()
+				.maxConcurrentCalls(props.getResilience().getBulkheadPricingMaxConcurrent())
+				.maxWaitDuration(Duration.ZERO)
+				.build();
+		return Bulkhead.of("haystackPricing", config);
+	}
+
 	@Bean
 	Retry haystackIngestRetry(HaystackProperties props) {
 		int maxAttempts = Math.max(1, props.getRetry().getIngestMaxAttempts());
@@ -124,6 +135,18 @@ public class HaystackClientConfig {
 	}
 
 	@Bean
+	Retry haystackPricingRetry(HaystackProperties props) {
+		int maxAttempts = Math.max(1, props.getRetry().getPricingMaxAttempts());
+		RetryConfig config = RetryConfig.custom()
+				.maxAttempts(maxAttempts)
+				.intervalFunction(IntervalFunction.ofExponentialRandomBackoff(
+						Duration.ofMillis(100), 2.0d, 0.5d))
+				.retryOnException(ex -> ex instanceof HaystackException he && he.isRetryable())
+				.build();
+		return Retry.of("haystackPricing", config);
+	}
+
+	@Bean
 	HaystackRecommenderClient haystackRecommenderClient(
 			HaystackProperties properties,
 			RestClient.Builder restClientBuilder,
@@ -146,6 +169,28 @@ public class HaystackClientConfig {
 				haystackIngestRetry,
 				haystackRecommendRetry,
 				haystackQaRetry);
+	}
+
+	/**
+	 * Rental-plan quote pricing client — reuses the shared {@code haystackCircuitBreaker}
+	 * (same "haystack is up or down" fact as the recommender client) but its own bulkhead/retry,
+	 * matching the per-operation pattern already used for health/ingest/recommend/qa.
+	 */
+	@Bean
+	HaystackPricingClient haystackPricingClient(
+			HaystackProperties properties,
+			RestClient.Builder restClientBuilder,
+			ObjectMapper objectMapper,
+			CircuitBreaker haystackCircuitBreaker,
+			Bulkhead haystackPricingBulkhead,
+			Retry haystackPricingRetry) {
+		return new HaystackPricingClient(
+				properties,
+				restClientBuilder,
+				objectMapper,
+				haystackCircuitBreaker,
+				haystackPricingBulkhead,
+				haystackPricingRetry);
 	}
 
 	/**

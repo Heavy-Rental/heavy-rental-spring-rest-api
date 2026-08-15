@@ -36,18 +36,21 @@ public class RentalPlanService {
     private final UserRepository userRepository;
     private final AssetRepository assetRepository;
     private final PricingClient pricingClient;
+    private final DynamicPricingService dynamicPricingService;
 
     public RentalPlanService(
             RentalPlanRepository rentalPlanRepository,
             RentalPlanRecordRepository rentalPlanRecordRepository,
             UserRepository userRepository,
             AssetRepository assetRepository,
-            PricingClient pricingClient) {
+            PricingClient pricingClient,
+            DynamicPricingService dynamicPricingService) {
         this.rentalPlanRepository = rentalPlanRepository;
         this.rentalPlanRecordRepository = rentalPlanRecordRepository;
         this.userRepository = userRepository;
         this.assetRepository = assetRepository;
         this.pricingClient = pricingClient;
+        this.dynamicPricingService = dynamicPricingService;
     }
 
     @Transactional
@@ -154,6 +157,10 @@ public class RentalPlanService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Cannot quote an empty plan");
         }
 
+        if (dynamicPricingService.isEnabled()) {
+            repriceItemsDynamically(plan, items);
+        }
+
         BigDecimal total = items.stream()
                 .map(RentalPlanRecord::getSubtotal)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
@@ -164,6 +171,23 @@ public class RentalPlanService {
         rentalPlanRepository.save(plan);
 
         return toResponse(plan);
+    }
+
+    /**
+     * Refreshes each item's dailyRate/subtotal from {@link DynamicPricingService} immediately
+     * before summing into totalAmount (see openspec/changes/dynamic-plan-quote-pricing/).
+     * Never blocks the quote — DynamicPricingService falls back to base-rate arithmetic per
+     * item on any pricing-service failure.
+     */
+    private void repriceItemsDynamically(RentalPlan plan, List<RentalPlanRecord> items) {
+        List<PricingClient.ItemPrice> prices = dynamicPricingService.priceItems(plan, items);
+        for (int i = 0; i < items.size(); i++) {
+            RentalPlanRecord item = items.get(i);
+            PricingClient.ItemPrice price = prices.get(i);
+            item.setDailyRate(price.dailyRate());
+            item.setSubtotal(price.subtotal());
+            rentalPlanRecordRepository.save(item);
+        }
     }
 
     @Transactional
