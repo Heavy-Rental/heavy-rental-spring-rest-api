@@ -134,6 +134,23 @@ class DynamicPricingServiceTest {
     }
 
     @Test
+    void priceItems_degradedResult_usesHaystackPriceWithoutFallback() {
+        // haystack's `degraded` flag means the model fell back to secondary/stale data, not that
+        // pricing failed — the returned price is still used, unlike `error` (see spec.md).
+        var degraded = new PricingQuoteResponseItem(
+                "101", 4L, new BigDecimal("182.40"), new BigDecimal("912.00"),
+                true, new BigDecimal("120.00"), new BigDecimal("260.00"), "prod-2026-08-01", true, null);
+        when(haystackPricingClient.quote(any(PricingQuoteRequest.class), anyString()))
+                .thenReturn(new PricingQuoteResponse("55", "SGD", new BigDecimal("0.30"), true,
+                        List.of(degraded), List.of()));
+
+        List<PricingClient.ItemPrice> prices = service.priceItems(plan, List.of(item1), "corr-test-4");
+
+        assertThat(prices.get(0).dailyRate()).isEqualByComparingTo("182.40");
+        verify(defaultPricingClient, never()).priceItem(any(), any(), any());
+    }
+
+    @Test
     void priceItems_perItemError_fallsBackOnlyForThatItem() {
         var usable = new PricingQuoteResponseItem(
                 "101", 4L, new BigDecimal("182.40"), new BigDecimal("912.00"),

@@ -69,6 +69,14 @@ public class DynamicPricingService {
 				.map(item -> {
 					PricingQuoteResponseItem result = results.get(String.valueOf(item.getId()));
 					if (result != null && result.isUsable()) {
+						if (result.degraded()) {
+							// haystack-fast-api dynamic-pricing spec: degraded means the primary data
+							// snapshot was unavailable and it fell back to a secondary source — the
+							// price is still model-computed and used as-is, just logged for ops
+							// visibility into upstream data-source health (not a pricing failure).
+							log.warn("Dynamic pricing degraded for plan {} item {} (model {}) — using price from secondary data source",
+									plan.getId(), item.getId(), result.modelVersion());
+						}
 						return new PricingClient.ItemPrice(result.dailyRate(), result.totalPrice());
 					}
 					if (result != null && result.error() != null) {

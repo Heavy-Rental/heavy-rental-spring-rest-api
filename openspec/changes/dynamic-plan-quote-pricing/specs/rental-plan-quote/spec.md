@@ -35,6 +35,12 @@ When `pricing.dynamic-enabled=true`, line subtotals MUST be refreshed from `Dyna
 - THEN the quote still succeeds (`200`)
 - AND the affected item(s) use `DefaultPricingClient` (`Asset.baseDailyRate`) arithmetic instead
 
+#### Scenario: Degraded dynamic price is used, not treated as a failure
+- GIVEN `pricing.dynamic-enabled=true` and an item's result comes back with `degraded=true` but a non-null `daily_rate`/`total_price` (`haystack-fast-api`'s primary data snapshot was unavailable; it served the price from a secondary source)
+- WHEN quote is requested
+- THEN that item's subtotal uses the returned dynamic price as-is — it does NOT fall back to `DefaultPricingClient`
+- AND a `WARN` log is emitted with the plan id, item id, and `model_version` for ops visibility into upstream data-source health
+
 ### Requirement: FR-RP-006 Quote pricing source
 
 `POST .../quote` MUST use `DynamicPricingService` when `pricing.dynamic-enabled=true`, backed by a FastAPI `PricingClient` calling `haystack-fast-api`'s `POST /internal/v1/pricing/quote`. When the flag is `false` (default), quote pricing remains Spring-only `DefaultPricingClient` arithmetic from snapshotted line subtotals, with no HTTP call to haystack — unchanged from prior behavior.

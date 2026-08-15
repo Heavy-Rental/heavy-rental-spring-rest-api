@@ -63,7 +63,9 @@ error.
 
 ## Fallback semantics (must decide, locked here)
 
-Never let checkout fail because the ML service is unavailable. If `HaystackPricingClient.quote(...)` throws, or a specific item comes back `degraded`/`error`, that item's price falls back to `DefaultPricingClient` arithmetic silently to the customer — logged at `WARN` with the plan id and item id for ops visibility. This mirrors the precedent already set for the recommender client (`spring-proxy-endpoints` FR-S2B-008 "fail fast... does not invent equipment or prices" — for pricing specifically, "fail fast" would block checkout entirely, which is worse than falling back to the existing, already-trusted base-rate math).
+Never let checkout fail because the ML service is unavailable. If `HaystackPricingClient.quote(...)` throws, or a specific item comes back with `error` set (or a missing/null price), that item's price falls back to `DefaultPricingClient` arithmetic silently to the customer — logged at `WARN` with the plan id and item id for ops visibility. This mirrors the precedent already set for the recommender client (`spring-proxy-endpoints` FR-S2B-008 "fail fast... does not invent equipment or prices" — for pricing specifically, "fail fast" would block checkout entirely, which is worse than falling back to the existing, already-trusted base-rate math).
+
+**`degraded` is not a failure signal and does NOT trigger fallback.** Per `haystack-fast-api`'s `dynamic-pricing` spec, `degraded=true` means the pricing service's primary real-time data snapshot was unavailable and it fell back to reading from a secondary/public source — the returned `daily_rate`/`total_price` are still real, model-computed values (lower confidence, not invalid), distinct from `error` (unresolvable item, no price at all) and `was_clamped` (a normal min/max guardrail, unrelated to data freshness). `DynamicPricingService` uses a degraded item's price as-is and logs it at `WARN` (plan id, item id, `model_version`) purely for ops visibility into upstream data-source health.
 
 ## distance_km
 

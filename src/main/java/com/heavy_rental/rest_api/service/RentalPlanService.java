@@ -1,6 +1,8 @@
 package com.heavy_rental.rest_api.service;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -23,7 +25,9 @@ import com.heavy_rental.rest_api.entity.Asset;
 import com.heavy_rental.rest_api.entity.RentalPlanRecord;
 import com.heavy_rental.rest_api.repository.AssetRepository;
 
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @Service
 public class RentalPlanService {
@@ -37,6 +41,8 @@ public class RentalPlanService {
     private final AssetRepository assetRepository;
     private final PricingClient pricingClient;
     private final DynamicPricingService dynamicPricingService;
+    private final TransactionTemplate readOnlyTransactionTemplate;
+    private final TransactionTemplate writeTransactionTemplate;
 
     public RentalPlanService(
             RentalPlanRepository rentalPlanRepository,
@@ -44,13 +50,17 @@ public class RentalPlanService {
             UserRepository userRepository,
             AssetRepository assetRepository,
             PricingClient pricingClient,
-            DynamicPricingService dynamicPricingService) {
+            DynamicPricingService dynamicPricingService,
+            PlatformTransactionManager transactionManager) {
         this.rentalPlanRepository = rentalPlanRepository;
         this.rentalPlanRecordRepository = rentalPlanRecordRepository;
         this.userRepository = userRepository;
         this.assetRepository = assetRepository;
         this.pricingClient = pricingClient;
         this.dynamicPricingService = dynamicPricingService;
+        this.readOnlyTransactionTemplate = new TransactionTemplate(transactionManager);
+        this.readOnlyTransactionTemplate.setReadOnly(true);
+        this.writeTransactionTemplate = new TransactionTemplate(transactionManager);
     }
 
     @Transactional
@@ -141,13 +151,48 @@ public class RentalPlanService {
         }
     }
 
-    @Transactional
+    /**
+     * Deliberately NOT {@code @Transactional} at this level. {@link DynamicPricingService} makes
+     * a blocking HTTP call to haystack-fast-api (up to {@code haystack.timeouts.pricing-read},
+     * 20s by default, plus retry) — if that call happened inside a single DB transaction spanning
+     * the whole method, the {@code rental_plan} row's optimistic lock (@Version) would stay
+     * "checked out" for the whole call. Since the same row is written by addItem/removeItem/
+     * cancel/checkout too, any of those landing during that window would win the race and bump
+     * {@code version}, so this transaction's final save would fail with
+     * {@code ObjectOptimisticLockingFailureException} — surfaced to the customer as a 409 even
+     * though nothing was actually wrong with their request (HR-153).
+     * <p>
+     * Split into two short transactions with the slow, untransacted haystack call in between:
+     * read the plan/items, price them, then reload-and-write. This shrinks the lock window from
+     * ~20s to milliseconds without changing the pricing/fallback semantics.
+     */
     public RentalPlanResponse requestQuote(Long planId, String customerEmail, String correlationId) {
-        RentalPlan plan = loadOwnedPlan(planId, customerEmail);
+        QuoteContext context = readOnlyTransactionTemplate.execute(status -> loadQuoteContext(planId, customerEmail));
 
-        // Re-quoting a QUOTED plan is allowed — it's how a customer refreshes a stale quote
-        // (BookingService's 24-hour freshness check, REQ-6) before checkout. Only a CONVERTED
-        // plan is truly final and can never be quoted again.
+        Map<Long, PricingClient.ItemPrice> priceByItemId = null;
+        if (dynamicPricingService.isEnabled()) {
+            List<PricingClient.ItemPrice> prices =
+                    dynamicPricingService.priceItems(context.plan(), context.items(), correlationId);
+            priceByItemId = new LinkedHashMap<>();
+            for (int i = 0; i < context.items().size(); i++) {
+                priceByItemId.put(context.items().get(i).getId(), prices.get(i));
+            }
+        }
+
+        Map<Long, PricingClient.ItemPrice> finalPriceByItemId = priceByItemId;
+        return writeTransactionTemplate.execute(status -> finalizeQuote(planId, customerEmail, finalPriceByItemId));
+    }
+
+    private record QuoteContext(RentalPlan plan, List<RentalPlanRecord> items) {
+    }
+
+    /**
+     * Re-quoting a QUOTED plan is allowed — it's how a customer refreshes a stale quote
+     * (BookingService's 24-hour freshness check, REQ-6) before checkout. Only a CONVERTED
+     * plan is truly final and can never be quoted again.
+     */
+    private QuoteContext loadQuoteContext(Long planId, String customerEmail) {
+        RentalPlan plan = loadOwnedPlan(planId, customerEmail);
         if (plan.getStatus() == RentalPlan.PlanStatus.CONVERTED) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Plan has already been converted to a booking");
         }
@@ -157,8 +202,40 @@ public class RentalPlanService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Cannot quote an empty plan");
         }
 
-        if (dynamicPricingService.isEnabled()) {
-            repriceItemsDynamically(plan, items, correlationId);
+        // Force-init each item's Asset now, while the read transaction's session is still open —
+        // DynamicPricingService's per-item fallback (DefaultPricingClient) reads
+        // Asset.baseDailyRate after this transaction has closed.
+        items.forEach(item -> item.getAsset().getBaseDailyRate());
+
+        return new QuoteContext(plan, items);
+    }
+
+    /**
+     * Reloads the plan/items fresh (picking up the current {@code version}) and applies the
+     * dynamic prices computed between the two transactions, keyed by item id so a concurrent
+     * cart edit that changed the item set in between doesn't misapply prices to the wrong item.
+     */
+    private RentalPlanResponse finalizeQuote(
+            Long planId, String customerEmail, Map<Long, PricingClient.ItemPrice> priceByItemId) {
+        RentalPlan plan = loadOwnedPlan(planId, customerEmail);
+        if (plan.getStatus() == RentalPlan.PlanStatus.CONVERTED) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Plan has already been converted to a booking");
+        }
+
+        List<RentalPlanRecord> items = rentalPlanRecordRepository.findByRentalPlanId(plan.getId());
+        if (items.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Cannot quote an empty plan");
+        }
+
+        if (priceByItemId != null) {
+            for (RentalPlanRecord item : items) {
+                PricingClient.ItemPrice price = priceByItemId.get(item.getId());
+                if (price != null) {
+                    item.setDailyRate(price.dailyRate());
+                    item.setSubtotal(price.subtotal());
+                    rentalPlanRecordRepository.save(item);
+                }
+            }
         }
 
         BigDecimal total = items.stream()
@@ -171,23 +248,6 @@ public class RentalPlanService {
         rentalPlanRepository.save(plan);
 
         return toResponse(plan);
-    }
-
-    /**
-     * Refreshes each item's dailyRate/subtotal from {@link DynamicPricingService} immediately
-     * before summing into totalAmount (see openspec/changes/dynamic-plan-quote-pricing/).
-     * Never blocks the quote — DynamicPricingService falls back to base-rate arithmetic per
-     * item on any pricing-service failure.
-     */
-    private void repriceItemsDynamically(RentalPlan plan, List<RentalPlanRecord> items, String correlationId) {
-        List<PricingClient.ItemPrice> prices = dynamicPricingService.priceItems(plan, items, correlationId);
-        for (int i = 0; i < items.size(); i++) {
-            RentalPlanRecord item = items.get(i);
-            PricingClient.ItemPrice price = prices.get(i);
-            item.setDailyRate(price.dailyRate());
-            item.setSubtotal(price.subtotal());
-            rentalPlanRecordRepository.save(item);
-        }
     }
 
     @Transactional

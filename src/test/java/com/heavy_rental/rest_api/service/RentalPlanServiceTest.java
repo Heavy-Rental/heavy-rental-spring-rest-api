@@ -24,6 +24,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpStatus;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.web.server.ResponseStatusException;
 
 import com.heavy_rental.rest_api.dto.RentalPlanCreateRequest;
@@ -49,6 +50,7 @@ class RentalPlanServiceTest {
     @Mock private AssetRepository assetRepository;
     @Mock private PricingClient pricingClient;
     @Mock private DynamicPricingService dynamicPricingService;
+    @Mock private PlatformTransactionManager transactionManager;
 
     private RentalPlanService service;
     private User customer;
@@ -57,9 +59,13 @@ class RentalPlanServiceTest {
     void setUp() {
         // dynamicPricingService.isEnabled() defaults to false (unstubbed boolean mock), so these
         // existing tests exercise the pre-dynamic-pricing behavior unchanged.
+        // transactionManager is an unstubbed mock — TransactionTemplate.execute() just invokes
+        // the callback directly against it (getTransaction()/commit()/rollback() are no-ops),
+        // so requestQuote's two-phase read/write split runs synchronously here, same as real
+        // transactions would, without needing a real DB transaction manager.
         service = new RentalPlanService(
                 rentalPlanRepository, rentalPlanRecordRepository, userRepository, assetRepository, pricingClient,
-                dynamicPricingService);
+                dynamicPricingService, transactionManager);
 
         customer = new User();
         customer.setId(1L);
