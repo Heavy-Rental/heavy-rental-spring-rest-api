@@ -2,27 +2,31 @@
 
 ## Wire contract (upstream, `haystack-fast-api`)
 
-`POST /internal/v1/pricing/quote` (from `haystack-fast-api` `openspec/specs/dynamic-pricing/design.md`):
+`POST /internal/v1/pricing/quote`. Verified against the real Pydantic models in
+`haystack-fast-api` `app/schemas/pricing.py` (`QuoteItemRequest`, `PricingQuoteRequest`,
+`QuoteItemResult`, `PricingQuoteResponse`) — **not** just the design-doc prose example, which
+showed illustrative string asset ids and cost us a real type mismatch during implementation
+(see "Gotcha" below).
 
 ```json
 // Request
 {
-  "rental_plan_id": 55,
+  "rental_plan_id": "55",
   "start_date": "2026-09-01",
   "end_date": "2026-09-05",
   "distance_km": 20.0,
-  "items": [{ "item_id": 101, "asset_id": 4 }]
+  "items": [{ "item_id": "101", "asset_id": 4 }]
 }
 
 // Response
 {
-  "rental_plan_id": 55,
+  "rental_plan_id": "55",
   "currency": "SGD",
   "deposit_rate": 0.30,
   "degraded": false,
   "results": [
     {
-      "item_id": 101,
+      "item_id": "101",
       "asset_id": 4,
       "daily_rate": 182.40,
       "total_price": 2189.60,
@@ -37,7 +41,15 @@
 }
 ```
 
-Per-item resolution failures come back as a per-item field on the matching `results[]` entry (per US-4 scenario "returns a clear per-item error rather than a raw exception, without failing the rest of the batch"), not a batch-level error.
+**Gotcha (fixed):** `item_id` and `rental_plan_id` are `str` in haystack's schema (`min_length=1`),
+even though Spring's own `RentalPlanRecord.id`/`RentalPlan.id` are numeric `Long` PKs. `asset_id`
+is the real numeric `int` PK. Spring sends `String.valueOf(id)` for the former and the raw `Long`
+for the latter; `DynamicPricingService` looks up `results[]` by the string item id.
+
+Per-item resolution failures come back as a per-item `error: str | None` field on the matching
+`results[]` entry (`QuoteItemResult.error`; confirmed via `tests/test_internal_pricing_api.py` —
+e.g. `results[1]['error'] == 'asset_not_found'` with all pricing fields `None`), not a batch-level
+error.
 
 ## Approach
 

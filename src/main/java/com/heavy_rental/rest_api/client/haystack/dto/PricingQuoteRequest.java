@@ -13,7 +13,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record PricingQuoteRequest(
-		@JsonProperty("rental_plan_id") Long rentalPlanId,
+		@JsonProperty("rental_plan_id") String rentalPlanId,
 		@JsonProperty("start_date") LocalDate startDate,
 		@JsonProperty("end_date") LocalDate endDate,
 		@JsonProperty("distance_km") double distanceKm,

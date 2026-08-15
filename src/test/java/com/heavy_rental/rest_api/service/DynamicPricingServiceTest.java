@@ -77,10 +77,10 @@ class DynamicPricingServiceTest {
     @Test
     void priceItems_happyPath_usesHaystackPricesAndNeverFallsBack() {
         var result1 = new PricingQuoteResponseItem(
-                101L, 4L, new BigDecimal("182.40"), new BigDecimal("912.00"),
+                "101", 4L, new BigDecimal("182.40"), new BigDecimal("912.00"),
                 true, new BigDecimal("120.00"), new BigDecimal("260.00"), "prod-2026-08-01", false, null);
         when(haystackPricingClient.quote(any(PricingQuoteRequest.class), anyString()))
-                .thenReturn(new PricingQuoteResponse(55L, "SGD", new BigDecimal("0.30"), false,
+                .thenReturn(new PricingQuoteResponse("55", "SGD", new BigDecimal("0.30"), false,
                         List.of(result1), List.of()));
 
         List<PricingClient.ItemPrice> prices = service.priceItems(plan, List.of(item1));
@@ -111,12 +111,12 @@ class DynamicPricingServiceTest {
     @Test
     void priceItems_perItemError_fallsBackOnlyForThatItem() {
         var usable = new PricingQuoteResponseItem(
-                101L, 4L, new BigDecimal("182.40"), new BigDecimal("912.00"),
+                "101", 4L, new BigDecimal("182.40"), new BigDecimal("912.00"),
                 true, new BigDecimal("120.00"), new BigDecimal("260.00"), "prod-2026-08-01", false, null);
         var errored = new PricingQuoteResponseItem(
-                102L, 7L, null, null, false, null, null, null, false, "asset_not_found");
+                "102", 7L, null, null, false, null, null, null, false, "asset_not_found");
         when(haystackPricingClient.quote(any(PricingQuoteRequest.class), anyString()))
-                .thenReturn(new PricingQuoteResponse(55L, "SGD", new BigDecimal("0.30"), false,
+                .thenReturn(new PricingQuoteResponse("55", "SGD", new BigDecimal("0.30"), false,
                         List.of(usable, errored), List.of()));
         when(defaultPricingClient.priceItem(eq(item2.getAsset()), any(), any()))
                 .thenReturn(new PricingClient.ItemPrice(new BigDecimal("300.00"), new BigDecimal("1500.00")));

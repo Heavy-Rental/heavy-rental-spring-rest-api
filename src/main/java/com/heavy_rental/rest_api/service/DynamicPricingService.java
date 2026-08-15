@@ -57,11 +57,11 @@ public class DynamicPricingService {
 	 * {@code items}. Never throws for pricing-service failures — falls back per item.
 	 */
 	public List<PricingClient.ItemPrice> priceItems(RentalPlan plan, List<RentalPlanRecord> items) {
-		Map<Long, PricingQuoteResponseItem> results = fetchResults(plan, items);
+		Map<String, PricingQuoteResponseItem> results = fetchResults(plan, items);
 
 		return items.stream()
 				.map(item -> {
-					PricingQuoteResponseItem result = results.get(item.getId());
+					PricingQuoteResponseItem result = results.get(String.valueOf(item.getId()));
 					if (result != null && result.isUsable()) {
 						return new PricingClient.ItemPrice(result.dailyRate(), result.totalPrice());
 					}
@@ -74,13 +74,13 @@ public class DynamicPricingService {
 				.toList();
 	}
 
-	private Map<Long, PricingQuoteResponseItem> fetchResults(RentalPlan plan, List<RentalPlanRecord> items) {
+	private Map<String, PricingQuoteResponseItem> fetchResults(RentalPlan plan, List<RentalPlanRecord> items) {
 		List<PricingQuoteRequestItem> requestItems = items.stream()
-				.map(item -> new PricingQuoteRequestItem(item.getId(), item.getAsset().getId()))
+				.map(item -> new PricingQuoteRequestItem(String.valueOf(item.getId()), item.getAsset().getId()))
 				.toList();
 
 		PricingQuoteRequest request = new PricingQuoteRequest(
-				plan.getId(),
+				String.valueOf(plan.getId()),
 				plan.getStartDate(),
 				plan.getEndDate(),
 				pricingProperties.defaultDistanceKm(),
@@ -88,7 +88,7 @@ public class DynamicPricingService {
 
 		try {
 			PricingQuoteResponse response = haystackPricingClient.quote(request, UUID.randomUUID().toString());
-			Map<Long, PricingQuoteResponseItem> byItemId = new HashMap<>();
+			Map<String, PricingQuoteResponseItem> byItemId = new HashMap<>();
 			if (response != null && response.results() != null) {
 				response.results().forEach(result -> byItemId.put(result.itemId(), result));
 			}

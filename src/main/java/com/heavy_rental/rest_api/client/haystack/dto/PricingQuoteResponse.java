@@ -9,7 +9,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 /** Response for {@code POST /internal/v1/pricing/quote}. */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record PricingQuoteResponse(
-		@JsonProperty("rental_plan_id") Long rentalPlanId,
+		@JsonProperty("rental_plan_id") String rentalPlanId,
 		String currency,
 		@JsonProperty("deposit_rate") BigDecimal depositRate,
 		boolean degraded,

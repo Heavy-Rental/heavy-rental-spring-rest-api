@@ -89,11 +89,11 @@ class HaystackPricingClientTest {
 
 	private static PricingQuoteRequest sampleRequest() {
 		return new PricingQuoteRequest(
-				55L,
+				"55",
 				LocalDate.of(2026, 9, 1),
 				LocalDate.of(2026, 9, 5),
 				20.0,
-				List.of(new PricingQuoteRequestItem(101L, 4L)));
+				List.of(new PricingQuoteRequestItem("101", 4L)));
 	}
 
 	@Test
@@ -105,13 +105,13 @@ class HaystackPricingClientTest {
 						.withHeader("Content-Type", "application/json")
 						.withBody("""
 								{
-								  "rental_plan_id": 55,
+								  "rental_plan_id": "55",
 								  "currency": "SGD",
 								  "deposit_rate": 0.30,
 								  "degraded": false,
 								  "results": [
 								    {
-								      "item_id": 101,
+								      "item_id": "101",
 								      "asset_id": 4,
 								      "daily_rate": 182.40,
 								      "total_price": 912.00,
@@ -130,7 +130,7 @@ class HaystackPricingClientTest {
 
 		assertEquals(1, resp.results().size());
 		var item = resp.results().get(0);
-		assertEquals(101L, item.itemId());
+		assertEquals("101", item.itemId());
 		assertEquals(new BigDecimal("182.40"), item.dailyRate());
 		assertEquals(new BigDecimal("912.00"), item.totalPrice());
 		assertTrue(item.wasClamped());
@@ -139,7 +139,7 @@ class HaystackPricingClientTest {
 
 		wireMock.verify(postRequestedFor(urlEqualTo(HaystackPricingClient.PATH_QUOTE))
 				.withHeader(HaystackPricingClient.HEADER_CORRELATION_ID, equalTo("corr-price-1"))
-				.withRequestBody(containing("\"rental_plan_id\":55")));
+				.withRequestBody(containing("\"rental_plan_id\":\"55\"")));
 	}
 
 	@Test
@@ -151,12 +151,12 @@ class HaystackPricingClientTest {
 						.withHeader("Content-Type", "application/json")
 						.withBody("""
 								{
-								  "rental_plan_id": 55,
+								  "rental_plan_id": "55",
 								  "currency": "SGD",
 								  "deposit_rate": 0.30,
 								  "degraded": false,
 								  "results": [
-								    { "item_id": 101, "asset_id": 4, "error": "asset_not_found", "degraded": false, "was_clamped": false }
+								    { "item_id": "101", "asset_id": 4, "error": "asset_not_found", "degraded": false, "was_clamped": false }
 								  ],
 								  "warnings": []
 								}

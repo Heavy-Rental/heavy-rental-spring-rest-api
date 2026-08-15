@@ -12,7 +12,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record PricingQuoteResponseItem(
-		@JsonProperty("item_id") Long itemId,
+		@JsonProperty("item_id") String itemId,
 		@JsonProperty("asset_id") Long assetId,
 		@JsonProperty("daily_rate") BigDecimal dailyRate,
 		@JsonProperty("total_price") BigDecimal totalPrice,
