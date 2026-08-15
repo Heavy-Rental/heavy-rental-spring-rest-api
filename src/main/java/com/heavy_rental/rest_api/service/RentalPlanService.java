@@ -142,7 +142,7 @@ public class RentalPlanService {
     }
 
     @Transactional
-    public RentalPlanResponse requestQuote(Long planId, String customerEmail) {
+    public RentalPlanResponse requestQuote(Long planId, String customerEmail, String correlationId) {
         RentalPlan plan = loadOwnedPlan(planId, customerEmail);
 
         // Re-quoting a QUOTED plan is allowed — it's how a customer refreshes a stale quote
@@ -158,7 +158,7 @@ public class RentalPlanService {
         }
 
         if (dynamicPricingService.isEnabled()) {
-            repriceItemsDynamically(plan, items);
+            repriceItemsDynamically(plan, items, correlationId);
         }
 
         BigDecimal total = items.stream()
@@ -179,8 +179,8 @@ public class RentalPlanService {
      * Never blocks the quote — DynamicPricingService falls back to base-rate arithmetic per
      * item on any pricing-service failure.
      */
-    private void repriceItemsDynamically(RentalPlan plan, List<RentalPlanRecord> items) {
-        List<PricingClient.ItemPrice> prices = dynamicPricingService.priceItems(plan, items);
+    private void repriceItemsDynamically(RentalPlan plan, List<RentalPlanRecord> items, String correlationId) {
+        List<PricingClient.ItemPrice> prices = dynamicPricingService.priceItems(plan, items, correlationId);
         for (int i = 0; i < items.size(); i++) {
             RentalPlanRecord item = items.get(i);
             PricingClient.ItemPrice price = prices.get(i);

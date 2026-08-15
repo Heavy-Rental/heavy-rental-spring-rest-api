@@ -19,6 +19,7 @@ import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -83,12 +84,36 @@ class DynamicPricingServiceTest {
                 .thenReturn(new PricingQuoteResponse("55", "SGD", new BigDecimal("0.30"), false,
                         List.of(result1), List.of()));
 
-        List<PricingClient.ItemPrice> prices = service.priceItems(plan, List.of(item1));
+        List<PricingClient.ItemPrice> prices = service.priceItems(plan, List.of(item1), "corr-test-1");
 
         assertThat(prices).hasSize(1);
         assertThat(prices.get(0).dailyRate()).isEqualByComparingTo("182.40");
         assertThat(prices.get(0).subtotal()).isEqualByComparingTo("912.00");
         verify(defaultPricingClient, never()).priceItem(any(), any(), any());
+    }
+
+    @Test
+    void priceItems_explicitCorrelationId_isPropagatedToHaystackClient() {
+        // Portal's inbound X-Correlation-Id (RentalPlanController) must reach the outbound
+        // haystack call unchanged — same tracing convention as RecommenderSagaService.
+        when(haystackPricingClient.quote(any(PricingQuoteRequest.class), eq("corr-from-portal")))
+                .thenReturn(new PricingQuoteResponse("55", "SGD", new BigDecimal("0.30"), false, List.of(), List.of()));
+
+        service.priceItems(plan, List.of(item1), "corr-from-portal");
+
+        verify(haystackPricingClient).quote(any(PricingQuoteRequest.class), eq("corr-from-portal"));
+    }
+
+    @Test
+    void priceItems_nullCorrelationId_generatesFreshNonBlankOne() {
+        when(haystackPricingClient.quote(any(PricingQuoteRequest.class), anyString()))
+                .thenReturn(new PricingQuoteResponse("55", "SGD", new BigDecimal("0.30"), false, List.of(), List.of()));
+        ArgumentCaptor<String> correlationCaptor = ArgumentCaptor.forClass(String.class);
+
+        service.priceItems(plan, List.of(item1), null);
+
+        verify(haystackPricingClient).quote(any(PricingQuoteRequest.class), correlationCaptor.capture());
+        assertThat(correlationCaptor.getValue()).isNotBlank();
     }
 
     @Test
@@ -101,7 +126,7 @@ class DynamicPricingServiceTest {
         when(defaultPricingClient.priceItem(eq(item2.getAsset()), any(), any()))
                 .thenReturn(new PricingClient.ItemPrice(new BigDecimal("300.00"), new BigDecimal("1500.00")));
 
-        List<PricingClient.ItemPrice> prices = service.priceItems(plan, List.of(item1, item2));
+        List<PricingClient.ItemPrice> prices = service.priceItems(plan, List.of(item1, item2), "corr-test-2");
 
         assertThat(prices).hasSize(2);
         assertThat(prices.get(0).dailyRate()).isEqualByComparingTo("450.00");
@@ -121,7 +146,7 @@ class DynamicPricingServiceTest {
         when(defaultPricingClient.priceItem(eq(item2.getAsset()), any(), any()))
                 .thenReturn(new PricingClient.ItemPrice(new BigDecimal("300.00"), new BigDecimal("1500.00")));
 
-        List<PricingClient.ItemPrice> prices = service.priceItems(plan, List.of(item1, item2));
+        List<PricingClient.ItemPrice> prices = service.priceItems(plan, List.of(item1, item2), "corr-test-3");
 
         assertThat(prices.get(0).dailyRate()).isEqualByComparingTo("182.40");
         assertThat(prices.get(1).dailyRate()).isEqualByComparingTo("300.00");

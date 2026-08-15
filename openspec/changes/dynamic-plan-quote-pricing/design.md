@@ -69,6 +69,16 @@ Never let checkout fail because the ML service is unavailable. If `HaystackPrici
 
 See proposal.md "Open decision." `pricing.default-distance-km` (default `20.0`) until a real postal-code/geocoding heuristic exists.
 
+## Correlation id
+
+`RentalPlanController.requestQuote` reads the optional inbound `X-Correlation-Id` header
+(`@RequestHeader(required = false)`) and threads it through
+`RentalPlanService.requestQuote(planId, customerEmail, correlationId)` →
+`DynamicPricingService.priceItems(plan, items, correlationId)` → `HaystackPricingClient.quote(...)`,
+matching the exact convention already used by `RecommendationController` /
+`RecommenderSagaService`: propagate the caller's id when present and non-blank, otherwise
+generate a fresh `UUID` so the outbound call is still traceable end to end.
+
 ## Rollout
 
 `pricing.dynamic-enabled` (env `DYNAMIC_PRICING_ENABLED`, default `false`) gates the new code path in `requestQuote()`. Same pattern as the existing `haystack.retry.ingest-enabled` flag used to gate a risky call path before production confidence is established.

@@ -98,7 +98,7 @@ class RentalPlanServiceTest {
         item.setSubtotal(new BigDecimal("2250.00"));
         when(rentalPlanRecordRepository.findByRentalPlanId(9L)).thenReturn(List.of(item));
 
-        RentalPlanResponse response = service.requestQuote(9L, EMAIL);
+        RentalPlanResponse response = service.requestQuote(9L, EMAIL, null);
 
         assertThat(response.status()).isEqualTo("QUOTED");
         assertThat(response.totalAmount()).isEqualByComparingTo("2250.00");
@@ -110,7 +110,7 @@ class RentalPlanServiceTest {
         RentalPlan plan = ownedPlan(9L, RentalPlan.PlanStatus.CONVERTED);
         when(rentalPlanRepository.findById(9L)).thenReturn(Optional.of(plan));
 
-        assertThatThrownBy(() -> service.requestQuote(9L, EMAIL))
+        assertThatThrownBy(() -> service.requestQuote(9L, EMAIL, null))
                 .isInstanceOf(ResponseStatusException.class)
                 .satisfies(ex -> assertThat(((ResponseStatusException) ex).getStatusCode())
                         .isEqualTo(HttpStatus.CONFLICT));
@@ -132,16 +132,42 @@ class RentalPlanServiceTest {
         when(rentalPlanRecordRepository.findByRentalPlanId(9L)).thenReturn(List.of(item));
 
         when(dynamicPricingService.isEnabled()).thenReturn(true);
-        when(dynamicPricingService.priceItems(eq(plan), eq(List.of(item))))
+        when(dynamicPricingService.priceItems(eq(plan), eq(List.of(item)), any()))
                 .thenReturn(List.of(new PricingClient.ItemPrice(new BigDecimal("500.00"), new BigDecimal("2500.00"))));
 
-        RentalPlanResponse response = service.requestQuote(9L, EMAIL);
+        RentalPlanResponse response = service.requestQuote(9L, EMAIL, null);
 
         assertThat(response.status()).isEqualTo("QUOTED");
         assertThat(response.totalAmount()).isEqualByComparingTo("2500.00");
         assertThat(item.getDailyRate()).isEqualByComparingTo("500.00");
         assertThat(item.getSubtotal()).isEqualByComparingTo("2500.00");
         verify(rentalPlanRecordRepository).save(item);
+    }
+
+    @Test
+    void requestQuote_propagatesInboundCorrelationIdToDynamicPricingService() {
+        // The portal's X-Correlation-Id (RentalPlanController) must reach DynamicPricingService
+        // unchanged, same tracing convention as RecommenderSagaService — required so a customer's
+        // "Get Quote" request and its downstream haystack call share one correlation id in logs.
+        RentalPlan plan = ownedPlan(9L, RentalPlan.PlanStatus.DRAFT);
+        when(rentalPlanRepository.findById(9L)).thenReturn(Optional.of(plan));
+
+        RentalPlanRecord item = new RentalPlanRecord();
+        item.setId(1L);
+        Asset asset = new Asset();
+        asset.setId(1L);
+        item.setAsset(asset);
+        item.setDailyRate(new BigDecimal("450.00"));
+        item.setSubtotal(new BigDecimal("2250.00"));
+        when(rentalPlanRecordRepository.findByRentalPlanId(9L)).thenReturn(List.of(item));
+
+        when(dynamicPricingService.isEnabled()).thenReturn(true);
+        when(dynamicPricingService.priceItems(eq(plan), eq(List.of(item)), eq("corr-quote-1")))
+                .thenReturn(List.of(new PricingClient.ItemPrice(new BigDecimal("500.00"), new BigDecimal("2500.00"))));
+
+        service.requestQuote(9L, EMAIL, "corr-quote-1");
+
+        verify(dynamicPricingService).priceItems(eq(plan), eq(List.of(item)), eq("corr-quote-1"));
     }
 
     @Test
@@ -161,10 +187,10 @@ class RentalPlanServiceTest {
         item.setSubtotal(new BigDecimal("2250.00"));
         when(rentalPlanRecordRepository.findByRentalPlanId(9L)).thenReturn(List.of(item));
 
-        RentalPlanResponse response = service.requestQuote(9L, EMAIL);
+        RentalPlanResponse response = service.requestQuote(9L, EMAIL, null);
 
         assertThat(response.totalAmount()).isEqualByComparingTo("2250.00");
-        verify(dynamicPricingService, never()).priceItems(any(), any());
+        verify(dynamicPricingService, never()).priceItems(any(), any(), any());
     }
 
     @Test
@@ -173,7 +199,7 @@ class RentalPlanServiceTest {
         when(rentalPlanRepository.findById(9L)).thenReturn(Optional.of(plan));
         when(rentalPlanRecordRepository.findByRentalPlanId(9L)).thenReturn(List.of());
 
-        assertThatThrownBy(() -> service.requestQuote(9L, EMAIL))
+        assertThatThrownBy(() -> service.requestQuote(9L, EMAIL, null))
                 .isInstanceOf(ResponseStatusException.class)
                 .satisfies(ex -> assertThat(((ResponseStatusException) ex).getStatusCode())
                         .isEqualTo(HttpStatus.BAD_REQUEST));

@@ -55,9 +55,17 @@ public class RentalPlanController {
         return rentalPlanService.removeItem(id, itemId, jwt.getSubject());
     }
 
+    /**
+     * Optional inbound {@code X-Correlation-Id} is propagated to haystack when dynamic pricing
+     * is enabled (see {@code openspec/changes/dynamic-plan-quote-pricing/}), same convention as
+     * {@code RecommendationController}.
+     */
     @PostMapping("/{id}/quote")
-    public RentalPlanResponse requestQuote(@PathVariable Long id, @AuthenticationPrincipal Jwt jwt) {
-        return rentalPlanService.requestQuote(id, jwt.getSubject());
+    public RentalPlanResponse requestQuote(
+            @PathVariable Long id,
+            @AuthenticationPrincipal Jwt jwt,
+            @RequestHeader(value = "X-Correlation-Id", required = false) String correlationId) {
+        return rentalPlanService.requestQuote(id, jwt.getSubject(), correlationId);
     }
 
     @PostMapping("/{id}/cancel")

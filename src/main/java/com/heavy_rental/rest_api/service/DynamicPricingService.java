@@ -55,9 +55,15 @@ public class DynamicPricingService {
 	/**
 	 * Prices every item in {@code items} for {@code plan}'s dates, in the same order as
 	 * {@code items}. Never throws for pricing-service failures — falls back per item.
+	 * <p>
+	 * {@code correlationId} is the inbound {@code X-Correlation-Id} from the portal quote request
+	 * (may be {@code null}/blank); propagated to haystack when present, same convention as
+	 * {@code RecommenderSagaService} — otherwise a fresh id is generated so the outbound call is
+	 * still traceable.
 	 */
-	public List<PricingClient.ItemPrice> priceItems(RentalPlan plan, List<RentalPlanRecord> items) {
-		Map<String, PricingQuoteResponseItem> results = fetchResults(plan, items);
+	public List<PricingClient.ItemPrice> priceItems(RentalPlan plan, List<RentalPlanRecord> items,
+			String correlationId) {
+		Map<String, PricingQuoteResponseItem> results = fetchResults(plan, items, correlationId);
 
 		return items.stream()
 				.map(item -> {
@@ -74,7 +80,8 @@ public class DynamicPricingService {
 				.toList();
 	}
 
-	private Map<String, PricingQuoteResponseItem> fetchResults(RentalPlan plan, List<RentalPlanRecord> items) {
+	private Map<String, PricingQuoteResponseItem> fetchResults(RentalPlan plan, List<RentalPlanRecord> items,
+			String correlationId) {
 		List<PricingQuoteRequestItem> requestItems = items.stream()
 				.map(item -> new PricingQuoteRequestItem(String.valueOf(item.getId()), item.getAsset().getId()))
 				.toList();
@@ -86,8 +93,12 @@ public class DynamicPricingService {
 				pricingProperties.defaultDistanceKm(),
 				requestItems);
 
+		String corr = (correlationId != null && !correlationId.isBlank())
+				? correlationId
+				: UUID.randomUUID().toString();
+
 		try {
-			PricingQuoteResponse response = haystackPricingClient.quote(request, UUID.randomUUID().toString());
+			PricingQuoteResponse response = haystackPricingClient.quote(request, corr);
 			Map<String, PricingQuoteResponseItem> byItemId = new HashMap<>();
 			if (response != null && response.results() != null) {
 				response.results().forEach(result -> byItemId.put(result.itemId(), result));
