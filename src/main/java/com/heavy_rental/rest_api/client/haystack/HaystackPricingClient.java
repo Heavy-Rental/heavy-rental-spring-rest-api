@@ -146,7 +146,7 @@ public class HaystackPricingClient {
 				}
 			}
 		} catch (Exception ignored) {
-			if (body != null && !body.isBlank()) {
+			if (!body.isBlank()) {
 				message = body;
 			}
 		}
