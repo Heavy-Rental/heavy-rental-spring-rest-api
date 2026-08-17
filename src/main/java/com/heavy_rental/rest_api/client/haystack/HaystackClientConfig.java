@@ -2,6 +2,7 @@ package com.heavy_rental.rest_api.client.haystack;
 
 import java.time.Duration;
 
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -149,7 +150,7 @@ public class HaystackClientConfig {
 	@Bean
 	HaystackRecommenderClient haystackRecommenderClient(
 			HaystackProperties properties,
-			RestClient.Builder restClientBuilder,
+			@Qualifier("haystackRestClientBuilder") RestClient.Builder restClientBuilder,
 			ObjectMapper objectMapper,
 			CircuitBreaker haystackCircuitBreaker,
 			Bulkhead haystackIngestBulkhead,
@@ -179,7 +180,7 @@ public class HaystackClientConfig {
 	@Bean
 	HaystackPricingClient haystackPricingClient(
 			HaystackProperties properties,
-			RestClient.Builder restClientBuilder,
+			@Qualifier("haystackRestClientBuilder") RestClient.Builder restClientBuilder,
 			ObjectMapper objectMapper,
 			CircuitBreaker haystackCircuitBreaker,
 			Bulkhead haystackPricingBulkhead,
