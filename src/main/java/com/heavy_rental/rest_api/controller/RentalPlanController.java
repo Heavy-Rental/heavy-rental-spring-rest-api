@@ -11,6 +11,7 @@ import jakarta.validation.Valid;
 
 import com.heavy_rental.rest_api.dto.RentalPlanCreateRequest;
 import com.heavy_rental.rest_api.dto.RentalPlanResponse;
+import com.heavy_rental.rest_api.dto.RentalPlanUpdateRequest;
 import com.heavy_rental.rest_api.service.RentalPlanService;
 
 import com.heavy_rental.rest_api.dto.RentalPlanItemRequest;
@@ -55,9 +56,30 @@ public class RentalPlanController {
         return rentalPlanService.removeItem(id, itemId, jwt.getSubject());
     }
 
+    /**
+     * Sets/changes {@code siteAddress} on a plan created without one (see
+     * {@code openspec/changes/pricing-postal-distance/}). Setting it on a {@code QUOTED} plan
+     * reverts to {@code DRAFT} and clears {@code totalAmount} — see
+     * {@code RentalPlanService#updateSiteAddress}.
+     */
+    @PatchMapping("/{id}")
+    public RentalPlanResponse updateSiteAddress(
+            @PathVariable Long id, @Valid @RequestBody RentalPlanUpdateRequest request,
+            @AuthenticationPrincipal Jwt jwt) {
+        return rentalPlanService.updateSiteAddress(id, request, jwt.getSubject());
+    }
+
+    /**
+     * Optional inbound {@code X-Correlation-Id} is propagated to haystack when dynamic pricing
+     * is enabled (see {@code openspec/changes/dynamic-plan-quote-pricing/}), same convention as
+     * {@code RecommendationController}.
+     */
     @PostMapping("/{id}/quote")
-    public RentalPlanResponse requestQuote(@PathVariable Long id, @AuthenticationPrincipal Jwt jwt) {
-        return rentalPlanService.requestQuote(id, jwt.getSubject());
+    public RentalPlanResponse requestQuote(
+            @PathVariable Long id,
+            @AuthenticationPrincipal Jwt jwt,
+            @RequestHeader(value = "X-Correlation-Id", required = false) String correlationId) {
+        return rentalPlanService.requestQuote(id, jwt.getSubject(), correlationId);
     }
 
     @PostMapping("/{id}/cancel")

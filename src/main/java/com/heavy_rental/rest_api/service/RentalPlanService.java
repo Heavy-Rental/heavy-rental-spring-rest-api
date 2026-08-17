@@ -1,6 +1,8 @@
 package com.heavy_rental.rest_api.service;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -9,11 +11,13 @@ import org.springframework.web.server.ResponseStatusException;
 import com.heavy_rental.rest_api.dto.RentalPlanCreateRequest;
 import com.heavy_rental.rest_api.dto.RentalPlanItemResponse;
 import com.heavy_rental.rest_api.dto.RentalPlanResponse;
+import com.heavy_rental.rest_api.dto.RentalPlanUpdateRequest;
 import com.heavy_rental.rest_api.entity.RentalPlan;
 import com.heavy_rental.rest_api.entity.User;
 import com.heavy_rental.rest_api.repository.RentalPlanRecordRepository;
 import com.heavy_rental.rest_api.repository.RentalPlanRepository;
 import com.heavy_rental.rest_api.repository.UserRepository;
+import com.heavy_rental.rest_api.util.PostalCodeUtil;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -23,7 +27,9 @@ import com.heavy_rental.rest_api.entity.Asset;
 import com.heavy_rental.rest_api.entity.RentalPlanRecord;
 import com.heavy_rental.rest_api.repository.AssetRepository;
 
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @Service
 public class RentalPlanService {
@@ -36,18 +42,27 @@ public class RentalPlanService {
     private final UserRepository userRepository;
     private final AssetRepository assetRepository;
     private final PricingClient pricingClient;
+    private final DynamicPricingService dynamicPricingService;
+    private final TransactionTemplate readOnlyTransactionTemplate;
+    private final TransactionTemplate writeTransactionTemplate;
 
     public RentalPlanService(
             RentalPlanRepository rentalPlanRepository,
             RentalPlanRecordRepository rentalPlanRecordRepository,
             UserRepository userRepository,
             AssetRepository assetRepository,
-            PricingClient pricingClient) {
+            PricingClient pricingClient,
+            DynamicPricingService dynamicPricingService,
+            PlatformTransactionManager transactionManager) {
         this.rentalPlanRepository = rentalPlanRepository;
         this.rentalPlanRecordRepository = rentalPlanRecordRepository;
         this.userRepository = userRepository;
         this.assetRepository = assetRepository;
         this.pricingClient = pricingClient;
+        this.dynamicPricingService = dynamicPricingService;
+        this.readOnlyTransactionTemplate = new TransactionTemplate(transactionManager);
+        this.readOnlyTransactionTemplate.setReadOnly(true);
+        this.writeTransactionTemplate = new TransactionTemplate(transactionManager);
     }
 
     @Transactional
@@ -65,10 +80,52 @@ public class RentalPlanService {
         plan.setStartDate(request.startDate());
         plan.setEndDate(request.endDate());
         plan.setSiteAddress(request.siteAddress());
+        // Populates the delivery postal code DistanceService geocodes at quote time (see
+        // openspec/changes/pricing-postal-distance/) — request.siteAddress() is already
+        // @Pattern(".*\d{6}$")-validated, so this should always succeed; null is a safe,
+        // defensive fallback DistanceService already treats as "use the default distance".
+        plan.setSitePostalCode(PostalCodeUtil.extractTrailing6Digits(request.siteAddress()));
         plan.setStatus(RentalPlan.PlanStatus.DRAFT);
         plan.setCreatedAt(LocalDateTime.now());
 
         rentalPlanRepository.save(plan);
+        return toResponse(plan);
+    }
+
+    /**
+     * Sets or changes {@code siteAddress} on a plan — how a plan created without one (the
+     * "Skip for now" cart flow, see {@code openspec/changes/pricing-postal-distance/}) later gets
+     * one. Setting it on a {@code QUOTED} plan reverts to {@code DRAFT} and clears
+     * {@code totalAmount}, same precedent as {@link #revertQuoteIfNeeded} for add/remove item —
+     * the frozen total was priced using {@code distance_km}, which depends on {@code siteAddress},
+     * so a stale total left in place after the address changes would be a real pricing bug, not
+     * just a display nit. Deliberately does NOT reuse {@code revertQuoteIfNeeded} directly: that
+     * helper only saves the plan when reverting, but this method must always save it (the address
+     * itself changed), so the revert is inlined into this method's own single save instead.
+     */
+    @Transactional
+    public RentalPlanResponse updateSiteAddress(Long planId, RentalPlanUpdateRequest request, String customerEmail) {
+        RentalPlan plan = loadOwnedPlan(planId, customerEmail);
+
+        if (plan.getStatus() == RentalPlan.PlanStatus.CONVERTED) {
+            throw new RentalPlanConflictException("already_converted",
+                    "Rental plan has already been converted to a booking and cannot be updated");
+        }
+        if (plan.getStatus() == RentalPlan.PlanStatus.CANCELLED) {
+            throw new RentalPlanConflictException("already_cancelled",
+                    "Rental plan has already been cancelled and cannot be updated");
+        }
+
+        plan.setSiteAddress(request.siteAddress());
+        plan.setSitePostalCode(PostalCodeUtil.extractTrailing6Digits(request.siteAddress()));
+
+        if (plan.getStatus() == RentalPlan.PlanStatus.QUOTED) {
+            plan.setStatus(RentalPlan.PlanStatus.DRAFT);
+            plan.setTotalAmount(null);
+        }
+        plan.setUpdatedAt(LocalDateTime.now());
+        rentalPlanRepository.save(plan);
+
         return toResponse(plan);
     }
 
@@ -138,13 +195,48 @@ public class RentalPlanService {
         }
     }
 
-    @Transactional
-    public RentalPlanResponse requestQuote(Long planId, String customerEmail) {
-        RentalPlan plan = loadOwnedPlan(planId, customerEmail);
+    /**
+     * Deliberately NOT {@code @Transactional} at this level. {@link DynamicPricingService} makes
+     * a blocking HTTP call to haystack-fast-api (up to {@code haystack.timeouts.pricing-read},
+     * 20s by default, plus retry) — if that call happened inside a single DB transaction spanning
+     * the whole method, the {@code rental_plan} row's optimistic lock (@Version) would stay
+     * "checked out" for the whole call. Since the same row is written by addItem/removeItem/
+     * cancel/checkout too, any of those landing during that window would win the race and bump
+     * {@code version}, so this transaction's final save would fail with
+     * {@code ObjectOptimisticLockingFailureException} — surfaced to the customer as a 409 even
+     * though nothing was actually wrong with their request (HR-153).
+     * <p>
+     * Split into two short transactions with the slow, untransacted haystack call in between:
+     * read the plan/items, price them, then reload-and-write. This shrinks the lock window from
+     * ~20s to milliseconds without changing the pricing/fallback semantics.
+     */
+    public RentalPlanResponse requestQuote(Long planId, String customerEmail, String correlationId) {
+        QuoteContext context = readOnlyTransactionTemplate.execute(status -> loadQuoteContext(planId, customerEmail));
 
-        // Re-quoting a QUOTED plan is allowed — it's how a customer refreshes a stale quote
-        // (BookingService's 24-hour freshness check, REQ-6) before checkout. Only a CONVERTED
-        // plan is truly final and can never be quoted again.
+        Map<Long, PricingClient.ItemPrice> priceByItemId = null;
+        if (dynamicPricingService.isEnabled()) {
+            List<PricingClient.ItemPrice> prices =
+                    dynamicPricingService.priceItems(context.plan(), context.items(), correlationId);
+            priceByItemId = new LinkedHashMap<>();
+            for (int i = 0; i < context.items().size(); i++) {
+                priceByItemId.put(context.items().get(i).getId(), prices.get(i));
+            }
+        }
+
+        Map<Long, PricingClient.ItemPrice> finalPriceByItemId = priceByItemId;
+        return writeTransactionTemplate.execute(status -> finalizeQuote(planId, customerEmail, finalPriceByItemId));
+    }
+
+    private record QuoteContext(RentalPlan plan, List<RentalPlanRecord> items) {
+    }
+
+    /**
+     * Re-quoting a QUOTED plan is allowed — it's how a customer refreshes a stale quote
+     * (BookingService's 24-hour freshness check, REQ-6) before checkout. Only a CONVERTED
+     * plan is truly final and can never be quoted again.
+     */
+    private QuoteContext loadQuoteContext(Long planId, String customerEmail) {
+        RentalPlan plan = loadOwnedPlan(planId, customerEmail);
         if (plan.getStatus() == RentalPlan.PlanStatus.CONVERTED) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Plan has already been converted to a booking");
         }
@@ -152,6 +244,42 @@ public class RentalPlanService {
         List<RentalPlanRecord> items = rentalPlanRecordRepository.findByRentalPlanId(plan.getId());
         if (items.isEmpty()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Cannot quote an empty plan");
+        }
+
+        // Force-init each item's Asset now, while the read transaction's session is still open —
+        // DynamicPricingService's per-item fallback (DefaultPricingClient) reads
+        // Asset.baseDailyRate after this transaction has closed.
+        items.forEach(item -> item.getAsset().getBaseDailyRate());
+
+        return new QuoteContext(plan, items);
+    }
+
+    /**
+     * Reloads the plan/items fresh (picking up the current {@code version}) and applies the
+     * dynamic prices computed between the two transactions, keyed by item id so a concurrent
+     * cart edit that changed the item set in between doesn't misapply prices to the wrong item.
+     */
+    private RentalPlanResponse finalizeQuote(
+            Long planId, String customerEmail, Map<Long, PricingClient.ItemPrice> priceByItemId) {
+        RentalPlan plan = loadOwnedPlan(planId, customerEmail);
+        if (plan.getStatus() == RentalPlan.PlanStatus.CONVERTED) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Plan has already been converted to a booking");
+        }
+
+        List<RentalPlanRecord> items = rentalPlanRecordRepository.findByRentalPlanId(plan.getId());
+        if (items.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Cannot quote an empty plan");
+        }
+
+        if (priceByItemId != null) {
+            for (RentalPlanRecord item : items) {
+                PricingClient.ItemPrice price = priceByItemId.get(item.getId());
+                if (price != null) {
+                    item.setDailyRate(price.dailyRate());
+                    item.setSubtotal(price.subtotal());
+                    rentalPlanRecordRepository.save(item);
+                }
+            }
         }
 
         BigDecimal total = items.stream()

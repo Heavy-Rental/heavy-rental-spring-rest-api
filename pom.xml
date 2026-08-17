@@ -68,6 +68,16 @@
 			<version>24.0.0</version>
 		</dependency>
 
+		<!-- Loads .env (workspace root, one level up — see springdotenv.directory in the
+		     spring-boot-maven-plugin config below) into the Environment for local dev, so
+		     `mvn spring-boot:run` works the same as the IDE's envFile-based launch config.
+		     Real env vars (CI/prod) always take precedence over .env values. -->
+		<dependency>
+			<groupId>me.paulschwarz</groupId>
+			<artifactId>springboot4-dotenv</artifactId>
+			<version>5.1.0</version>
+		</dependency>
+
 		<!-- S2b: Resilience4j (programmatic decorators around RestClient) -->
 		<dependency>
 			<groupId>io.github.resilience4j</groupId>
@@ -146,6 +156,12 @@
 							<artifactId>lombok</artifactId>
 						</exclude>
 					</excludes>
+					<!-- .env lives at the workspace root (one level above this project, and
+					     outside this git repo entirely — deliberate, so it can never be
+					     committed). springboot4-dotenv looks in the working directory by
+					     default; point it up one level so `mvn spring-boot:run` finds it
+					     without moving the file or duplicating it. -->
+					<jvmArguments>-Dspringdotenv.directory=..</jvmArguments>
 				</configuration>
 			</plugin>
 			<plugin>

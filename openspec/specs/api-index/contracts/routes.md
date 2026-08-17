@@ -68,6 +68,8 @@ Legend: **Shared** = web + mobile; **Web** / **Mobile** / **Admin** = primary cl
 | Method | Path | Notes |
 |--------|------|--------|
 | `POST` | `/api/pricing/estimate` | Design only — active change [`../../../changes/pricing-estimate/`](../../../changes/pricing-estimate/) |
+| `GET` | `/api/postalCodes/{postalCode}` | Implemented (USER/ADMIN), not yet archived here or consumed by the frontend — active change [`../../../changes/pricing-postal-distance/`](../../../changes/pricing-postal-distance/), contract [`contracts/postal-code-validation.md`](../../../changes/pricing-postal-distance/contracts/postal-code-validation.md) |
+| `PATCH` | `/api/rentalPlans/{id}` | Implemented (owner), not yet archived here or consumed by the frontend — active change [`../../../changes/pricing-postal-distance/`](../../../changes/pricing-postal-distance/), contract [`contracts/rental-plan-site-address.md`](../../../changes/pricing-postal-distance/contracts/rental-plan-site-address.md) |
 
 ## Haystack proxy map
 

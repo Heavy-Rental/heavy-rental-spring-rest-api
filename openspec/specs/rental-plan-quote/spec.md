@@ -82,13 +82,18 @@ On `DRAFT`/`SAVED` **or `QUOTED`** plans, `POST .../items` with `assetId` MUST c
 
 Adding/quoting plan items MUST NOT block equipment availability; only bookings with active statuses do. Checkout MUST re-check overlap (see FR-BDR-009).
 
-### Requirement: FR-RP-008 Site address ends with a 6-digit postal code
+### Requirement: FR-RP-008 Site address is optional; when provided must end with a 6-digit postal code
 
-`POST /api/rentalPlans` `siteAddress` MUST be non-blank and MUST end with a 6-digit postal code (`^.*\d{6}$`). Leading/trailing whitespace MUST be stripped before validation. Invalid or missing address MUST return `400` with `error` = `validation_failed` before the one-active-plan check or any persist. The `RentalPlan.siteAddress` column itself remains an unconstrained nullable string.
+`POST /api/rentalPlans` `siteAddress` is OPTIONAL — a plan MAY be created with it omitted or `null` (the "Skip for now" cart flow; see `openspec/changes/pricing-postal-distance/` "Follow-on: optional siteAddress at plan creation"). WHEN PROVIDED, it MUST be non-blank and MUST end with a 6-digit postal code (`^.*\d{6}$`). Leading/trailing whitespace MUST be stripped before validation. A present-but-invalid address MUST return `400` with `error` = `validation_failed` before the one-active-plan check or any persist. `RentalPlan.siteAddress`/`sitePostalCode` remain unconstrained nullable columns. `PATCH /api/rentalPlans/{id}` (FR-RP-011) is how a plan created without an address gets one set later.
 
-#### Scenario: Missing postal code rejected
+#### Scenario: Omitted address accepted
 - GIVEN a caller with no active plan
-- WHEN they POST a plan whose `siteAddress` is blank or does not end in six digits
+- WHEN they POST a plan with `siteAddress` omitted (or explicitly `null`)
+- THEN `201` and a `DRAFT` plan is created with `siteAddress: null`
+
+#### Scenario: Malformed postal code rejected
+- GIVEN a caller with no active plan
+- WHEN they POST a plan whose `siteAddress` is present but blank or does not end in six digits
 - THEN `400` `validation_failed`
 - AND no `RentalPlan` row is created
 
@@ -118,6 +123,30 @@ When `POST /api/bookings` includes `rentalPlanId`, the system MUST apply FR-BDR-
 #### Scenario: Converted plan cannot be cancelled
 - GIVEN a CONVERTED plan
 - WHEN `POST .../cancel`
+- THEN `409` `already_converted`
+
+### Requirement: FR-RP-011 Update site address
+
+`PATCH /api/rentalPlans/{id}` MUST set `siteAddress` on a plan owned by the caller — how a plan created without one (FR-RP-008) gets one later, or how an existing one gets corrected. WHEN PROVIDED, `siteAddress` MUST satisfy the same non-blank + 6-digit-postal-code rule as FR-RP-008 (`400` `validation_failed` otherwise, no persist). Since the frozen `totalAmount` on a `QUOTED` plan was priced using `distance_km`, which is derived from `siteAddress`, setting a new address on a `QUOTED` plan MUST revert it to `DRAFT` and clear `totalAmount` — same rule as FR-RP-002/FR-RP-003 for item changes. A `CONVERTED` plan MUST NOT be updatable (`409` `already_converted`). An already-`CANCELLED` plan MUST NOT be updatable (`409` `already_cancelled`). Non-owner → `404`.
+
+#### Scenario: Set address on a plan created without one
+- GIVEN a DRAFT plan owned by the caller with `siteAddress: null`
+- WHEN `PATCH .../{id}` with a valid `siteAddress`
+- THEN `200` and the plan's `siteAddress` is set; `status` remains `DRAFT`
+
+#### Scenario: Changing address on a quoted plan reverts to draft
+- GIVEN a QUOTED plan owned by the caller with a non-null `totalAmount`
+- WHEN `PATCH .../{id}` with a different valid `siteAddress`
+- THEN `200`, `status` is `DRAFT`, and `totalAmount` is `null`
+
+#### Scenario: Malformed address rejected
+- GIVEN a plan owned by the caller
+- WHEN `PATCH .../{id}` with a `siteAddress` that does not end in six digits
+- THEN `400` `validation_failed` and the plan is unchanged
+
+#### Scenario: Converted plan cannot be updated
+- GIVEN a CONVERTED plan
+- WHEN `PATCH .../{id}`
 - THEN `409` `already_converted`
 
 ## Out of scope
