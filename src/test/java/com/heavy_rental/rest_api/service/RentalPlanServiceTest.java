@@ -31,6 +31,7 @@ import org.springframework.web.server.ResponseStatusException;
 import com.heavy_rental.rest_api.dto.RentalPlanCreateRequest;
 import com.heavy_rental.rest_api.dto.RentalPlanItemRequest;
 import com.heavy_rental.rest_api.dto.RentalPlanResponse;
+import com.heavy_rental.rest_api.dto.RentalPlanUpdateRequest;
 import com.heavy_rental.rest_api.entity.Asset;
 import com.heavy_rental.rest_api.entity.RentalPlan;
 import com.heavy_rental.rest_api.entity.RentalPlanRecord;
@@ -347,6 +348,96 @@ class RentalPlanServiceTest {
         verify(rentalPlanRepository).save(savedPlan.capture());
         assertThat(savedPlan.getValue().getSiteAddress()).isNull();
         assertThat(savedPlan.getValue().getSitePostalCode()).isNull();
+    }
+
+    // --- updateSiteAddress (PATCH) ------------------------------------------------------------
+
+    @Test
+    void updateSiteAddress_onDraftPlan_setsAddressAndPostalCodeWithoutTouchingStatus() {
+        RentalPlan plan = ownedPlan(9L, RentalPlan.PlanStatus.DRAFT);
+        when(rentalPlanRepository.findById(9L)).thenReturn(Optional.of(plan));
+        when(rentalPlanRecordRepository.findByRentalPlanId(9L)).thenReturn(List.of());
+
+        RentalPlanResponse response =
+                service.updateSiteAddress(9L, new RentalPlanUpdateRequest("20 Jurong Port Road, 619094"), EMAIL);
+
+        assertThat(response.status()).isEqualTo("DRAFT");
+        assertThat(response.siteAddress()).isEqualTo("20 Jurong Port Road, 619094");
+        assertThat(plan.getSitePostalCode()).isEqualTo("619094");
+        assertThat(plan.getUpdatedAt()).isNotNull();
+        verify(rentalPlanRepository).save(plan);
+    }
+
+    @Test
+    void updateSiteAddress_onQuotedPlan_revertsToDraftAndClearsTotal() {
+        // The frozen totalAmount was priced using distance_km, which depends on siteAddress —
+        // same "stale total" reasoning as add/remove item on a QUOTED plan (FR-RP-002/FR-RP-003).
+        RentalPlan plan = ownedPlan(9L, RentalPlan.PlanStatus.QUOTED);
+        plan.setTotalAmount(new BigDecimal("2250.00"));
+        when(rentalPlanRepository.findById(9L)).thenReturn(Optional.of(plan));
+        when(rentalPlanRecordRepository.findByRentalPlanId(9L)).thenReturn(List.of());
+
+        RentalPlanResponse response =
+                service.updateSiteAddress(9L, new RentalPlanUpdateRequest("20 Jurong Port Road, 619094"), EMAIL);
+
+        assertThat(response.status()).isEqualTo("DRAFT");
+        assertThat(response.totalAmount()).isNull();
+        assertThat(response.siteAddress()).isEqualTo("20 Jurong Port Road, 619094");
+    }
+
+    @Test
+    void updateSiteAddress_withNullAddress_clearsAddressAndPostalCode() {
+        RentalPlan plan = ownedPlan(9L, RentalPlan.PlanStatus.DRAFT);
+        plan.setSiteAddress("20 Jurong Port Road, 619094");
+        plan.setSitePostalCode("619094");
+        when(rentalPlanRepository.findById(9L)).thenReturn(Optional.of(plan));
+        when(rentalPlanRecordRepository.findByRentalPlanId(9L)).thenReturn(List.of());
+
+        RentalPlanResponse response = service.updateSiteAddress(9L, new RentalPlanUpdateRequest(null), EMAIL);
+
+        assertThat(response.siteAddress()).isNull();
+        assertThat(plan.getSitePostalCode()).isNull();
+    }
+
+    @Test
+    void updateSiteAddress_nonOwner_rejectedWith404() {
+        User otherCustomer = new User();
+        otherCustomer.setId(99L);
+        RentalPlan plan = new RentalPlan();
+        plan.setId(9L);
+        plan.setCustomer(otherCustomer);
+        plan.setStatus(RentalPlan.PlanStatus.DRAFT);
+        when(rentalPlanRepository.findById(9L)).thenReturn(Optional.of(plan));
+
+        RentalPlanUpdateRequest request = new RentalPlanUpdateRequest("20 Jurong Port Road, 619094");
+        assertThatThrownBy(() -> service.updateSiteAddress(9L, request, EMAIL))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(ex -> assertThat(((ResponseStatusException) ex).getStatusCode())
+                        .isEqualTo(HttpStatus.NOT_FOUND));
+    }
+
+    @Test
+    void updateSiteAddress_onConvertedPlan_rejectedWith409AlreadyConverted() {
+        RentalPlan plan = ownedPlan(9L, RentalPlan.PlanStatus.CONVERTED);
+        when(rentalPlanRepository.findById(9L)).thenReturn(Optional.of(plan));
+
+        RentalPlanUpdateRequest request = new RentalPlanUpdateRequest("20 Jurong Port Road, 619094");
+        assertThatThrownBy(() -> service.updateSiteAddress(9L, request, EMAIL))
+                .isInstanceOf(RentalPlanConflictException.class)
+                .satisfies(ex -> assertThat(((RentalPlanConflictException) ex).getCode())
+                        .isEqualTo("already_converted"));
+    }
+
+    @Test
+    void updateSiteAddress_onCancelledPlan_rejectedWith409AlreadyCancelled() {
+        RentalPlan plan = ownedPlan(9L, RentalPlan.PlanStatus.CANCELLED);
+        when(rentalPlanRepository.findById(9L)).thenReturn(Optional.of(plan));
+
+        RentalPlanUpdateRequest request = new RentalPlanUpdateRequest("20 Jurong Port Road, 619094");
+        assertThatThrownBy(() -> service.updateSiteAddress(9L, request, EMAIL))
+                .isInstanceOf(RentalPlanConflictException.class)
+                .satisfies(ex -> assertThat(((RentalPlanConflictException) ex).getCode())
+                        .isEqualTo("already_cancelled"));
     }
 
     // --- cancel ------------------------------------------------------------------------------
