@@ -21,6 +21,7 @@ import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpStatus;
@@ -310,6 +311,22 @@ class RentalPlanServiceTest {
 
         assertThat(response.status()).isEqualTo("DRAFT");
         assertThat(response.createdAt()).isNotNull();
+    }
+
+    @Test
+    void create_populatesSitePostalCode_fromTrailing6DigitsOfSiteAddress() {
+        // DistanceService (openspec/changes/pricing-postal-distance/) reads this column at quote
+        // time rather than re-parsing siteAddress — create() must populate it up front.
+        when(rentalPlanRecordRepository.findByRentalPlanId(any())).thenReturn(List.of());
+
+        RentalPlanCreateRequest request = new RentalPlanCreateRequest(
+                LocalDate.of(2026, 10, 1), LocalDate.of(2026, 10, 3), "20 Jurong Port Road, 619094");
+
+        service.create(request, EMAIL);
+
+        ArgumentCaptor<RentalPlan> savedPlan = ArgumentCaptor.forClass(RentalPlan.class);
+        verify(rentalPlanRepository).save(savedPlan.capture());
+        assertThat(savedPlan.getValue().getSitePostalCode()).isEqualTo("619094");
     }
 
     // --- cancel ------------------------------------------------------------------------------

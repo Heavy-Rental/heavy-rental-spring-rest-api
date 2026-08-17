@@ -24,7 +24,9 @@ import com.heavy_rental.rest_api.entity.RentalPlanRecord;
  * {@code POST /internal/v1/pricing/quote} (see {@code openspec/changes/dynamic-plan-quote-pricing/}),
  * with a per-item fallback to {@link DefaultPricingClient} ({@code Asset.baseDailyRate}) so a
  * quote request is never blocked by the pricing service being unavailable or unable to resolve
- * a specific item.
+ * a specific item. {@code distance_km} is resolved via {@link DistanceService}, which never throws
+ * either — a geocoding failure there falls back to a constant, same "never block the quote"
+ * philosophy (see {@code openspec/changes/pricing-postal-distance/}).
  * <p>
  * Deliberately independent of the recommender saga — only called from
  * {@link RentalPlanService#requestQuote}, never from cart-building ({@code addItem}).
@@ -36,14 +38,17 @@ public class DynamicPricingService {
 
 	private final HaystackPricingClient haystackPricingClient;
 	private final DefaultPricingClient defaultPricingClient;
+	private final DistanceService distanceService;
 	private final PricingProperties pricingProperties;
 
 	public DynamicPricingService(
 			HaystackPricingClient haystackPricingClient,
 			DefaultPricingClient defaultPricingClient,
+			DistanceService distanceService,
 			PricingProperties pricingProperties) {
 		this.haystackPricingClient = haystackPricingClient;
 		this.defaultPricingClient = defaultPricingClient;
+		this.distanceService = distanceService;
 		this.pricingProperties = pricingProperties;
 	}
 
@@ -98,7 +103,7 @@ public class DynamicPricingService {
 				String.valueOf(plan.getId()),
 				plan.getStartDate(),
 				plan.getEndDate(),
-				pricingProperties.defaultDistanceKm(),
+				distanceService.resolveDistanceKm(plan),
 				requestItems);
 
 		String corr = (correlationId != null && !correlationId.isBlank())

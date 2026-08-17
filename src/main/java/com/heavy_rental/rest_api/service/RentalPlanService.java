@@ -16,6 +16,7 @@ import com.heavy_rental.rest_api.entity.User;
 import com.heavy_rental.rest_api.repository.RentalPlanRecordRepository;
 import com.heavy_rental.rest_api.repository.RentalPlanRepository;
 import com.heavy_rental.rest_api.repository.UserRepository;
+import com.heavy_rental.rest_api.util.PostalCodeUtil;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -78,6 +79,11 @@ public class RentalPlanService {
         plan.setStartDate(request.startDate());
         plan.setEndDate(request.endDate());
         plan.setSiteAddress(request.siteAddress());
+        // Populates the delivery postal code DistanceService geocodes at quote time (see
+        // openspec/changes/pricing-postal-distance/) — request.siteAddress() is already
+        // @Pattern(".*\d{6}$")-validated, so this should always succeed; null is a safe,
+        // defensive fallback DistanceService already treats as "use the default distance".
+        plan.setSitePostalCode(PostalCodeUtil.extractTrailing6Digits(request.siteAddress()));
         plan.setStatus(RentalPlan.PlanStatus.DRAFT);
         plan.setCreatedAt(LocalDateTime.now());
 

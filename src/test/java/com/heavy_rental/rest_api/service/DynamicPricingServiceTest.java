@@ -8,6 +8,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -38,6 +39,7 @@ class DynamicPricingServiceTest {
 
     @Mock private HaystackPricingClient haystackPricingClient;
     @Mock private DefaultPricingClient defaultPricingClient;
+    @Mock private DistanceService distanceService;
 
     private DynamicPricingService service;
 
@@ -47,8 +49,12 @@ class DynamicPricingServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new DynamicPricingService(
-                haystackPricingClient, defaultPricingClient, new PricingProperties(true, 20.0, "629462", true));
+        service = new DynamicPricingService(haystackPricingClient, defaultPricingClient, distanceService,
+                new PricingProperties(true, 20.0, "629462", true));
+        // Not every test below cares about the resolved distance (e.g. isEnabled_...) — lenient so
+        // those aren't flagged as unnecessary stubbing; priceItems_usesDistanceServiceResolvedDistance
+        // overrides this default for its specific plan to prove the value actually flows through.
+        lenient().when(distanceService.resolveDistanceKm(any())).thenReturn(20.0);
 
         plan = new RentalPlan();
         plan.setId(55L);
@@ -71,7 +77,7 @@ class DynamicPricingServiceTest {
     @Test
     void isEnabled_delegatesToPricingProperties() {
         assertThat(service.isEnabled()).isTrue();
-        assertThat(new DynamicPricingService(haystackPricingClient, defaultPricingClient,
+        assertThat(new DynamicPricingService(haystackPricingClient, defaultPricingClient, distanceService,
                 new PricingProperties(false, 20.0, "629462", true)).isEnabled()).isFalse();
     }
 
@@ -148,6 +154,21 @@ class DynamicPricingServiceTest {
 
         assertThat(prices.get(0).dailyRate()).isEqualByComparingTo("182.40");
         verify(defaultPricingClient, never()).priceItem(any(), any(), any());
+    }
+
+    @Test
+    void priceItems_usesDistanceServiceResolvedDistance_inOutboundRequest() {
+        // Distinct from the 20.0 default (see setUp()) so a passing test proves the value is
+        // actually wired through DistanceService, not coincidentally matching a fallback constant.
+        when(distanceService.resolveDistanceKm(plan)).thenReturn(37.5);
+        when(haystackPricingClient.quote(any(PricingQuoteRequest.class), anyString()))
+                .thenReturn(new PricingQuoteResponse("55", "SGD", new BigDecimal("0.30"), false, List.of(), List.of()));
+        ArgumentCaptor<PricingQuoteRequest> requestCaptor = ArgumentCaptor.forClass(PricingQuoteRequest.class);
+
+        service.priceItems(plan, List.of(item1), "corr-distance-1");
+
+        verify(haystackPricingClient).quote(requestCaptor.capture(), anyString());
+        assertThat(requestCaptor.getValue().distanceKm()).isEqualTo(37.5);
     }
 
     @Test
