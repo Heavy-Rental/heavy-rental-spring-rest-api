@@ -48,7 +48,7 @@ class DynamicPricingServiceTest {
     @BeforeEach
     void setUp() {
         service = new DynamicPricingService(
-                haystackPricingClient, defaultPricingClient, new PricingProperties(true, 20.0));
+                haystackPricingClient, defaultPricingClient, new PricingProperties(true, 20.0, "629462", true));
 
         plan = new RentalPlan();
         plan.setId(55L);
@@ -72,7 +72,7 @@ class DynamicPricingServiceTest {
     void isEnabled_delegatesToPricingProperties() {
         assertThat(service.isEnabled()).isTrue();
         assertThat(new DynamicPricingService(haystackPricingClient, defaultPricingClient,
-                new PricingProperties(false, 20.0)).isEnabled()).isFalse();
+                new PricingProperties(false, 20.0, "629462", true)).isEnabled()).isFalse();
     }
 
     @Test
