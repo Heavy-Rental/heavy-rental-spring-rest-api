@@ -3,7 +3,7 @@
 | Field | Value |
 |-------|--------|
 | **Change** | [`pricing-postal-distance`](../proposal.md) — implementation in progress |
-| **Status** | `POST /api/rentalPlans` change — **not yet implemented** (tasks 11–12). `PATCH /api/rentalPlans/{id}` — **not yet implemented** (tasks 13–15). This doc is written ahead of the code so the frontend team can build against it now; if the as-built behavior ends up differing, this file gets updated and that'll be called out. |
+| **Status** | Both **implemented and tested** (tasks 11–14 done; 130+ automated tests, including a real HTTP + `@Valid` integration test, not just service-level). Not yet consumed by the frontend, not yet archived into `openspec/specs/rental-plan-quote/`. The behavior below matches the as-built code exactly — the "written ahead of code" caveat from the previous revision of this doc no longer applies. |
 | **Behavior** | [`../proposal.md`](../proposal.md) ("Follow-on" section) · [`../design.md`](../design.md) |
 
 ## `POST /api/rentalPlans` — `siteAddress` becomes optional
@@ -98,7 +98,11 @@ still end in a 6-digit postal code, or:
 |------|---------|------|
 | `404` | `not_found` | Plan missing or not owned by the caller |
 | `400` | `validation_failed` | `siteAddress` present but malformed |
-| `409` | *(exact code TBD — will match whatever `cancel()`'s existing terminal-state errors use)* | Plan is already `CONVERTED` or `CANCELLED` |
+| `409` | `already_converted` | Plan is already `CONVERTED` |
+| `409` | `already_cancelled` | Plan is already `CANCELLED` |
+
+`siteAddress` can also be explicitly set back to `null` in the PATCH body to clear an address —
+same `@Pattern`-allows-null rule as `POST`, not a special case.
 
 ## Not changing as part of this endpoint
 

@@ -125,6 +125,30 @@ When `POST /api/bookings` includes `rentalPlanId`, the system MUST apply FR-BDR-
 - WHEN `POST .../cancel`
 - THEN `409` `already_converted`
 
+### Requirement: FR-RP-011 Update site address
+
+`PATCH /api/rentalPlans/{id}` MUST set `siteAddress` on a plan owned by the caller — how a plan created without one (FR-RP-008) gets one later, or how an existing one gets corrected. WHEN PROVIDED, `siteAddress` MUST satisfy the same non-blank + 6-digit-postal-code rule as FR-RP-008 (`400` `validation_failed` otherwise, no persist). Since the frozen `totalAmount` on a `QUOTED` plan was priced using `distance_km`, which is derived from `siteAddress`, setting a new address on a `QUOTED` plan MUST revert it to `DRAFT` and clear `totalAmount` — same rule as FR-RP-002/FR-RP-003 for item changes. A `CONVERTED` plan MUST NOT be updatable (`409` `already_converted`). An already-`CANCELLED` plan MUST NOT be updatable (`409` `already_cancelled`). Non-owner → `404`.
+
+#### Scenario: Set address on a plan created without one
+- GIVEN a DRAFT plan owned by the caller with `siteAddress: null`
+- WHEN `PATCH .../{id}` with a valid `siteAddress`
+- THEN `200` and the plan's `siteAddress` is set; `status` remains `DRAFT`
+
+#### Scenario: Changing address on a quoted plan reverts to draft
+- GIVEN a QUOTED plan owned by the caller with a non-null `totalAmount`
+- WHEN `PATCH .../{id}` with a different valid `siteAddress`
+- THEN `200`, `status` is `DRAFT`, and `totalAmount` is `null`
+
+#### Scenario: Malformed address rejected
+- GIVEN a plan owned by the caller
+- WHEN `PATCH .../{id}` with a `siteAddress` that does not end in six digits
+- THEN `400` `validation_failed` and the plan is unchanged
+
+#### Scenario: Converted plan cannot be updated
+- GIVEN a CONVERTED plan
+- WHEN `PATCH .../{id}`
+- THEN `409` `already_converted`
+
 ## Out of scope
 
 - Discounts / agreement e-sign  

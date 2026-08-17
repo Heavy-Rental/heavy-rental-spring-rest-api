@@ -96,5 +96,5 @@ already planned elsewhere in this codebase.
 - Living quote SoT: [`../../specs/rental-plan-quote/`](../../specs/rental-plan-quote/) — FR-RP-008 (relaxed), FR-RP-011 (new, if the optional PATCH ships)
 - Proxy map: [`../../specs/spring-proxy-endpoints/`](../../specs/spring-proxy-endpoints/)
 - Frontend contract: [`contracts/postal-code-validation.md`](./contracts/postal-code-validation.md) (added in task 9, see tasks.md)
-- Frontend contract: [`contracts/rental-plan-site-address.md`](./contracts/rental-plan-site-address.md) — optional `siteAddress` at creation + the new `PATCH` endpoint (written ahead of tasks 11–15's code, for handoff)
+- Frontend contract: [`contracts/rental-plan-site-address.md`](./contracts/rental-plan-site-address.md) — optional `siteAddress` at creation + the new `PATCH` endpoint (implemented and tested as of task 14)
 - Upstream: OneMap API docs — https://www.onemap.gov.sg/apidocs/
