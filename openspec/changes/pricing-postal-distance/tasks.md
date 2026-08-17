@@ -5,8 +5,8 @@ One PR, one commit per numbered task below. Stop after each commit for human rev
 ## Implementation
 
 - [x] 1. Proposal + design (this doc set) — `openspec/changes/pricing-postal-distance/{proposal.md,design.md,tasks.md}`
-- [ ] 2. `data.sql`: normalize every seeded `Asset.location` to `"Tuas"` (replaces 18 distinct free-text values), matching the single-fixed-origin-postal-code decision
-- [ ] 3. `onemap.email`/`onemap.password` placeholders in `application.properties`, Stripe-block pattern (non-functional defaults, real values never committed)
+- [x] 2. `data.sql`: normalize every seeded `Asset.location` to `"Tuas"` (replaces 18 distinct free-text values), matching the single-fixed-origin-postal-code decision
+- [x] 3. `onemap.email`/`onemap.password` placeholders in `application.properties`, Stripe-block pattern (non-functional defaults, real values never committed)
 - [ ] 4. ⛔ **Human action** — register a OneMap account (onemap.gov.sg); add real `ONEMAP_EMAIL`/`ONEMAP_PASSWORD` to the local `.env` (workspace root) and as GitHub Environment secrets for CI. Not a commit.
 - [ ] 5. `client/onemap/` package: `OneMapProperties`, `Coordinates`, `OneMapException`, token/search DTOs, `OneMapAuthService`, `OneMapClient`, `OneMapClientConfig`; rest of `onemap.*` properties (base-url/timeouts/resilience) in `application.properties`; `OneMapClientTest` + `OneMapCircuitBreakerTest` + `OneMapAuthServiceTest` (WireMock/unit only — no real OneMap calls, so this doesn't actually need task 4 to be done first, just convenient to sequence after)
 - [ ] 6. `util/PostalCodeUtil`, `service/DistanceService` (+ `pricing.origin-postal-code`, `pricing.distance-lookup-enabled` on `PricingProperties`), `DistanceServiceTest` (Mockito)
