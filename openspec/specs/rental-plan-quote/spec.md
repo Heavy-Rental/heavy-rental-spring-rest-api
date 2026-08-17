@@ -82,13 +82,18 @@ On `DRAFT`/`SAVED` **or `QUOTED`** plans, `POST .../items` with `assetId` MUST c
 
 Adding/quoting plan items MUST NOT block equipment availability; only bookings with active statuses do. Checkout MUST re-check overlap (see FR-BDR-009).
 
-### Requirement: FR-RP-008 Site address ends with a 6-digit postal code
+### Requirement: FR-RP-008 Site address is optional; when provided must end with a 6-digit postal code
 
-`POST /api/rentalPlans` `siteAddress` MUST be non-blank and MUST end with a 6-digit postal code (`^.*\d{6}$`). Leading/trailing whitespace MUST be stripped before validation. Invalid or missing address MUST return `400` with `error` = `validation_failed` before the one-active-plan check or any persist. The `RentalPlan.siteAddress` column itself remains an unconstrained nullable string.
+`POST /api/rentalPlans` `siteAddress` is OPTIONAL — a plan MAY be created with it omitted or `null` (the "Skip for now" cart flow; see `openspec/changes/pricing-postal-distance/` "Follow-on: optional siteAddress at plan creation"). WHEN PROVIDED, it MUST be non-blank and MUST end with a 6-digit postal code (`^.*\d{6}$`). Leading/trailing whitespace MUST be stripped before validation. A present-but-invalid address MUST return `400` with `error` = `validation_failed` before the one-active-plan check or any persist. `RentalPlan.siteAddress`/`sitePostalCode` remain unconstrained nullable columns. `PATCH /api/rentalPlans/{id}` (FR-RP-011) is how a plan created without an address gets one set later.
 
-#### Scenario: Missing postal code rejected
+#### Scenario: Omitted address accepted
 - GIVEN a caller with no active plan
-- WHEN they POST a plan whose `siteAddress` is blank or does not end in six digits
+- WHEN they POST a plan with `siteAddress` omitted (or explicitly `null`)
+- THEN `201` and a `DRAFT` plan is created with `siteAddress: null`
+
+#### Scenario: Malformed postal code rejected
+- GIVEN a caller with no active plan
+- WHEN they POST a plan whose `siteAddress` is present but blank or does not end in six digits
 - THEN `400` `validation_failed`
 - AND no `RentalPlan` row is created
 
