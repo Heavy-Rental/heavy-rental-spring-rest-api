@@ -329,6 +329,26 @@ class RentalPlanServiceTest {
         assertThat(savedPlan.getValue().getSitePostalCode()).isEqualTo("619094");
     }
 
+    @Test
+    void create_withSiteAddressOmitted_succeedsWithNullAddressAndPostalCode() {
+        // "Skip for now" cart flow (openspec/changes/pricing-postal-distance/ "Follow-on"): a plan
+        // must be persistable before the customer has chosen an address at all.
+        when(rentalPlanRecordRepository.findByRentalPlanId(any())).thenReturn(List.of());
+
+        RentalPlanCreateRequest request =
+                new RentalPlanCreateRequest(LocalDate.of(2026, 10, 1), LocalDate.of(2026, 10, 3), null);
+
+        RentalPlanResponse response = service.create(request, EMAIL);
+
+        assertThat(response.status()).isEqualTo("DRAFT");
+        assertThat(response.siteAddress()).isNull();
+
+        ArgumentCaptor<RentalPlan> savedPlan = ArgumentCaptor.forClass(RentalPlan.class);
+        verify(rentalPlanRepository).save(savedPlan.capture());
+        assertThat(savedPlan.getValue().getSiteAddress()).isNull();
+        assertThat(savedPlan.getValue().getSitePostalCode()).isNull();
+    }
+
     // --- cancel ------------------------------------------------------------------------------
 
     @Test

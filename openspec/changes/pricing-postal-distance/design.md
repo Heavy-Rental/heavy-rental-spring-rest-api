@@ -91,3 +91,78 @@ Same principle as `dynamic-plan-quote-pricing`'s design.md: **never let a quote 
 ## Correlation / logging
 
 No `X-Correlation-Id` threading for OneMap calls (unlike haystack) — these are lookups, not the primary business call the request exists to make, and failures are always absorbed locally. Plan id (for `DistanceService`) or the raw postal code (for `PostalCodeService`) is enough context in `WARN` logs to debug a specific incident.
+
+## Follow-on: optional `siteAddress` at plan creation
+
+See proposal.md for the "why." Verified by reading every call site before proposing this — no
+production code beyond the DTO annotation needs to change:
+
+1. **`RentalPlanCreateRequest`** (`dto/RentalPlanCreateRequest.java`) — remove `@NotBlank(message =
+   "Site address is required")` from `siteAddress`, keep `@Pattern(regexp = "^.*\\d{6}$", ...)`
+   as-is. Jakarta Bean Validation's `@Pattern` only validates non-null values by spec — `null`
+   already passes today without any change; an empty string `""` still fails the regex (does not
+   end in 6 digits) and stays rejected, matching "omitted or null succeeds, garbage still doesn't."
+   The compact constructor's `siteAddress == null ? null : siteAddress.strip()` is already
+   null-safe.
+2. **`RentalPlanService.create()`** — no change. `plan.setSiteAddress(request.siteAddress())` and
+   `plan.setSitePostalCode(PostalCodeUtil.extractTrailing6Digits(request.siteAddress()))` already
+   handle `null` correctly (`extractTrailing6Digits(null)` returns `null`, already covered by
+   `PostalCodeUtilTest`).
+3. **`DistanceService.resolveDistanceKm()`** — no change. A plan with `sitePostalCode == null`
+   already hits the `!PostalCodeUtil.isWellFormed(destinationPostalCode)` branch and falls back to
+   `pricing.default-distance-km`, same as today's malformed-address case.
+4. **`RentalPlanServiceTest`** — new test: `create()` with `siteAddress` omitted (pass `null` in
+   the record constructor) succeeds, and the saved `RentalPlan` has `siteAddress == null` and
+   `sitePostalCode == null` (extend the `ArgumentCaptor<RentalPlan>` pattern already used for the
+   `sitePostalCode` extraction test).
+5. **`openspec/specs/rental-plan-quote/spec.md` FR-RP-008** — reword to:
+   > `POST /api/rentalPlans` `siteAddress` is OPTIONAL. WHEN PROVIDED, it MUST be non-blank and end
+   > with a 6-digit postal code... Leading/trailing whitespace MUST be stripped before validation.
+   > A present-but-invalid address MUST return `400` `validation_failed` before the one-active-plan
+   > check or any persist. `RentalPlan.siteAddress`/`sitePostalCode` remain nullable.
+
+   Split the existing "Missing postal code rejected" scenario into two: rename it "Malformed
+   postal code rejected" (drop "or missing" from the GIVEN/WHEN, since that's no longer true), and
+   add a new "Scenario: Omitted address accepted" (POST with no `siteAddress` → `201`, plan created
+   with `siteAddress: null`).
+
+No change needed to `RentalPlanResponse` — `siteAddress` is already a plain nullable `String`
+field there; `null` serializes the same unremarkable way any other nullable response field does.
+
+## Follow-on: `PATCH /api/rentalPlans/{id}` (secondary, optional)
+
+Only build this if explicitly confirmed in scope — proposal.md flags it as optional/non-blocking.
+
+1. **`RentalPlanUpdateRequest`** (new `dto/`) — mirrors `BookingUpdateRequest`'s shape: single
+   nullable `siteAddress` field, `@Pattern(regexp = "^.*\\d{6}$", ...)` applied only when non-null
+   (Bean Validation's default null-passes behavior handles this for free, same as the create DTO
+   post-relaxation) — no `@NotBlank`, since omitting the field (or sending `null`) should be a
+   no-op, not an error, given PATCH semantics.
+2. **`RentalPlanService.updateSiteAddress(Long id, RentalPlanUpdateRequest request, String
+   customerEmail)`** (new method):
+   - Load plan, verify ownership (`404` if not owner — same convention as every other
+     plan-scoped method in this service), `409`/appropriate error if `CONVERTED`/`CANCELLED`
+     (mirrors `cancel()`'s existing terminal-state guards — an update to a plan that's already
+     become a booking or been cancelled doesn't make sense).
+   - Set `siteAddress` + re-derive `sitePostalCode` via `PostalCodeUtil.extractTrailing6Digits(...)`
+     (same call already used in `create()`).
+   - **If current status is `QUOTED`**: also set status → `DRAFT`, `totalAmount` → `null` — copy
+     the exact revert pattern `addItem()`/`removeItem()` already use for FR-RP-002/FR-RP-003, for
+     the same reason (a stored total that no longer matches what a fresh quote would compute is a
+     latent pricing bug, not a cosmetic issue).
+   - Refresh `updatedAt`, save, return `toResponse(plan)`.
+3. **`RentalPlanController`** — `@PatchMapping("/{id}")`, `@RequestBody @Valid
+   RentalPlanUpdateRequest`, delegates to the new service method. No `SecurityConfig` change
+   (falls under the existing per-plan ownership pattern already enforced inside the service, same
+   as every other `/api/rentalPlans/**` route).
+4. **Tests**: `RentalPlanServiceTest` additions — happy path on `DRAFT`, happy path on `QUOTED`
+   (asserts revert-to-`DRAFT` + cleared `totalAmount`), non-owner → `404`, `CONVERTED`/`CANCELLED`
+   → rejected. Consider whether this is also the moment to add the first
+   `RentalPlanControllerIntegrationTest` (none exists today for this controller at all) — not
+   required, but this is new API surface, unlike the rest of this change's work which extended
+   existing routes.
+5. **`openspec/specs/rental-plan-quote/spec.md`** — new `FR-RP-011 Update site address` requirement
+   documenting the route, the ownership/terminal-state rules, and the QUOTED-reverts-to-DRAFT rule,
+   with BDD scenarios for each.
+6. **Docs**: `openspec/specs/api-index/contracts/routes.md` gains a `PATCH /api/rentalPlans/{id}`
+   row; `postman/` collection gains a request in folder 7 (Rental Plans) + a `README.md` mention.
