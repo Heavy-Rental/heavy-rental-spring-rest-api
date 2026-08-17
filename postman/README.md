@@ -47,6 +47,7 @@ Routes other than interim token, login, health, and Stripe webhook need an **acc
 | **6. Payments** | Deposit intent (needs Stripe key); webhook (signature) |
 | **7. Rental Plans** | Create / list / get / add item / remove item / quote / cancel (`/api/rentalPlans`) |
 | **8. Stubs** | Depots empty list only |
+| **9. Postal Codes** | Real-time validation (`/api/postalCodes/{postalCode}`) — 200 VALID/INVALID, 503 UNAVAILABLE |
 
 ## Recommendations (S2b) checklist
 
@@ -84,6 +85,7 @@ Submit test script asserts the portal body is **quote-shaped** and stores `recom
 | `rentalPlanItemId` | `1` | Add item |
 | `equipmentId` | `1` | you |
 | `correlationId` | `postman-corr-001` | optional header on submit |
+| `postalCode` | `619094` | you — real Singapore postal code; set to a malformed value (e.g. `12345`) to see the `400` case |
 
 ## Contracts
 
@@ -98,5 +100,6 @@ Submit test script asserts the portal body is **quote-shaped** and stores `recom
 - Admin users: [`../openspec/specs/admin-users/`](../openspec/specs/admin-users/)
 - Monthly utilization: [`../openspec/specs/monthly-utilization/`](../openspec/specs/monthly-utilization/)
 - Pricing estimate (design): [`../openspec/changes/pricing-estimate/`](../openspec/changes/pricing-estimate/)
+- Postal code validation: [`../openspec/changes/pricing-postal-distance/contracts/postal-code-validation.md`](../openspec/changes/pricing-postal-distance/contracts/postal-code-validation.md)
 - Recommender: [`../openspec/specs/haystack-recommender/`](../openspec/specs/haystack-recommender/) · [`contracts/portal-api.md`](../openspec/specs/haystack-recommender/contracts/portal-api.md)
 - OpenSpec guide: [`../openspec/AGENTS.md`](../openspec/AGENTS.md)

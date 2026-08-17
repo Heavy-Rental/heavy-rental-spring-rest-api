@@ -26,7 +26,8 @@
     { "key": "rentalPlanId", "value": "3" },
     { "key": "rentalPlanItemId", "value": "1" },
     { "key": "equipmentId", "value": "1" },
-    { "key": "correlationId", "value": "postman-corr-001" }
+    { "key": "correlationId", "value": "postman-corr-001" },
+    { "key": "postalCode", "value": "619094" }
   ],
   "item": [
     {
@@ -770,6 +771,21 @@
             "header": [{ "key": "Accept", "value": "application/json" }],
             "url": "{{baseUrl}}/api/depots",
             "description": "Always returns `[]` — stub for React portal. Rental plans are real under folder 7 (`/api/rentalPlans`)."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "9. Postal Codes",
+      "item": [
+        {
+          "name": "Validate postal code",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/postalCodes/{{postalCode}}",
+            "description": "Real-time postal code validation (pricing-postal-distance). 200 with status VALID/INVALID, or 503 with status UNAVAILABLE if OneMap itself is down — see openspec/changes/pricing-postal-distance/contracts/postal-code-validation.md. Set {{postalCode}} to a malformed value (e.g. 12345) to see the 400 case instead."
           },
           "response": []
         }
