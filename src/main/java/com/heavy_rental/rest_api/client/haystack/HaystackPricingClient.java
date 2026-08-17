@@ -146,9 +146,9 @@ public class HaystackPricingClient {
 				}
 			}
 		} catch (Exception ignored) {
-			if (body != null && !body.isBlank()) {
-				message = body;
-			}
+			// Reachable only via a failure inside the body-parsing branch above, which is
+			// itself guarded by `body != null && !body.isBlank()` — so that's already true here.
+			message = body;
 		}
 		HaystackException.Kind kind = status >= 500 ? HaystackException.Kind.UPSTREAM : HaystackException.Kind.CLIENT;
 		return new HaystackException(status, code, message, kind, rce);

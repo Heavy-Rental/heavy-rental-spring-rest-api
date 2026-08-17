@@ -48,10 +48,18 @@ public class PostalCodeService {
             }
             return ResponseEntity.ok(PostalCodeValidationResponse.invalid(postalCode));
         } catch (OneMapException ex) {
+            // postalCode is already regex-validated above (no CR/LF possible), but ex.getMessage()
+            // can carry OneMap's raw response body verbatim (see OneMapClient/OneMapAuthService
+            // mapException) — an untrusted external value. Strip line breaks from both before
+            // logging so neither can forge extra log lines (CWE-117 log injection).
             log.warn("Postal code validation unavailable for {} ({}: {})",
-                    postalCode, ex.getErrorCode(), ex.getMessage());
+                    sanitizeForLog(postalCode), ex.getErrorCode(), sanitizeForLog(ex.getMessage()));
             return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                     .body(PostalCodeValidationResponse.unavailable(postalCode));
         }
+    }
+
+    private static String sanitizeForLog(String value) {
+        return value == null ? null : value.replaceAll("[\r\n]", "_");
     }
 }
