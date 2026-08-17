@@ -11,6 +11,7 @@ import jakarta.validation.Valid;
 
 import com.heavy_rental.rest_api.dto.RentalPlanCreateRequest;
 import com.heavy_rental.rest_api.dto.RentalPlanResponse;
+import com.heavy_rental.rest_api.dto.RentalPlanUpdateRequest;
 import com.heavy_rental.rest_api.service.RentalPlanService;
 
 import com.heavy_rental.rest_api.dto.RentalPlanItemRequest;
@@ -53,6 +54,19 @@ public class RentalPlanController {
     public RentalPlanResponse removeItem(
             @PathVariable Long id, @PathVariable Long itemId, @AuthenticationPrincipal Jwt jwt) {
         return rentalPlanService.removeItem(id, itemId, jwt.getSubject());
+    }
+
+    /**
+     * Sets/changes {@code siteAddress} on a plan created without one (see
+     * {@code openspec/changes/pricing-postal-distance/}). Setting it on a {@code QUOTED} plan
+     * reverts to {@code DRAFT} and clears {@code totalAmount} — see
+     * {@code RentalPlanService#updateSiteAddress}.
+     */
+    @PatchMapping("/{id}")
+    public RentalPlanResponse updateSiteAddress(
+            @PathVariable Long id, @Valid @RequestBody RentalPlanUpdateRequest request,
+            @AuthenticationPrincipal Jwt jwt) {
+        return rentalPlanService.updateSiteAddress(id, request, jwt.getSubject());
     }
 
     /**

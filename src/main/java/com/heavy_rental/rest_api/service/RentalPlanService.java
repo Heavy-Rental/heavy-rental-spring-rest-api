@@ -11,6 +11,7 @@ import org.springframework.web.server.ResponseStatusException;
 import com.heavy_rental.rest_api.dto.RentalPlanCreateRequest;
 import com.heavy_rental.rest_api.dto.RentalPlanItemResponse;
 import com.heavy_rental.rest_api.dto.RentalPlanResponse;
+import com.heavy_rental.rest_api.dto.RentalPlanUpdateRequest;
 import com.heavy_rental.rest_api.entity.RentalPlan;
 import com.heavy_rental.rest_api.entity.User;
 import com.heavy_rental.rest_api.repository.RentalPlanRecordRepository;
@@ -88,6 +89,43 @@ public class RentalPlanService {
         plan.setCreatedAt(LocalDateTime.now());
 
         rentalPlanRepository.save(plan);
+        return toResponse(plan);
+    }
+
+    /**
+     * Sets or changes {@code siteAddress} on a plan — how a plan created without one (the
+     * "Skip for now" cart flow, see {@code openspec/changes/pricing-postal-distance/}) later gets
+     * one. Setting it on a {@code QUOTED} plan reverts to {@code DRAFT} and clears
+     * {@code totalAmount}, same precedent as {@link #revertQuoteIfNeeded} for add/remove item —
+     * the frozen total was priced using {@code distance_km}, which depends on {@code siteAddress},
+     * so a stale total left in place after the address changes would be a real pricing bug, not
+     * just a display nit. Deliberately does NOT reuse {@code revertQuoteIfNeeded} directly: that
+     * helper only saves the plan when reverting, but this method must always save it (the address
+     * itself changed), so the revert is inlined into this method's own single save instead.
+     */
+    @Transactional
+    public RentalPlanResponse updateSiteAddress(Long planId, RentalPlanUpdateRequest request, String customerEmail) {
+        RentalPlan plan = loadOwnedPlan(planId, customerEmail);
+
+        if (plan.getStatus() == RentalPlan.PlanStatus.CONVERTED) {
+            throw new RentalPlanConflictException("already_converted",
+                    "Rental plan has already been converted to a booking and cannot be updated");
+        }
+        if (plan.getStatus() == RentalPlan.PlanStatus.CANCELLED) {
+            throw new RentalPlanConflictException("already_cancelled",
+                    "Rental plan has already been cancelled and cannot be updated");
+        }
+
+        plan.setSiteAddress(request.siteAddress());
+        plan.setSitePostalCode(PostalCodeUtil.extractTrailing6Digits(request.siteAddress()));
+
+        if (plan.getStatus() == RentalPlan.PlanStatus.QUOTED) {
+            plan.setStatus(RentalPlan.PlanStatus.DRAFT);
+            plan.setTotalAmount(null);
+        }
+        plan.setUpdatedAt(LocalDateTime.now());
+        rentalPlanRepository.save(plan);
+
         return toResponse(plan);
     }
 
