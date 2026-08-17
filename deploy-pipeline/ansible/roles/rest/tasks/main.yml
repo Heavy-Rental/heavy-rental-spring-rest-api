@@ -1,0 +1,50 @@
+---
+# Copied from estate ansible/roles/rest/tasks/main.yml. Keep in sync; do not fork compose.
+- name: REST image is required
+  ansible.builtin.assert:
+    that:
+      - rest_image | default('') | length > 0
+    fail_msg: >-
+      Set extra-var rest_image (ECR/GHCR tag or name loaded from image_http_url).
+      Do not docker build on the guest.
+
+- name: REST compose
+  ansible.builtin.template:
+    src: compose.yml.j2
+    dest: "{{ compose_dir }}/compose.yml"
+    mode: "0644"
+
+- name: Compose REST
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --env-file
+      - "{{ env_path }}"
+      - -f
+      - "{{ compose_dir }}/compose.yml"
+      - up
+      - -d
+      - --remove-orphans
+    chdir: "{{ compose_dir }}"
+
+- name: REST health
+  ansible.builtin.uri:
+    url: "{{ item }}"
+    status_code: [200, 301, 302, 401, 403]
+  loop:
+    - http://127.0.0.1:8080/actuator/health
+    - http://127.0.0.1:8080/
+  register: rest_health
+  retries: 15
+  delay: 5
+  until: rest_health is succeeded
+  failed_when: false
+
+- name: REST must answer on 8080
+  ansible.builtin.command: curl -fsS -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/
+  register: rest_code
+  retries: 15
+  delay: 5
+  until: rest_code.rc == 0 or (rest_code.stdout | default('000') | int) >= 200
+  changed_when: false
