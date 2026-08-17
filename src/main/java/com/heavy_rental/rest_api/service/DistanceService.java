@@ -61,7 +61,10 @@ public class DistanceService {
 						plan.getId());
 				return pricingProperties.defaultDistanceKm();
 			}
-			return haversineKm(origin.get(), destination.get());
+			double distanceKm = haversineKm(origin.get(), destination.get());
+			log.info("Plan {} — resolved distance_km={} ({} -> {})",
+					plan.getId(), distanceKm, pricingProperties.originPostalCode(), destinationPostalCode);
+			return distanceKm;
 		} catch (OneMapException ex) {
 			log.warn("Plan {} — distance lookup unavailable ({}: {}) — using default distance",
 					plan.getId(), ex.getErrorCode(), ex.getMessage());
