@@ -1,0 +1,14 @@
+---
+# REST app CD only. Do not add portal / haystack / neo4j plays.
+- name: Shared guest bootstrap
+  hosts: rest
+  become: true
+  gather_facts: true
+  roles:
+    - guest_base
+
+- name: REST (Spring Boot / Tomcat)
+  hosts: rest
+  become: true
+  roles:
+    - rest

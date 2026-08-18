@@ -1,0 +1,93 @@
+# Handoff — copy this package into the Spring Boot project
+
+| Field | Value |
+|-------|--------|
+| **Package** | `Feasibility_Study_Spring/` |
+| **Version** | **2.1.1** |
+| **Date** | 2026-08-13 |
+| **S2b in this Spring repo** | **As-built** (HR-106) |
+| **Upstream repo** | [Heavy-Rental/haystack-fast-api](https://github.com/Heavy-Rental/haystack-fast-api) (**read-only**) |
+| **Synced from** | `develop` @ `12f89dda9b27ba0196c7a37f7f4310459731cb1e` |
+
+---
+
+## 1. Copy
+
+```bash
+# Example destinations — pick one that matches your Spring repo layout
+cp -R Feasibility_Study_Spring /path/to/spring-boot/docs/Feasibility_Study
+# or
+cp -R Feasibility_Study_Spring /path/to/spring-boot/Feasibility_Study
+```
+
+Optional: rename the folder to `Feasibility_Study` inside Spring so engineers have a familiar name. Keep internal relative links (they stay within the package).
+
+---
+
+## 2. Tickets / PRs (S2b)
+
+Use [`phase2-s2b-spring-implementation-plan.md`](./phase2-s2b-spring-implementation-plan.md) and [`portal-to-haystack-mapping.md`](./portal-to-haystack-mapping.md):
+
+| PR | Content | This repo |
+|----|---------|-----------|
+| **S2b-1** | `HaystackRecommenderClient` + properties + timeouts + DTOs + WireMock happy path | ✅ |
+| **S2b-2** | Resilience4j CB + bulkhead + retry-with-same-`Idempotency-Key` (Call 1 only) | ✅ |
+| **S2b-3** | Correlation propagation (may fold into S2b-1) | ✅ |
+| **S2b-4** | Portal `project-spec` saga: **Call 1 → Call 2 recommend quote** → React; Call 3 via knowledge-query; no re-ingest on Call 2 fail | ✅ |
+| **S2b-5** | Ops runbook + config docs | ✅ |
+
+**Minimum combine:** S2b-1 + S2b-2 + headers in one PR; portal dual-hop saga second; docs third.  
+**Shipped as one capability** under archived OpenSpec change `openspec/changes/archive/2026-08-12-s2b-resilient-haystack-client/`.
+
+---
+
+## 3. Preconditions
+
+- [ ] Confirm **S2a** available on target haystack environment before enabling **production** Call 1 retries ([`s2a-haystack-dependency.md`](./s2a-haystack-dependency.md))
+- [ ] Agree **max multipart size** across gateway, Spring, and FastAPI *(Spring default 20MB via `haystack.max-in-memory-size`; portal multipart live)*
+- [x] Agree **timeout matrix** (ingest ≫ recommend ≫ Q&A ≫ health) with ops *(defaults in `application.properties`; tune with p95)*
+- [ ] Plan **sticky session / single instance** for Call 1→2 until shared session (Phase 5)
+
+---
+
+## 4. After merge in Spring
+
+- [x] Link Spring OpenAPI / living SPEC to `wire-contract-call1-call2.md`
+- [x] WireMock suite green (portal dual-hop: Call 1 + Call 2 recommend; React body has quote/items)
+- [ ] Optional joint test: Spring + real haystack, same key → one `ingest_id`
+- [ ] Portal fallback copy when circuit open (“recommender unavailable”)
+
+### As-built pointers
+
+| Item | Location |
+|------|----------|
+| OpenSpec SoT | `openspec/specs/haystack-recommender/spec.md` |
+| Portal API contract | `openspec/specs/haystack-recommender/contracts/portal-api.md` |
+| Proxy hop map | `openspec/specs/spring-proxy-endpoints/spec.md` |
+| OpenSPDD canvas | `spdd/prompt/S2b-resilient-haystack-recommender-client.md` |
+| Archived Spec-Kit pack | `openspec/changes/archive/2026-08-12-s2b-resilient-haystack-client/spec-kit/` |
+| Client | `…/client/haystack/HaystackRecommenderClient.java` |
+| Saga | `…/service/RecommenderSagaService.java` |
+| Portal | `…/controller/RecommendationController.java` |
+
+---
+
+## 5. Do not
+
+- Implement C/W/D multi-agent roles inside Spring  
+- Treat Call 2 as chatbot Q&A (that is Call 3 `.../query`)  
+- Expect Call 3 path for portal submit primary body (primary is Call 2 quote)  
+- Enable aggressive prod ingest retry without S2a  
+- Expand this pack into C2 (202 jobs) without a new plan  
+
+---
+
+## 6. Document control
+
+| Version | Date | Notes |
+|---------|------|--------|
+| **2.1.0** | 2026-08-12 | S2b as-built checklist in this Spring repo; Call 2/3 confirm |
+| **2.0.0** | 2026-08-12 | Call 2 recommend / Call 3 Q&A handoff checklist |
+| **1.1.1** | 2026-08-12 | Dual-hop WireMock checklist; align Feasibility_Study |
+| **1.1.0** | 2026-08-12 | Portal dual-hop saga checklist (Call 1 then Call 2) |
+| **1.0.0** | 2026-08-12 | Initial Spring export handoff |

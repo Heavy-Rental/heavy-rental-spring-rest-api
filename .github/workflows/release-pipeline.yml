@@ -7,7 +7,8 @@
 #   3. Security Testing needs Integration — SAST (Semgrep) + SCA/FS (Trivy)
 #   4. CodeQL Analysis  needs Integration — GitHub CodeQL (Java) security + quality
 #   5. Packaging        needs Integration + QC + Security + CodeQL — versioned WAR +
-#                       Docker image (tar artifact; push to GHCR when not a PR)
+#                       Docker image (tar artifact; GHCR heavy_rental_rest_api:<semver>
+#                       + :latest, off PR)
 #
 # Security report format (standard): SARIF 2.1.0
 #   - Semgrep → semgrep.sarif
@@ -29,10 +30,19 @@
 # Semgrep, Trivy), plus Packaging for deploy consumers.
 #
 # Packaging output (Spring Boot WAR + container image for deploy):
-#   ./mvnw -DskipTests package → target/*.war (preferred; jar fallback)
+#   ./mvnw -DskipTests package → target/*.war only (no JAR / java -jar image)
 #   Versioned + stable WAR copies for overall-project-deploy
-#   Docker image (Tomcat 10.1 + JDK 21) with WAR as ROOT.war
+#   Docker image is always-generated tomcat:10.1-jdk21-temurin + ROOT.war
+#   (app Dockerfile is not the deploy image). Works on Docker Desktop,
+#   compose, Academy, or any OCI runtime: docker run -p 8080:8080 -e …
+#   Image is env-driven: no POSTGRES_*, SPRING_DATASOURCE_*,
+#   HAYSTACK_*, STRIPE_*, APP_JWT_*, or REST_API_* in ENV/ARG/.env.
+#   Packaging refuses baked config, requires WEB-INF in the WAR, and
+#   starts Tomcat briefly to prove :8080 binds (no live database).
 #   Image saved as gzipped tar artifact; also pushed to GHCR outside PRs
+#   as ghcr.io/<owner>/heavy_rental_rest_api:<x.y.z> and :latest.
+#   <x.y.z> is the previous GHCR semver patch-bumped (first publish: 1.0.0).
+#   spring-datasource.env is a workflow artifact (no password), not copied into the image.
 #
 # Application:
 #   https://github.com/SA62-team1/heavy-rental-spring-rest-api
@@ -157,7 +167,7 @@ env:
   DEFAULT_APP_REPOSITORY: SA62-team1/heavy-rental-spring-rest-api
   DEFAULT_APP_REF: master
   # Docker image naming (Tomcat hosts the Spring Boot WAR)
-  IMAGE_NAME: heavy-rental-rest-api
+  IMAGE_NAME: heavy_rental_rest_api
   TOMCAT_BASE_IMAGE: tomcat:10.1-jdk21-temurin
   # Non-sensitive Spring/JPA settings only — credentials come from GitHub Secrets
   SPRING_DATASOURCE_DRIVER_CLASS_NAME: org.postgresql.Driver
@@ -510,7 +520,7 @@ jobs:
             exit 1
           fi
           echo "Running tests with SPRING_DATASOURCE_URL derived from Docker Postgres (password not logged)."
-          # Use runner-native $GITHUB_WORKSPACE (never ${{ github.* }} inside run: scripts)
+          # Use runner-native $GITHUB_WORKSPACE (never github context interpolation inside run scripts)
           mkdir -p "${GITHUB_WORKSPACE}/test-reports"
           ./mvnw -B -ntp test
           # Collect surefire / failsafe reports when present
@@ -843,12 +853,14 @@ jobs:
   # ---------------------------------------------------------------------------
   # Spring Boot WAR deploy model:
   #   - build: ./mvnw -B -ntp -DskipTests package
-  #   - artifact under target/: *.war (packaging=war) or executable *.jar
-  #   - deploy unit: versioned binary + stable name for overall-project-deploy
-  # Docker image deploy model:
-  #   - base: tomcat:10.1-jdk21-temurin (matches Spring Boot 4 / Jakarta EE)
+  #   - artifact under target/: *.war only (not an executable JAR)
+  #   - deploy unit: versioned WAR + stable name for overall-project-deploy
+  # Docker image deploy model (any Docker Engine / Docker Desktop / compose):
+  #   - always generate tomcat:10.1-jdk21-temurin (app Dockerfile ignored)
   #   - WAR copied to /usr/local/tomcat/webapps/ROOT.war
+  #   - EXPOSE 8080; CMD catalina.sh run; runtime env via -e / env_file
   #   - image saved as .tar.gz artifact; pushed to GHCR outside pull requests
+  #     as heavy_rental_rest_api:<semver> and :latest
   # Do not ship source trees or the local .m2 cache.
   # ---------------------------------------------------------------------------
   packaging:
@@ -949,14 +961,60 @@ jobs:
           echo "==> target/ after package"
           ls -lah target/ || true
 
+      - name: Resolve next heavy_rental_rest_api version
+        id: image-version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPOSITORY_OWNER: ${{ github.repository_owner }}
+          IMAGE_NAME: ${{ env.IMAGE_NAME }}
+        run: |
+          set -euo pipefail
+          OWNER="${GH_REPOSITORY_OWNER}"
+          PKG="${IMAGE_NAME,,}"
+
+          list_tags() {
+            local path="$1"
+            gh api --paginate "${path}" --jq '.[] | .metadata.container.tags[]?' 2>/dev/null || true
+          }
+
+          TAGS="$(list_tags "/orgs/${OWNER}/packages/container/${PKG}/versions")"
+          if [ -z "${TAGS}" ]; then
+            TAGS="$(list_tags "/users/${OWNER}/packages/container/${PKG}/versions")"
+          fi
+
+          PREV="$(printf '%s\n' "${TAGS}" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1 || true)"
+          if [ -z "${PREV}" ]; then
+            NEXT="1.0.0"
+            PREV_DISPLAY="none"
+          else
+            IFS=. read -r MAJ MIN PAT <<< "${PREV}"
+            NEXT="${MAJ}.${MIN}.$((PAT + 1))"
+            PREV_DISPLAY="${PREV}"
+          fi
+
+          echo "previous_version=${PREV_DISPLAY}" >> "$GITHUB_OUTPUT"
+          echo "image_version=${NEXT}" >> "$GITHUB_OUTPUT"
+          echo "Resolved GHCR image version: previous=${PREV_DISPLAY} next=${NEXT}"
+          {
+            echo "### GHCR image version"
+            echo ""
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Package | \`${PKG}\` |"
+            echo "| Previous semver | \`${PREV_DISPLAY}\` |"
+            echo "| Next semver | \`${NEXT}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Verify and stage release package (WAR)
         id: package
         working-directory: ${{ env.APP_PATH }}
         env:
-          # Bind github context for use in shell (Semgrep: no ${{ github.* }} in run:)
+          # Bind github context for use in shell (Semgrep: no github context in run scripts)
           GH_RUN_NUMBER: ${{ github.run_number }}
           GH_REPOSITORY_OWNER: ${{ github.repository_owner }}
           IMAGE_NAME: ${{ env.IMAGE_NAME }}
+          IMAGE_VERSION: ${{ steps.image-version.outputs.image_version }}
+          PREVIOUS_IMAGE_VERSION: ${{ steps.image-version.outputs.previous_version }}
         run: |
           set -euo pipefail
           VERSION="$(./mvnw -B -q -DforceStdout help:evaluate -Dexpression=project.version)"
@@ -965,27 +1023,40 @@ jobs:
           SHORT_SHA="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
           RUN_ID="${GH_RUN_NUMBER}"
 
-          # Prefer primary packaging type from pom (war); fall back to jar.
-          BUILD_FILE=""
-          if [ "${PACKAGING}" = "war" ]; then
-            BUILD_FILE="$(find target -maxdepth 1 -type f -name '*.war' ! -name '*-sources.war' ! -name '*-javadoc.war' | head -n 1 || true)"
-            if [ -z "${BUILD_FILE}" ]; then
-              echo "::error::pom packaging is war but no deployable .war found under target/"
-              ls -lah target/ || true
-              exit 1
-            fi
-          fi
-          if [ -z "${BUILD_FILE}" ]; then
-            BUILD_FILE="$(find target -maxdepth 1 -type f \( -name '*.war' -o -name '*.jar' \) \
-              ! -name '*-sources.*' ! -name '*-javadoc.*' ! -name '*-plain.jar' | head -n 1 || true)"
-          fi
+          # Tomcat ROOT.war only. An executable JAR is not a servlet webapp.
+          BUILD_FILE="$(find target -maxdepth 1 -type f -name '*.war' \
+            ! -name '*-sources.war' ! -name '*-javadoc.war' | head -n 1 || true)"
           if [ -z "${BUILD_FILE}" ] || [ ! -f "${BUILD_FILE}" ]; then
-            echo "::error::No deployable .war/.jar found under target/ after package"
+            echo "::error::No deployable .war under target/. Release image is Tomcat + ROOT.war, not java -jar."
             ls -lah target/ || true
+            exit 1
+          fi
+          if [ "${PACKAGING}" != "war" ]; then
+            echo "::error::pom packaging is '${PACKAGING}'; Release requires packaging=war for Tomcat ROOT.war."
             exit 1
           fi
 
           EXT="${BUILD_FILE##*.}"
+          if [ "${EXT}" != "war" ]; then
+            echo "::error::Expected a .war for Tomcat ROOT.war, got: ${BUILD_FILE}"
+            exit 1
+          fi
+          if ! jar tf "${BUILD_FILE}" | grep -q '^WEB-INF/'; then
+            echo "::error::${BUILD_FILE} is not a Tomcat webapp (no WEB-INF/). Do not package an executable JAR as ROOT.war."
+            jar tf "${BUILD_FILE}" | head -n 40 || true
+            exit 1
+          fi
+          # Spring Boot loads application-prod.properties (hyphen) when SPRING_PROFILES_ACTIVE=prod.
+          if ! jar tf "${BUILD_FILE}" | grep -qx 'WEB-INF/classes/application-prod.properties'; then
+            if jar tf "${BUILD_FILE}" | grep -q 'application.prod.properties'; then
+              echo "::error::Found application.prod.properties (dot). Spring Boot prod profile loads application-prod.properties (hyphen) from src/main/resources/."
+            else
+              echo "::error::WAR is missing WEB-INF/classes/application-prod.properties. Add src/main/resources/application-prod.properties (hyphen) for non-secret prod defaults."
+            fi
+            jar tf "${BUILD_FILE}" | grep -i 'application' || true
+            exit 1
+          fi
+          echo "WAR contains application-prod.properties (Spring prod profile)."
           # Relative path for Docker COPY (build context = APP_PATH)
           BUILD_FILE_REL="${BUILD_FILE#./}"
           VERSIONED_NAME="heavy-rental-rest-api-v${VERSION}-build${RUN_ID}-${SHORT_SHA}.${EXT}"
@@ -1005,7 +1076,11 @@ jobs:
           file "${VERSIONED_PATH}" || true
           ls -lh "${VERSIONED_PATH}" "${STABLE_PATH}" "${BUILD_FILE}"
 
-          IMAGE_TAG="v${VERSION}-build${RUN_ID}-${SHORT_SHA}"
+          IMAGE_TAG="${IMAGE_VERSION}"
+          if [ -z "${IMAGE_TAG}" ]; then
+            echo "::error::Resolved image version is empty"
+            exit 1
+          fi
           # GHCR (and Docker Hub) require image repository path segments to be lowercase
           IMAGE_NAME_LC="${IMAGE_NAME,,}"
           OWNER_LC="${GH_REPOSITORY_OWNER,,}"
@@ -1013,7 +1088,7 @@ jobs:
           IMAGE_LOCAL_LATEST="${IMAGE_NAME_LC}:latest"
           IMAGE_REMOTE="ghcr.io/${OWNER_LC}/${IMAGE_NAME_LC}:${IMAGE_TAG}"
           IMAGE_REMOTE_LATEST="ghcr.io/${OWNER_LC}/${IMAGE_NAME_LC}:latest"
-          IMAGE_TAR="heavy-rental-rest-api-v${VERSION}-build${RUN_ID}-${SHORT_SHA}.tar.gz"
+          IMAGE_TAR="heavy_rental_rest_api-${IMAGE_TAG}.tar.gz"
 
           {
             echo "version=${VERSION}"
@@ -1026,6 +1101,7 @@ jobs:
             echo "build_file=${BUILD_FILE}"
             echo "build_file_rel=${BUILD_FILE_REL}"
             echo "image_tag=${IMAGE_TAG}"
+            echo "previous_image_version=${PREVIOUS_IMAGE_VERSION}"
             echo "image_local=${IMAGE_LOCAL}"
             echo "image_local_latest=${IMAGE_LOCAL_LATEST}"
             echo "image_remote=${IMAGE_REMOTE}"
@@ -1054,46 +1130,106 @@ jobs:
           if-no-files-found: error
 
       # -------------------------------------------------------------------
-      # Docker image: Tomcat + packaged WAR for deployment
-      # Uses app Dockerfile when present; otherwise generates a WAR-based one.
+      # Docker image: always Tomcat + ROOT.war so any Docker Engine can run it.
+      # An app Dockerfile (java -jar / fat JAR) is not the deploy image.
+      # Runtime env comes from docker run -e / compose env_file, not ENV/ARG.
       # -------------------------------------------------------------------
       - name: Prepare Dockerfile for WAR image
         working-directory: ${{ env.APP_PATH }}
+        env:
+          TOMCAT_BASE_IMAGE: ${{ env.TOMCAT_BASE_IMAGE }}
+          IMAGE_NAME: ${{ env.IMAGE_NAME }}
+          APP_REPOSITORY: ${{ needs.integration.outputs.app_repository }}
+          SHORT_SHA: ${{ steps.package.outputs.short_sha }}
+          VERSION: ${{ steps.package.outputs.version }}
+          WAR_REL: ${{ steps.package.outputs.build_file_rel }}
         run: |
           set -euo pipefail
-          WAR_REL="${{ steps.package.outputs.build_file_rel }}"
           if [ ! -f "${WAR_REL}" ]; then
             echo "::error::WAR for Docker build not found: ${WAR_REL}"
             exit 1
           fi
+          case "${WAR_REL}" in
+            *.war) ;;
+            *)
+              echo "::error::Docker image copies a WAR as ROOT.war. Refusing: ${WAR_REL}"
+              exit 1
+              ;;
+          esac
+
+          if [ -f .dockerignore ] && grep -Eiq '^[[:space:]]*(\./)?target(/|\*|/\*)?[[:space:]]*$' .dockerignore; then
+            echo "::error::.dockerignore excludes target/; Release cannot COPY the WAR into Tomcat."
+            cat .dockerignore
+            exit 1
+          fi
 
           if [ -f Dockerfile ]; then
-            echo "Using Dockerfile from application repository"
-          else
-            echo "No app Dockerfile found — generating Tomcat WAR Dockerfile"
-            # App is packaging=war with tomcat provided → external Tomcat image
-            {
-              echo "# Generated by rest-api release packaging (Spring Boot WAR → Tomcat)"
-              echo "FROM ${{ env.TOMCAT_BASE_IMAGE }}"
-              echo "LABEL org.opencontainers.image.title=\"${{ env.IMAGE_NAME }}\""
-              echo "LABEL org.opencontainers.image.description=\"Heavy Rental Spring REST API (WAR on Tomcat)\""
-              echo "LABEL org.opencontainers.image.source=\"https://github.com/${{ needs.integration.outputs.app_repository }}\""
-              echo "LABEL org.opencontainers.image.revision=\"${{ steps.package.outputs.short_sha }}\""
-              echo "LABEL org.opencontainers.image.version=\"${{ steps.package.outputs.version }}\""
-              echo ""
-              echo "# Clear default Tomcat apps; deploy API as root context"
-              echo "RUN rm -rf /usr/local/tomcat/webapps/*"
-              echo ""
-              echo "COPY ${WAR_REL} /usr/local/tomcat/webapps/ROOT.war"
-              echo ""
-              echo "EXPOSE 8080"
-              echo 'CMD ["catalina.sh", "run"]'
-            } > Dockerfile
+            echo "Application Dockerfile present — moving aside. Release always builds Tomcat + ROOT.war for GHCR / Docker Desktop / compose."
+            mv Dockerfile Dockerfile.app-repo
           fi
+
+          echo "Generating Tomcat WAR Dockerfile (Spring Boot WAR → ${TOMCAT_BASE_IMAGE})"
+          {
+            echo "# Generated by rest-api release packaging (Spring Boot WAR → Tomcat)"
+            echo "# Portable: docker run -p 8080:8080 -e SPRING_DATASOURCE_URL=… <image>"
+            echo "# SPRING_PROFILES_ACTIVE=prod loads application-prod.properties from the WAR."
+            echo "# Runtime env (compose env_file / docker -e — do not ENV/ARG these):"
+            echo "#   Postgres: POSTGRES_HOST, POSTGRES_HOSTNAME, POSTGRES_PORT,"
+            echo "#             POSTGRES_DATABASE, POSTGRES_DB, POSTGRES_USERNAME,"
+            echo "#             POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_URL,"
+            echo "#             SPRING_DATASOURCE_URL, SPRING_DATASOURCE_USERNAME,"
+            echo "#             SPRING_DATASOURCE_PASSWORD"
+            echo "#   Haystack: HAYSTACK_BASE_URL"
+            echo "#   Stripe:   STRIPE_API_KEY, STRIPE_WEBHOOK_SECRET, STRIPE_PUBLISHABLE_KEY"
+            echo "#   JWT:      APP_JWT_SECRET"
+            echo "FROM ${TOMCAT_BASE_IMAGE}"
+            echo "LABEL org.opencontainers.image.title=\"${IMAGE_NAME}\""
+            echo "LABEL org.opencontainers.image.description=\"Heavy Rental Spring REST API (WAR on Tomcat)\""
+            echo "LABEL org.opencontainers.image.source=\"https://github.com/${APP_REPOSITORY}\""
+            echo "LABEL org.opencontainers.image.revision=\"${SHORT_SHA}\""
+            echo "LABEL org.opencontainers.image.version=\"${VERSION}\""
+            echo ""
+            echo "ENV SPRING_PROFILES_ACTIVE=prod"
+            echo ""
+            echo "# Clear default Tomcat apps; deploy API as root context"
+            echo "RUN rm -rf /usr/local/tomcat/webapps/*"
+            echo ""
+            echo "COPY ${WAR_REL} /usr/local/tomcat/webapps/ROOT.war"
+            echo ""
+            echo "EXPOSE 8080"
+            echo 'CMD ["catalina.sh", "run"]'
+          } > Dockerfile
 
           echo "==> Dockerfile"
           cat Dockerfile
           echo "==> WAR for image: ${WAR_REL} ($(wc -c < "${WAR_REL}") bytes)"
+
+          PROD_PROPS=""
+          if [ -f src/main/resources/application-prod.properties ]; then
+            PROD_PROPS="src/main/resources/application-prod.properties"
+          fi
+          if [ -n "${PROD_PROPS}" ]; then
+            if grep -Eiq 'sk_live_|sk_test_|whsec_|change-me-to-a-long-random-secret-key|jdbc:postgresql://[^$].*:[^$].*@' "${PROD_PROPS}"; then
+              echo "::error::${PROD_PROPS} must not contain Stripe secrets, the default JWT, or a baked JDBC URL. Use \${ENV} or omit; SM injects secrets."
+              exit 1
+            fi
+            if grep -Eq '^[[:space:]]*(app\.jwt\.secret|APP_JWT_SECRET|stripe\.api\.key|STRIPE_API_KEY|STRIPE_WEBHOOK_SECRET|spring\.datasource\.password|POSTGRES_PASSWORD)[[:space:]]*=' "${PROD_PROPS}"; then
+              if ! grep -Eq '^[[:space:]]*(app\.jwt\.secret|APP_JWT_SECRET|stripe\.api\.key|STRIPE_API_KEY|STRIPE_WEBHOOK_SECRET|spring\.datasource\.password|POSTGRES_PASSWORD)[[:space:]]*=[[:space:]]*\$\{' "${PROD_PROPS}"; then
+                echo "::error::${PROD_PROPS} assigns a secret without a \${ENV} placeholder. Leave secrets to heavy-rental/rest."
+                exit 1
+              fi
+            fi
+            echo "Scanned ${PROD_PROPS}: no baked secrets."
+          fi
+
+          if grep -Eiq '^[[:space:]]*(ENV|ARG)[[:space:]]+(POSTGRES_|SPRING_DATASOURCE_|SPRING_JPA_|HAYSTACK_|STRIPE_|APP_JWT_|REST_API_CLOUD_DB_|REST_API_DB_)' Dockerfile; then
+            echo "::error::Dockerfile bakes Spring/DB/Stripe/JWT/CI-DB config (ENV/ARG). Externalize via compose env_file or docker -e."
+            exit 1
+          fi
+          if grep -Eiq '^[[:space:]]*COPY[[:space:]]+[^[:space:]]*\.env' Dockerfile; then
+            echo "::error::Dockerfile copies a .env file. Secrets belong in heavy-rental/rest (or docker -e) at deploy."
+            exit 1
+          fi
 
       - name: Build Docker image
         id: docker
@@ -1116,6 +1252,7 @@ jobs:
           IMAGE_REMOTE="${IMAGE_REMOTE,,}"
           IMAGE_REMOTE_LATEST="${IMAGE_REMOTE_LATEST,,}"
 
+          # No --build-arg for POSTGRES_ / SPRING_DATASOURCE_ / HAYSTACK_ / STRIPE_ / APP_JWT_ / REST_API_*
           docker build \
             --pull \
             -t "${IMAGE_LOCAL}" \
@@ -1130,9 +1267,14 @@ jobs:
           docker images "${IMAGE_NAME_LC}" --format 'table {{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.Size}}'
           docker images "ghcr.io/${OWNER_LC}/${IMAGE_NAME_LC}" --format 'table {{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.Size}}' || true
 
-          # Export image for deploy pipelines that load from artifact (no registry required)
+          # Export every tag so docker load matches compose / Docker Desktop (local + GHCR + :latest)
           TAR_PATH="${GITHUB_WORKSPACE}/${IMAGE_TAR}"
-          docker save "${IMAGE_LOCAL}" | gzip -c > "${TAR_PATH}"
+          docker save \
+            "${IMAGE_LOCAL}" \
+            "${IMAGE_LOCAL_LATEST}" \
+            "${IMAGE_REMOTE}" \
+            "${IMAGE_REMOTE_LATEST}" \
+            | gzip -c > "${TAR_PATH}"
           ls -lh "${TAR_PATH}"
           if [ ! -s "${TAR_PATH}" ]; then
             echo "::error::Docker image tar is missing or empty: ${TAR_PATH}"
@@ -1143,6 +1285,90 @@ jobs:
             echo "image_id=$(docker image inspect -f '{{.Id}}' "${IMAGE_LOCAL}")"
             echo "tar_path=${TAR_PATH}"
           } >> "$GITHUB_OUTPUT"
+
+      - name: Prove image is deployable
+        env:
+          IMAGE_LOCAL: ${{ steps.package.outputs.image_local }}
+        run: |
+          set -euo pipefail
+          IMAGE_LOCAL="${IMAGE_LOCAL,,}"
+          NAME="rest-smoke-${GITHUB_RUN_ID:-$$}"
+
+          ENV_JSON="$(docker image inspect -f '{{json .Config.Env}}' "${IMAGE_LOCAL}")"
+          echo "Image Config.Env: ${ENV_JSON}"
+          if printf '%s' "${ENV_JSON}" | grep -Eq '"POSTGRES_|"SPRING_DATASOURCE_|"SPRING_JPA_|"HAYSTACK_|"STRIPE_|"APP_JWT_|"REST_API_CLOUD_DB_|"REST_API_DB_'; then
+            echo "::error::Image bakes Spring/DB/Stripe/JWT/CI-DB env. Inject via docker -e or compose env_file."
+            exit 1
+          fi
+          if ! printf '%s' "${ENV_JSON}" | grep -q 'SPRING_PROFILES_ACTIVE=prod'; then
+            echo "::error::Image must set SPRING_PROFILES_ACTIVE=prod so application-prod.properties is loaded."
+            exit 1
+          fi
+          echo "SPRING_PROFILES_ACTIVE=prod is set (application-prod.properties)."
+
+          EXPOSED="$(docker image inspect -f '{{json .Config.ExposedPorts}}' "${IMAGE_LOCAL}")"
+          echo "Image ExposedPorts: ${EXPOSED}"
+          if ! printf '%s' "${EXPOSED}" | grep -q '8080/tcp'; then
+            echo "::error::Image does not EXPOSE 8080/tcp. docker run -p 8080:8080 and Academy compose require it."
+            exit 1
+          fi
+
+          docker run --rm --entrypoint /bin/sh "${IMAGE_LOCAL}" -c \
+            'test -f /usr/local/tomcat/webapps/ROOT.war && jar tf /usr/local/tomcat/webapps/ROOT.war | grep -q "^WEB-INF/"'
+          echo "Image contains Tomcat ROOT.war with WEB-INF (Spring Boot webapp)"
+
+          # Dummy values only — not REST_API_CLOUD_DB_*, not Vocareum, not Academy RDS.
+          OUT="$(
+            docker run --rm \
+              -e SPRING_DATASOURCE_URL=jdbc:postgresql://sor.example.test:5432/heavy_rental \
+              -e POSTGRES_HOST=sor.example.test \
+              -e HAYSTACK_BASE_URL=http://haystack.example.test:8000 \
+              -e STRIPE_PUBLISHABLE_KEY=pk_test_ci_dummy \
+              -e APP_JWT_SECRET=ci-dummy-jwt-secret-at-least-32-chars \
+              --entrypoint /bin/sh \
+              "${IMAGE_LOCAL}" \
+              -c 'printf "%s\n" "$SPRING_DATASOURCE_URL" "$POSTGRES_HOST" "$HAYSTACK_BASE_URL" "$STRIPE_PUBLISHABLE_KEY" "$APP_JWT_SECRET"'
+          )"
+          echo "${OUT}" | grep -qx 'jdbc:postgresql://sor.example.test:5432/heavy_rental'
+          echo "${OUT}" | grep -qx 'sor.example.test'
+          echo "${OUT}" | grep -qx 'http://haystack.example.test:8000'
+          echo "${OUT}" | grep -qx 'pk_test_ci_dummy'
+          echo "${OUT}" | grep -qx 'ci-dummy-jwt-secret-at-least-32-chars'
+          echo "Dummy SPRING_DATASOURCE_URL / POSTGRES_HOST / HAYSTACK_BASE_URL / Stripe / JWT are visible at runtime."
+
+          cleanup() { docker rm -f "${NAME}" >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          docker run -d --name "${NAME}" \
+            -e SPRING_DATASOURCE_URL=jdbc:postgresql://sor.example.test:5432/heavy_rental \
+            -e POSTGRES_HOST=sor.example.test \
+            -e HAYSTACK_BASE_URL=http://haystack.example.test:8000 \
+            -e STRIPE_PUBLISHABLE_KEY=pk_test_ci_dummy \
+            -e APP_JWT_SECRET=ci-dummy-jwt-secret-at-least-32-chars \
+            "${IMAGE_LOCAL}"
+          ok=0
+          for _ in $(seq 1 45); do
+            if docker exec "${NAME}" bash -c 'echo >/dev/tcp/127.0.0.1/8080' >/dev/null 2>&1; then
+              ok=1
+              break
+            fi
+            sleep 1
+          done
+          if [ "${ok}" -ne 1 ]; then
+            echo "::error::Tomcat did not bind :8080 (image is not runnable with docker run -p 8080:8080)."
+            docker logs "${NAME}" || true
+            exit 1
+          fi
+          echo "Tomcat accepted TCP on :8080; image is deployable on any Docker Engine (Desktop, compose, Academy)."
+
+          {
+            echo "### Deployable image"
+            echo ""
+            echo "Generated \`tomcat:10.1-jdk21-temurin\` + Spring Boot \`ROOT.war\` (WEB-INF present)."
+            echo "No baked POSTGRES_/SPRING_DATASOURCE_/HAYSTACK_/STRIPE_/APP_JWT_/REST_API_* in Config.Env."
+            echo "Dummy compose-style env is visible. \`EXPOSE 8080\`. Tomcat bound \`:8080\`, then the container was removed."
+            echo "Run anywhere: \`docker run -p 8080:8080 -e SPRING_DATASOURCE_URL=… <image>\` (Docker Desktop, compose, or Academy)."
+            echo "Academy CD injects \`heavy-rental/rest\`. \`spring-datasource.env\` is a workflow artifact only (not in the image)."
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload Docker image archive
         uses: actions/upload-artifact@v4
@@ -1163,6 +1389,10 @@ jobs:
       - name: Push Docker image to GHCR
         if: github.event_name != 'pull_request'
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPOSITORY_OWNER: ${{ github.repository_owner }}
+          IMAGE_NAME: ${{ env.IMAGE_NAME }}
+          IMAGE_TAG: ${{ steps.package.outputs.image_tag }}
           IMAGE_REMOTE: ${{ steps.package.outputs.image_remote }}
           IMAGE_REMOTE_LATEST: ${{ steps.package.outputs.image_remote_latest }}
         run: |
@@ -1170,6 +1400,23 @@ jobs:
           # Repository path already lowercased at package time; re-enforce for GHCR
           IMAGE_REMOTE="${IMAGE_REMOTE,,}"
           IMAGE_REMOTE_LATEST="${IMAGE_REMOTE_LATEST,,}"
+          OWNER="${GH_REPOSITORY_OWNER}"
+          PKG="${IMAGE_NAME,,}"
+
+          list_tags() {
+            local path="$1"
+            gh api --paginate "${path}" --jq '.[] | .metadata.container.tags[]?' 2>/dev/null || true
+          }
+
+          TAGS="$(list_tags "/orgs/${OWNER}/packages/container/${PKG}/versions")"
+          if [ -z "${TAGS}" ]; then
+            TAGS="$(list_tags "/users/${OWNER}/packages/container/${PKG}/versions")"
+          fi
+          if printf '%s\n' "${TAGS}" | grep -qx "${IMAGE_TAG}"; then
+            echo "::error::GHCR tag ${IMAGE_REMOTE} already exists; will not overwrite a version tag."
+            exit 1
+          fi
+
           docker push "${IMAGE_REMOTE}"
           docker push "${IMAGE_REMOTE_LATEST}"
           echo "Pushed:"
@@ -1189,6 +1436,7 @@ jobs:
           STABLE_NAME: ${{ steps.package.outputs.stable_name }}
           IMAGE_LOCAL: ${{ steps.package.outputs.image_local }}
           IMAGE_REMOTE: ${{ steps.package.outputs.image_remote }}
+          IMAGE_REMOTE_LATEST: ${{ steps.package.outputs.image_remote_latest }}
           IMAGE_TAR: ${{ steps.package.outputs.image_tar }}
           IMAGE_ID: ${{ steps.docker.outputs.image_id }}
           EXT: ${{ steps.package.outputs.ext }}
@@ -1208,16 +1456,17 @@ jobs:
             echo "| Stable WAR | \`${STABLE_NAME}\` |"
             echo "| Docker image (local) | \`${IMAGE_LOCAL}\` |"
             echo "| Docker image (GHCR) | \`${IMAGE_REMOTE}\` |"
+            echo "| Docker image (GHCR latest) | \`${IMAGE_REMOTE_LATEST}\` |"
             echo "| Image archive | \`${IMAGE_TAR}\` |"
             echo "| Image ID | \`${IMAGE_ID}\` |"
             echo "| Artifacts | \`rest-api-release-target\`, \`rest-api-release-package\`, \`rest-api-release-docker-image\` |"
             echo ""
             echo "### Deploy options"
             echo ""
-            echo "1. **WAR** — download \`rest-api-release-package\` and deploy \`.${EXT}\` to a servlet container."
-            echo "2. **Image archive** — \`docker load < ${IMAGE_TAR}\` then run \`${IMAGE_LOCAL}\`."
+            echo "1. **WAR** — download \`rest-api-release-package\` and deploy the \`.war\` as Tomcat \`ROOT.war\`."
+            echo "2. **Image archive** — \`docker load < ${IMAGE_TAR}\` then \`docker run -p 8080:8080 -e … ${IMAGE_LOCAL}\` (Docker Desktop or any Engine)."
             if [ "${EVENT_NAME}" != "pull_request" ]; then
-              echo "3. **GHCR** — \`docker pull ${IMAGE_REMOTE}\` (also tagged \`:latest\`)."
+              echo "3. **GHCR** — \`docker pull ${IMAGE_REMOTE}\` or \`docker pull ${IMAGE_REMOTE_LATEST}\`."
             else
               echo "3. **GHCR** — push skipped on pull_request; image is available as the tar artifact only."
             fi

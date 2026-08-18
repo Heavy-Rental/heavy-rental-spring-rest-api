@@ -1,0 +1,90 @@
+package com.heavy_rental.rest_api.controller;
+
+import java.util.List;
+
+import org.springframework.http.HttpStatus;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.web.bind.annotation.*;
+
+import jakarta.validation.Valid;
+
+import com.heavy_rental.rest_api.dto.RentalPlanCreateRequest;
+import com.heavy_rental.rest_api.dto.RentalPlanResponse;
+import com.heavy_rental.rest_api.dto.RentalPlanUpdateRequest;
+import com.heavy_rental.rest_api.service.RentalPlanService;
+
+import com.heavy_rental.rest_api.dto.RentalPlanItemRequest;
+
+@RestController
+@RequestMapping("/api/rentalPlans")
+
+public class RentalPlanController {
+
+    private final RentalPlanService rentalPlanService;
+
+    public RentalPlanController(RentalPlanService rentalPlanService) {
+        this.rentalPlanService = rentalPlanService;
+    }
+
+    @PostMapping
+    @ResponseStatus(HttpStatus.CREATED)
+    public RentalPlanResponse create(@Valid @RequestBody RentalPlanCreateRequest request, @AuthenticationPrincipal Jwt jwt) {
+        return rentalPlanService.create(request, jwt.getSubject());
+    }
+
+    @GetMapping
+    public List<RentalPlanResponse> listMine(@AuthenticationPrincipal Jwt jwt) {
+        return rentalPlanService.listMine(jwt.getSubject());
+    }
+
+    @GetMapping("/{id}")
+    public RentalPlanResponse getById(@PathVariable Long id, @AuthenticationPrincipal Jwt jwt) {
+        return rentalPlanService.getById(id, jwt.getSubject());
+    }
+
+    @PostMapping("/{id}/items")
+    @ResponseStatus(HttpStatus.CREATED)
+    public RentalPlanResponse addItem(
+            @PathVariable Long id, @RequestBody RentalPlanItemRequest request, @AuthenticationPrincipal Jwt jwt) {
+        return rentalPlanService.addItem(id, request, jwt.getSubject());
+    }
+
+    @DeleteMapping("/{id}/items/{itemId}")
+    public RentalPlanResponse removeItem(
+            @PathVariable Long id, @PathVariable Long itemId, @AuthenticationPrincipal Jwt jwt) {
+        return rentalPlanService.removeItem(id, itemId, jwt.getSubject());
+    }
+
+    /**
+     * Sets/changes {@code siteAddress} on a plan created without one (see
+     * {@code openspec/changes/pricing-postal-distance/}). Setting it on a {@code QUOTED} plan
+     * reverts to {@code DRAFT} and clears {@code totalAmount} — see
+     * {@code RentalPlanService#updateSiteAddress}.
+     */
+    @PatchMapping("/{id}")
+    public RentalPlanResponse updateSiteAddress(
+            @PathVariable Long id, @Valid @RequestBody RentalPlanUpdateRequest request,
+            @AuthenticationPrincipal Jwt jwt) {
+        return rentalPlanService.updateSiteAddress(id, request, jwt.getSubject());
+    }
+
+    /**
+     * Optional inbound {@code X-Correlation-Id} is propagated to haystack when dynamic pricing
+     * is enabled (see {@code openspec/changes/dynamic-plan-quote-pricing/}), same convention as
+     * {@code RecommendationController}.
+     */
+    @PostMapping("/{id}/quote")
+    public RentalPlanResponse requestQuote(
+            @PathVariable Long id,
+            @AuthenticationPrincipal Jwt jwt,
+            @RequestHeader(value = "X-Correlation-Id", required = false) String correlationId) {
+        return rentalPlanService.requestQuote(id, jwt.getSubject(), correlationId);
+    }
+
+    @PostMapping("/{id}/cancel")
+    public RentalPlanResponse cancel(@PathVariable Long id, @AuthenticationPrincipal Jwt jwt) {
+        return rentalPlanService.cancel(id, jwt.getSubject());
+    }
+
+}
