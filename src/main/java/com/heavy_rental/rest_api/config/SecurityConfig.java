@@ -70,6 +70,15 @@ public class SecurityConfig {
 	@Bean
 	SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
 		http
+			// Stateless JWT resource server: credentials travel in Authorization
+			// (never cookies). A cross-site form cannot forge an authenticated
+			// call, so CSRF is not a viable attack. Spring CSRF would 403 every
+			// mutating /api/** route because portal, mobile, and Postman do not
+			// send a CSRF token. Required by OpenSpec FR-ENV-002.
+			// Do not replace with ignoringRequestMatchers on only auth/webhook —
+			// that re-enables CSRF on bookings, plans, payments, assets, and
+			// recommendations.
+			// codeql[java/spring-disabled-csrf-protection]
 			.csrf(csrf -> csrf.disable())
 			.cors(cors -> cors.configurationSource(corsConfigurationSource()))
 			.sessionManagement(session -> session

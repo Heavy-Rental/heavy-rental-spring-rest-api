@@ -133,6 +133,20 @@ class AuthenticationIntegrationTest {
 	}
 
 	@Test
+	void loginWithInterimAndBlankCredentialsReturns400() throws Exception {
+		String interim = mintInterim();
+
+		mockMvc.perform(post("/api/auth/login")
+						.header(HttpHeaders.AUTHORIZATION, "Bearer " + interim)
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{"email":"","password":"  "}
+							"""))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.error").value("bad_request"));
+	}
+
+	@Test
 	void loginWithInterimAndBadPasswordReturns401() throws Exception {
 		String interim = mintInterim();
 

@@ -47,7 +47,7 @@ public class RestExceptionHandler {
 	}
 
 	@ExceptionHandler(BadCredentialsException.class)
-	public ResponseEntity<Map<String, String>> handleBadCredentials(BadCredentialsException ex) {
+	public ResponseEntity<Map<String, String>> handleBadCredentials() {
 		return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
 				.body(error("invalid_credentials", "Invalid email or password"));
 	}
