@@ -6,25 +6,10 @@
 #   1. A GitHub Release is published, or
 #   2. A pull request is opened/updated from develop → master
 #
-# Secrets (in heavy-rental-spring-rest-api)
-# ----------------------------------------
 # Do NOT set `environment:` on this caller job (invalid with uses:).
-# QC inside the reusable workflow uses environment: production.
-#
-# Add secrets (Environment "production" and/or Repository secrets):
-#   REST_API_CLOUD_DB_HOST     e.g. mydb.postgres.database.azure.com
-#   REST_API_CLOUD_DB_NAME
-#   REST_API_CLOUD_DB_USER
-#   REST_API_CLOUD_DB_PASSWORD
-#   REST_API_CLOUD_DB_PORT
-#
-# JDBC URLs are derived (not secrets):
-#   QC tests:    jdbc:postgresql://localhost:<PORT>/<NAME>
-#   Cloud deploy: jdbc:postgresql://<HOST>:<PORT>/<NAME>
-# Packaging writes spring-datasource.env for deploy (no password).
-#
-# explicit secrets: map forwards repository secrets; Environment secrets load on QC
-# via environment: production (PR develop→master and published release).
+# Release QC starts a local Docker Postgres from workflow env (QC_POSTGRES_*).
+# Do not add REST_API_CLOUD_DB_* or REST_API_DB_* here. Academy RDS is
+# Secrets Manager heavy-rental/rest (infra sync-secrets), not GitHub.
 # =============================================================================
 
 name: Release
@@ -56,12 +41,3 @@ jobs:
        github.head_ref == 'develop' &&
        github.base_ref == 'master')
     uses: ./.github/workflows/release-pipeline.yml
-    with:
-      github_environment: production
-    # Explicit secrets only (Semgrep: avoid secrets: inherit)
-    secrets:
-      REST_API_CLOUD_DB_HOST: ${{ secrets.REST_API_CLOUD_DB_HOST }}
-      REST_API_CLOUD_DB_NAME: ${{ secrets.REST_API_CLOUD_DB_NAME }}
-      REST_API_CLOUD_DB_USER: ${{ secrets.REST_API_CLOUD_DB_USER }}
-      REST_API_CLOUD_DB_PASSWORD: ${{ secrets.REST_API_CLOUD_DB_PASSWORD }}
-      REST_API_CLOUD_DB_PORT: ${{ secrets.REST_API_CLOUD_DB_PORT }}

@@ -1,0 +1,55 @@
+# Dependabot version updates for Heavy Rental Spring REST API.
+# https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+#
+# Security updates still open against the default branch (develop) even if
+# this file is later pointed at another target-branch.
+#
+# Enable in the repo: Settings → Code security → Dependabot version updates
+# (and Dependabot security updates, separately).
+
+version: 2
+
+updates:
+  # pom.xml at the repository root (Spring Boot parent + explicit versions).
+  - package-ecosystem: maven
+    directory: /
+    target-branch: develop
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Asia/Singapore
+    open-pull-requests-limit: 8
+    labels:
+      - dependencies
+    commit-message:
+      prefix: "deps"
+      prefix-development: "deps-dev"
+      include: scope
+    groups:
+      spring-boot:
+        patterns:
+          - "org.springframework.boot:*"
+      resilience4j:
+        patterns:
+          - "io.github.resilience4j:*"
+
+  # Workflow and composite-action pins under .github/
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: develop
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Asia/Singapore
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+    commit-message:
+      prefix: "ci"
+      include: scope
+    groups:
+      github-actions:
+        patterns:
+          - "*"
