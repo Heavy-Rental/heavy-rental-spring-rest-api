@@ -2,7 +2,8 @@
 
 ## Purpose
 
-Upgrade an **interim** Bearer JWT to a **session (access)** token via login, and revoke access tokens via logout (jti denylist).
+Upgrade an **interim** Bearer JWT to a **session (access)** token via login — with password or a
+Google-issued ID token — and revoke access tokens via logout (jti denylist).
 
 **Status:** **As-built**  
 **Depends on:** [`auth-interim-token`](../auth-interim-token/spec.md)  
@@ -45,6 +46,42 @@ The system MUST accept `POST /api/auth/login` with a valid interim Bearer and JS
 - GIVEN valid interim and blank email or password
 - WHEN login is called
 - THEN response is `400` with `error` of `bad_request`
+
+### Requirement: FR-AUTH-L-001b Google sign-in upgrades interim to access (mobile)
+
+The system MUST accept `POST /api/auth/google` with a valid interim Bearer and JSON
+`{ "idToken" }`, verify the Google ID token's signature/audience/expiry, and return `200` with a
+session access JWT in `LoginResponse` form. The Google account's email MUST be
+`email_verified`. If no `User` row matches the verified email, the system MUST auto-provision one
+with `role = ROLE_DRIVER` (never `ROLE_ADMIN`) — this endpoint is the mobile ops app's sign-in
+path, which is staff-only, so a first-time sign-in is assumed to be a driver, not a customer. An
+existing account (any role, matched by email) MUST log in unchanged — its role MUST NOT be
+altered by a Google sign-in. After success, the interim token's `jti` MUST be denylisted until
+its original `exp`, same as `FR-AUTH-L-001`.
+
+#### Scenario: First-time Google sign-in provisions a driver
+- GIVEN a valid interim Bearer and a Google ID token with a verified email that matches no
+  existing `User`
+- WHEN `POST /api/auth/google`
+- THEN response is `200` with an access JWT whose `roles` claim is `["ROLE_DRIVER"]`
+- AND a new `User` row is persisted with `role = DRIVER`
+
+#### Scenario: Existing account keeps its role
+- GIVEN a valid interim Bearer and a Google ID token whose verified email matches an existing
+  `User` with `role = ADMIN`
+- WHEN `POST /api/auth/google`
+- THEN response is `200` with an access JWT whose `roles` claim is `["ROLE_ADMIN"]`
+- AND no new `User` row is created
+
+#### Scenario: Unverified email rejected
+- GIVEN a Google ID token whose `email_verified` claim is not `true`
+- WHEN `POST /api/auth/google`
+- THEN response is `401`
+
+#### Scenario: Invalid or missing ID token
+- GIVEN a missing/blank `idToken`, or one that fails Google signature/audience verification
+- WHEN `POST /api/auth/google`
+- THEN response is `400` (missing) or `401` (invalid/unverifiable)
 
 ### Requirement: FR-AUTH-L-002 Token tier authorization
 
@@ -91,6 +128,7 @@ Login MUST pass the **plain** password from the request into `AuthenticationMana
 |---------|------|
 | `GET /api/auth/getBearerToken` | `permitAll` (auth-interim-token) |
 | `POST /api/auth/login` | `hasAuthority("ROLE_INTERIM")` |
+| `POST /api/auth/google` | `hasAuthority("ROLE_INTERIM")` |
 | `POST /api/auth/logout` | `hasAnyAuthority("ROLE_USER", "ROLE_ADMIN")` |
 | Other API requests | `hasAnyAuthority("ROLE_USER", "ROLE_ADMIN")` |
 

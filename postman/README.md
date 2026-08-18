@@ -24,6 +24,10 @@ Routes other than interim token, login, health, and Stripe webhook need an **acc
    - `Authorization: Bearer {{interimToken}}`  
    - Body: `{{email}}` / `{{password}}`  
    - Test script saves `accessToken`  
+   - Mobile ops app alternative: **Auth → 2b. Login with Google** — same interim-in/access-out
+     shape, body is `{{googleIdToken}}` instead of email/password. Requires a real Google ID
+     token (there's no way to mint one from Postman); first-time sign-in auto-provisions a
+     `ROLE_DRIVER` account, an existing account keeps its current role.
 3. Other folders use collection auth: **Bearer `{{accessToken}}`**.
 
 ### Seed users (`data.sql`)
@@ -39,7 +43,7 @@ Routes other than interim token, login, health, and Stripe webhook need an **acc
 | Folder | Notes |
 |--------|--------|
 | **0. Health** | `GET /actuator/health` (public) |
-| **1. Auth** | Interim → login → logout |
+| **1. Auth** | Interim → login/google → logout |
 | **2. Recommendations (S2b)** | Submit quote · knowledge-query · get session |
 | **3. Equipment** | Browse / CRUD |
 | **4. Bookings** | Direct create / **checkout from plan** / list / get / update |
@@ -77,7 +81,8 @@ Submit test script asserts the portal body is **quote-shaped** and stores `recom
 | `baseUrl` | `http://localhost:8080` | you |
 | `email` / `password` | Alex Tan seed | you |
 | `interimToken` | — | Get interim request |
-| `accessToken` | — | Login request |
+| `accessToken` | — | Login / Login with Google request |
+| `googleIdToken` | *(empty)* | you — real Google ID token, only needed for **2b. Login with Google** |
 | `recommendationId` | `1` | Submit project-spec (success) |
 | `bookingId` | `1` | Create / checkout booking |
 | `rentalPlanId` | `3` | Create plan / quote (seeded Alex Tan QUOTED plan) |

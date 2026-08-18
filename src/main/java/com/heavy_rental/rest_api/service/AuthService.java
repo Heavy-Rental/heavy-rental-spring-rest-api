@@ -115,9 +115,10 @@ public class AuthService {
 
 	/**
 	 * Same interim -> access handshake as {@link #login}, but authenticates via a Google-issued
-	 * ID token instead of a password. Auto-provisions a {@code ROLE_USER} account on first sign-in
-	 * (never auto-elevates to ADMIN — that stays a manual {@code POST /api/users} action) and links
-	 * to an existing account by email otherwise.
+	 * ID token instead of a password. This is the mobile ops app's sign-in path, so a first-time
+	 * sign-in auto-provisions a {@code ROLE_DRIVER} account (never auto-elevates to ADMIN — that
+	 * stays a manual {@code POST /api/users} action) and links to an existing account by email
+	 * otherwise.
 	 */
 	public LoginResponse loginWithGoogle(GoogleLoginRequest request, Jwt interimJwt) {
 		if (interimJwt == null || !JwtService.isInterim(interimJwt)) {
@@ -175,7 +176,8 @@ public class AuthService {
 				.email(email)
 				// Unusable random hash: this account only ever authenticates via Google.
 				.password(passwordEncoder.encode(UUID.randomUUID().toString()))
-				.role(User.UserRole.USER)
+				// The mobile app is staff-only (admin/driver); a self-serve new account is a driver.
+				.role(User.UserRole.DRIVER)
 				.enabled(true)
 				.createdAt(LocalDateTime.now())
 				.build();

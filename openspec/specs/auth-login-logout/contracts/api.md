@@ -10,6 +10,8 @@
 ```text
 1. GET  /api/auth/getBearerToken     → interim JWT  (auth-interim-token)
 2. POST /api/auth/login              → access JWT JSON; interim jti denylisted
+   (mobile ops app: POST /api/auth/google is the alternative to step 2 — same
+   interim-in/access-out shape, Google ID token instead of a password)
 3. Protected APIs with access Bearer
 4. POST /api/auth/logout             → access jti denylisted
 ```
@@ -18,11 +20,11 @@
 
 | | Interim | Session (access) |
 |--|---------|------------------|
-| Issued by | `GET /getBearerToken` | `POST /login` after AuthenticationManager success |
+| Issued by | `GET /getBearerToken` | `POST /login` or `POST /google` after successful auth |
 | `sub` | Random UUID | Authenticated **email** |
 | `tokenType` | `"interim"` | `"access"` |
-| `roles` | `["ROLE_INTERIM"]` | DB roles e.g. `ROLE_USER`, `ROLE_ADMIN` |
-| May call | Login only | Logout + USER/ADMIN APIs |
+| `roles` | `["ROLE_INTERIM"]` | DB roles e.g. `ROLE_USER`, `ROLE_ADMIN`, `ROLE_DRIVER` |
+| May call | Login/Google only | Logout + USER/ADMIN APIs |
 
 Signing: HS256; same `app.jwt.*` config as project constitution.
 
@@ -54,6 +56,34 @@ Content-Type: application/json
 | `tokenType` | string | `"Bearer"` |
 | `expiresIn` | long | Seconds |
 | `username` | string | Authenticated **email** (legacy field name) |
+
+## `POST /api/auth/google`
+
+Mobile ops app only — alternative to `POST /api/auth/login` using a Google-issued ID token
+(Android Credential Manager) instead of a password.
+
+```http
+POST /api/auth/google HTTP/1.1
+Authorization: Bearer <interim-jwt>
+Content-Type: application/json
+
+{ "idToken": "<google-id-token>" }
+```
+
+**DTO:** `GoogleLoginRequest(idToken)`
+
+**Success `200` — `LoginResponse`:** same shape as `POST /api/auth/login`.
+
+First-time sign-in (no existing `User` row for the token's verified email) auto-provisions a new
+`User` with `role = DRIVER` — the mobile app is staff-only, so a self-serve new account is
+assumed to be a driver, never a customer, and is never auto-elevated to `ADMIN`. An existing
+account (matched by email, any role) logs in unchanged; its role is never altered by this route.
+
+| HTTP | Condition |
+|------|-----------|
+| `400` | Missing/blank `idToken` |
+| `401` | Invalid/unverifiable Google ID token, or `email_verified` is not `true` |
+| `403` | An access token (not interim) used as Bearer, or the linked account is disabled |
 
 ## `POST /api/auth/logout`
 
@@ -98,5 +128,5 @@ login(LoginRequest, Jwt interimJwt):
 
 ```bash
 cd heavy-rental-spring-rest-api
-./mvnw test -Dtest=AuthenticationIntegrationTest
+./mvnw test -Dtest=AuthenticationIntegrationTest,AuthServiceTest
 ```
