@@ -43,14 +43,20 @@ Controllers MUST stay thin; services own business rules; external HTTP clients M
 - WHEN the controller handles it
 - THEN orchestration goes service → `client.haystack`, not controller → RestClient
 
-### Requirement: FR-ENV-005 Schema via Hibernate update
+### Requirement: FR-ENV-005 Schema via Flyway in production only
 
-Schema management MUST use `spring.jpa.hibernate.ddl-auto=update` unless an explicit change introduces migrations and updates this capability + `project.md`.
+The default profile MUST disable Flyway (`spring.flyway.enabled=false`) and use Hibernate `spring.jpa.hibernate.ddl-auto=update`. The `prod` profile (Release image `SPRING_PROFILES_ACTIVE=prod`) MUST enable Flyway against `src/main/resources/db/migration` and set Hibernate `ddl-auto=validate`. Existing production databases that already have the JPA schema MAY be baselined (`spring.flyway.baseline-on-migrate=true`) so V1 is not re-applied.
 
-#### Scenario: No Flyway required for boot
-- GIVEN current constitution
-- WHEN the module boots
+#### Scenario: Local boot does not run Flyway
+- GIVEN the default profile
+- WHEN the application context starts
 - THEN Hibernate updates schema without Flyway
+
+#### Scenario: Prod empty Postgres is created by Flyway
+- GIVEN `SPRING_PROFILES_ACTIVE=prod` and reachable PostgreSQL with no application tables
+- WHEN the application context starts
+- THEN Flyway applies `V1__baseline_jpa_schema.sql` (and later versions)
+- AND Hibernate validates the schema against entity mappings
 
 ### Requirement: FR-ENV-006 OpenSpec-primary process
 
@@ -73,7 +79,7 @@ Write DTOs that carry format rules (for example `siteAddress` postal code) MUST 
 | Framework | Spring Boot 4.1 |
 | Packaging | WAR |
 | Security | Spring Security + OAuth2 Resource Server JWT |
-| Persistence | Spring Data JPA + PostgreSQL |
+| Persistence | Spring Data JPA + PostgreSQL + Flyway |
 | HTTP client (S2b) | RestClient + Resilience4j |
 | Port | 8080 |
 

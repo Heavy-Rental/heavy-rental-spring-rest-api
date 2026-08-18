@@ -26,8 +26,8 @@ HTTP tables: `specs/<capability>/contracts/`.
 | DB | PostgreSQL only; no H2 default |
 | Auth | JWT resource server; `{ "error", "message" }` |
 | Layering | Thin controllers; no external HTTP from controllers |
-| Schema | `ddl-auto=update` |
-| Seed | `data.sql` after DDL |
+| Schema | default: Hibernate `ddl-auto=update`; prod: Flyway + `validate` |
+| Seed | `data.sql` after Hibernate DDL (dev only) |
 | Process | New work → OpenSpec only |
 
 ## Living domains

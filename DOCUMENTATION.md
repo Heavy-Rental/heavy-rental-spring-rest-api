@@ -209,7 +209,7 @@ Validation failures (`@Valid` on request bodies) return HTTP `400` with `error` 
 
 ### 4.4 Seed data (development)
 
-Loaded from `src/main/resources/data.sql` after Hibernate DDL (`ddl-auto=update`, `defer-datasource-initialization=true`).
+Loaded from `src/main/resources/data.sql` after Hibernate DDL (`ddl-auto=update`, `defer-datasource-initialization=true`). Flyway is disabled on the default profile. Production (`SPRING_PROFILES_ACTIVE=prod`) runs Flyway and `ddl-auto=validate`. Set GitHub Environment var `APP_SEED_DATA_SQL=true` on Academy CD to also run `data.sql` after Flyway (default off).
 
 | Email | Password (dev) | Role |
 |-------|----------------|------|
@@ -882,8 +882,11 @@ Primary file: `heavy-rental-spring-rest-api/src/main/resources/application.prope
 |----------|-----------------|
 | `server.port` | `8080` |
 | `spring.datasource.url` | `jdbc:postgresql://${POSTGRES_HOSTNAME:db}:5432/${POSTGRES_DB:postgres}` |
-| `spring.jpa.hibernate.ddl-auto` | `update` |
-| `spring.sql.init.mode` | `always` (seed `data.sql`) |
+| `spring.jpa.hibernate.ddl-auto` | `update` (default); `validate` in `prod` |
+| `spring.flyway.enabled` | `false` (default); `true` in `prod` |
+| `spring.flyway.locations` | `classpath:db/migration` (prod) |
+| `spring.sql.init.mode` | `always` locally (seed `data.sql`); `never` in prod |
+| `app.seed.data-sql` | prod only; `${APP_SEED_DATA_SQL:false}` — Academy CD overlay |
 | `spring.jpa.open-in-view` | `false` |
 
 ### 7.2 JWT

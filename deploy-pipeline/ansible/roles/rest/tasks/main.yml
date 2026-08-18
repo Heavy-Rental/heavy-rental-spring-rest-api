@@ -8,6 +8,51 @@
       Set extra-var rest_image (ECR/GHCR tag or name loaded from image_http_url).
       Do not docker build on the guest.
 
+- name: Overlay REST Environment academy pricing knobs
+  ansible.builtin.shell: |
+    set -euo pipefail
+    python3 - <<'PY'
+    import json
+    from pathlib import Path
+    path = Path("{{ env_path }}")
+    data = {}
+    order = []
+    if path.is_file():
+        for line in path.read_text().splitlines():
+            if not line or line.lstrip().startswith("#") or "=" not in line:
+                continue
+            key, _, val = line.partition("=")
+            if key not in data:
+                order.append(key)
+            data[key] = val
+    overlay = json.loads('''{{ rest_profile_overlay | default({}) | to_json }}''')
+    forbidden = {
+        "POSTGRES_HOST", "POSTGRES_HOSTNAME", "POSTGRES_PORT",
+        "POSTGRES_DATABASE", "POSTGRES_DB", "POSTGRES_USERNAME", "POSTGRES_USER",
+        "POSTGRES_PASSWORD", "POSTGRES_URL",
+        "SPRING_DATASOURCE_URL", "SPRING_DATASOURCE_USERNAME", "SPRING_DATASOURCE_PASSWORD",
+        "HAYSTACK_BASE_URL", "APP_JWT_SECRET", "APP_CORS_ALLOWED_ORIGINS",
+        "STRIPE_API_KEY", "STRIPE_PUBLISHABLE_KEY", "STRIPE_WEBHOOK_SECRET",
+        "ONEMAP_EMAIL", "ONEMAP_PASSWORD",
+    }
+    if not isinstance(overlay, dict):
+        overlay = {}
+    for key, val in overlay.items():
+        if key in forbidden:
+            continue
+        text = "" if val is None else str(val).strip()
+        if not text:
+            continue
+        data[key] = text
+        if key not in order:
+            order.append(key)
+    path.write_text("".join(f"{k}={data[k]}\n" for k in order))
+    PY
+    chmod 600 "{{ env_path }}"
+  args:
+    executable: /bin/bash
+  no_log: true
+
 - name: REST compose
   ansible.builtin.template:
     src: compose.yml.j2
