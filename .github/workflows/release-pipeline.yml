@@ -42,9 +42,8 @@
 #   Image saved as gzipped tar artifact; also pushed to GHCR outside PRs
 #   as ghcr.io/<owner>/heavy_rental_rest_api:<x.y.z> and :latest.
 #   <x.y.z> is the previous GHCR semver patch-bumped (first publish: 1.0.0).
-#   spring-datasource.env is a workflow artifact (localhost QC URL, no
-#   password, not Academy RDS). Not copied into the image. Guest CD reads
-#   heavy-rental/rest. Release does not require GitHub DB secrets.
+#   spring-datasource.env is a workflow artifact (localhost JDBC, no
+#   password). Not copied into the image. Guest CD reads heavy-rental/rest.
 #
 # Application:
 #   https://github.com/SA62-team1/heavy-rental-spring-rest-api
@@ -71,11 +70,24 @@
 #   actionlint heavy-rental-rest-api/release-pipeline/release-pipeline.yml
 #   actionlint .github/workflows/rest-api-release.yml
 #
-# Release QC does not require GitHub secrets or Environment production.
-# It starts a local Docker Postgres from workflow env (QC_POSTGRES_*).
-# Academy RDS lives in Secrets Manager heavy-rental/rest (infra sync-secrets).
-# Do not add REST_API_CLOUD_DB_* or REST_API_DB_* to this workflow.
-# Do not set environment: on the caller uses: job.
+# Quality Control uses environment: production (hardcoded) and explicit secrets map.
+#
+# Recommended (either works):
+#   A) Settings → Environments → production → Environment secrets
+#   B) Settings → Secrets and variables → Actions → Repository secrets
+#
+# Names (exact match, same as Integration CI):
+#   REST_API_DB_NAME
+#   REST_API_DB_USER
+#   REST_API_DB_PASSWORD
+#   REST_API_DB_PORT
+#
+# REST_API_DB_URL is NOT required. After Start PostgreSQL, QC builds:
+#   jdbc:postgresql://localhost:<PORT>/<NAME>
+# These start a local Docker Postgres for tests. They are not Academy RDS.
+# Guest CD reads heavy-rental/rest (infra sync-secrets).
+# Caller must use explicit secrets map. Do not set environment: on the caller uses: job.
+# Never commit real values.
 # =============================================================================
 
 name: REST API Release CI
@@ -105,7 +117,21 @@ on:
           still validate. Release QC does not load Environment secrets.
         required: false
         type: string
-        default: ""
+        default: production
+    secrets:
+      REST_API_DB_NAME:
+        description: PostgreSQL database name (local Docker QC)
+        required: false
+      REST_API_DB_USER:
+        description: PostgreSQL username
+        required: false
+      REST_API_DB_PASSWORD:
+        description: PostgreSQL password
+        required: false
+      REST_API_DB_PORT:
+        description: Host port for CI Postgres container
+        required: false
+      # REST_API_DB_URL is derived after Docker Postgres starts (not a secret)
 
 # One run per release tag or develop→master PR; do not cancel in-flight packaging
 concurrency:
@@ -319,20 +345,41 @@ jobs:
     # Local Docker Postgres from workflow env. No GitHub Environment secrets.
     timeout-minutes: 30
     steps:
-      - name: Confirm local QC Postgres settings
+      - name: Verify required database secrets are configured
+        env:
+          REST_API_DB_NAME: ${{ secrets.REST_API_DB_NAME }}
+          REST_API_DB_USER: ${{ secrets.REST_API_DB_USER }}
+          REST_API_DB_PASSWORD: ${{ secrets.REST_API_DB_PASSWORD }}
+          REST_API_DB_PORT: ${{ secrets.REST_API_DB_PORT }}
         run: |
           set -euo pipefail
-          echo "Release QC uses a local Docker Postgres (QC_POSTGRES_*). No GitHub DB secrets."
-          echo "Academy RDS is heavy-rental/rest (infra sync-secrets), not this job."
-          if [ -z "${QC_POSTGRES_DB}" ] || [ -z "${QC_POSTGRES_USER}" ] || [ -z "${QC_POSTGRES_PASSWORD}" ]; then
-            echo "::error::QC_POSTGRES_DB / USER / PASSWORD must be set in the workflow env."
+          echo "Quality Control secrets source: GitHub Environment 'production' and/or repository secrets (via explicit secrets map)."
+          missing=()
+          [ -n "${REST_API_DB_NAME}" ] || missing+=(REST_API_DB_NAME)
+          [ -n "${REST_API_DB_USER}" ] || missing+=(REST_API_DB_USER)
+          [ -n "${REST_API_DB_PASSWORD}" ] || missing+=(REST_API_DB_PASSWORD)
+          [ -n "${REST_API_DB_PORT}" ] || missing+=(REST_API_DB_PORT)
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::Missing required secrets: ${missing[*]}"
+            echo ""
+            echo "Configure in the APPLICATION repository (where this workflow runs):"
+            echo "  1) Settings → Environments → production → Environment secrets"
+            echo "     OR"
+            echo "  2) Settings → Secrets and variables → Actions → Repository secrets"
+            echo ""
+            echo "Required names (exact, case-sensitive):"
+            echo "  REST_API_DB_NAME, REST_API_DB_USER, REST_API_DB_PASSWORD, REST_API_DB_PORT"
+            echo "  (REST_API_DB_URL is optional — built after Docker Postgres starts)"
+            echo ""
+            echo "Caller must include: explicit secrets map"
+            echo "This job uses: environment: production"
             exit 1
           fi
-          if ! [[ "${QC_POSTGRES_PORT}" =~ ^[0-9]+$ ]]; then
-            echo "::error::QC_POSTGRES_PORT must be a numeric TCP port."
+          if ! [[ "${REST_API_DB_PORT}" =~ ^[0-9]+$ ]]; then
+            echo "::error::REST_API_DB_PORT must be a numeric TCP port."
             exit 1
           fi
-          echo "Local QC Postgres: localhost:${QC_POSTGRES_PORT}/${QC_POSTGRES_DB} (password not logged)."
+          echo "All required database secrets are present (values not logged)."
 
       - name: Checkout calling repository (release / push head)
         if: needs.integration.outputs.checkout_mode == 'caller'
@@ -360,30 +407,43 @@ jobs:
         working-directory: ${{ env.APP_PATH }}
         run: chmod +x ./mvnw
 
-      - name: Start PostgreSQL (Docker; local QC only)
+      - name: Start PostgreSQL (Docker; credentials and port from secrets)
         id: dburl
+        env:
+          REST_API_DB_NAME: ${{ secrets.REST_API_DB_NAME }}
+          REST_API_DB_USER: ${{ secrets.REST_API_DB_USER }}
+          REST_API_DB_PASSWORD: ${{ secrets.REST_API_DB_PASSWORD }}
+          REST_API_DB_PORT: ${{ secrets.REST_API_DB_PORT }}
         run: |
           set -euo pipefail
           docker rm -f rest-api-release-postgres >/dev/null 2>&1 || true
           docker run -d --name rest-api-release-postgres \
-            -e POSTGRES_DB="${QC_POSTGRES_DB}" \
-            -e POSTGRES_USER="${QC_POSTGRES_USER}" \
-            -e POSTGRES_PASSWORD="${QC_POSTGRES_PASSWORD}" \
-            -p "${QC_POSTGRES_PORT}:5432" \
+            -e POSTGRES_DB="${REST_API_DB_NAME}" \
+            -e POSTGRES_USER="${REST_API_DB_USER}" \
+            -e POSTGRES_PASSWORD="${REST_API_DB_PASSWORD}" \
+            -p "${REST_API_DB_PORT}:5432" \
             postgres:16-alpine
 
-          LOCAL_JDBC="jdbc:postgresql://localhost:${QC_POSTGRES_PORT}/${QC_POSTGRES_DB}"
-          echo "QC_POSTGRES_URL=${LOCAL_JDBC}" >> "$GITHUB_ENV"
+          JDBC_URL="jdbc:postgresql://localhost:${REST_API_DB_PORT}/${REST_API_DB_NAME}"
+          {
+            echo "REST_API_DB_URL=${JDBC_URL}"
+            echo "REST_API_DB_NAME=${REST_API_DB_NAME}"
+            echo "REST_API_DB_USER=${REST_API_DB_USER}"
+            echo "REST_API_DB_PORT=${REST_API_DB_PORT}"
+          } >> "$GITHUB_ENV"
 
           echo "PostgreSQL container started."
-          echo "Local test URL: jdbc:postgresql://localhost:${QC_POSTGRES_PORT}/<db>"
+          echo "Derived REST_API_DB_URL=jdbc:postgresql://localhost:${REST_API_DB_PORT}/<db> (password not in URL)."
 
       - name: Wait for PostgreSQL
+        env:
+          REST_API_DB_PORT: ${{ secrets.REST_API_DB_PORT }}
+          REST_API_DB_USER: ${{ secrets.REST_API_DB_USER }}
         run: |
           set -euo pipefail
-          PORT="${QC_POSTGRES_PORT}"
+          PORT="${REST_API_DB_PORT}"
           for i in $(seq 1 30); do
-            if docker exec rest-api-release-postgres pg_isready -U "${QC_POSTGRES_USER}" >/dev/null 2>&1; then
+            if docker exec rest-api-release-postgres pg_isready -U "${REST_API_DB_USER}" >/dev/null 2>&1; then
               echo "PostgreSQL is accepting connections on localhost:${PORT}"
               exit 0
             fi
@@ -406,16 +466,16 @@ jobs:
         env:
           # Spring Boot binds these env vars automatically — do not pass passwords
           # on the Maven CLI (would appear in process listings).
-          # QC_POSTGRES_URL was built after Start PostgreSQL and written to GITHUB_ENV.
-          SPRING_DATASOURCE_URL: ${{ env.QC_POSTGRES_URL }}
-          SPRING_DATASOURCE_USERNAME: ${{ env.QC_POSTGRES_USER }}
-          SPRING_DATASOURCE_PASSWORD: ${{ env.QC_POSTGRES_PASSWORD }}
+          # REST_API_DB_URL was built after Start PostgreSQL and written to GITHUB_ENV.
+          SPRING_DATASOURCE_URL: ${{ env.REST_API_DB_URL }}
+          SPRING_DATASOURCE_USERNAME: ${{ secrets.REST_API_DB_USER }}
+          SPRING_DATASOURCE_PASSWORD: ${{ secrets.REST_API_DB_PASSWORD }}
           SPRING_DATASOURCE_DRIVER_CLASS_NAME: ${{ env.SPRING_DATASOURCE_DRIVER_CLASS_NAME }}
           SPRING_JPA_DATABASE_PLATFORM: ${{ env.SPRING_JPA_DATABASE_PLATFORM }}
         run: |
           set -euo pipefail
-          if [ -z "${QC_POSTGRES_URL:-}" ]; then
-            echo "::error::QC_POSTGRES_URL is empty — Start PostgreSQL must export it via GITHUB_ENV."
+          if [ -z "${REST_API_DB_URL:-}" ]; then
+            echo "::error::REST_API_DB_URL is empty — Start PostgreSQL must export it via GITHUB_ENV."
             exit 1
           fi
           echo "Running tests with SPRING_DATASOURCE_URL derived from Docker Postgres (password not logged)."
@@ -767,19 +827,23 @@ jobs:
     runs-on: ubuntu-latest
     # Integration first; packaging waits for QC, Security, and CodeQL
     needs: [integration, quality-control, security-testing, codeql]
+    environment: production
     timeout-minutes: 30
     steps:
       - name: Write datasource env template
+        env:
+          REST_API_DB_NAME: ${{ secrets.REST_API_DB_NAME }}
+          REST_API_DB_USER: ${{ secrets.REST_API_DB_USER }}
+          REST_API_DB_PORT: ${{ secrets.REST_API_DB_PORT }}
         run: |
           set -euo pipefail
-          LOCAL_JDBC="jdbc:postgresql://localhost:${QC_POSTGRES_PORT}/${QC_POSTGRES_DB}"
+          LOCAL_JDBC="jdbc:postgresql://localhost:${REST_API_DB_PORT}/${REST_API_DB_NAME}"
           mkdir -p "${GITHUB_WORKSPACE}/release-deploy-config"
           {
-            echo "# Generated by rest-api release packaging — template only."
-            echo "# QC tests used local Docker Postgres. Not Academy RDS."
+            echo "# Generated by rest-api release packaging — local QC JDBC (no password)."
             echo "# Guest compose reads heavy-rental/rest (infra sync-secrets)."
             echo "SPRING_DATASOURCE_URL=${LOCAL_JDBC}"
-            echo "SPRING_DATASOURCE_USERNAME=${QC_POSTGRES_USER}"
+            echo "SPRING_DATASOURCE_USERNAME=${REST_API_DB_USER}"
             echo "SPRING_DATASOURCE_DRIVER_CLASS_NAME=org.postgresql.Driver"
             echo "SPRING_JPA_DATABASE_PLATFORM=org.hibernate.dialect.PostgreSQLDialect"
             echo "# Set SPRING_DATASOURCE_PASSWORD and replace URL from Secrets Manager at deploy."
@@ -787,11 +851,11 @@ jobs:
           {
             echo "### Datasource env artifact"
             echo ""
-            echo "Template only (localhost QC URL, no password). Academy CD does not use this file."
+            echo "Localhost QC URL from \`REST_API_DB_*\` (no password). Academy CD does not use this file."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload datasource env template
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: rest-api-release-cloud-datasource
           path: release-deploy-config/
