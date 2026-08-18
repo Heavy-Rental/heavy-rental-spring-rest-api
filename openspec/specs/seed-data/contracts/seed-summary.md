@@ -36,6 +36,8 @@ Exact rows: inspect `data.sql`.
 ## Config
 
 ```properties
+spring.flyway.enabled=false
+spring.jpa.hibernate.ddl-auto=update
 spring.jpa.defer-datasource-initialization=true
 spring.sql.init.mode=always
 ```

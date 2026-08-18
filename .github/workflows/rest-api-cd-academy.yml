@@ -24,13 +24,18 @@ on:
         required: false
         type: string
         default: ""
-    secrets:
-      AWS_ACCESS_KEY_ID:
+      aws_access_key_id:
         required: false
-      AWS_SECRET_ACCESS_KEY:
+        type: string
+        default: ""
+      aws_secret_access_key:
         required: false
-      AWS_SESSION_TOKEN:
+        type: string
+        default: ""
+      aws_session_token:
         required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -61,9 +66,9 @@ jobs:
 
       - uses: ./.github/actions/resolve-vocareum-aws
         with:
-          aws_access_key_id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws_secret_access_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws_session_token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws_access_key_id: ${{ inputs.aws_access_key_id || secrets.AWS_ACCESS_KEY_ID }}
+          aws_secret_access_key: ${{ inputs.aws_secret_access_key || secrets.AWS_SECRET_ACCESS_KEY }}
+          aws_session_token: ${{ inputs.aws_session_token || secrets.AWS_SESSION_TOKEN }}
           aws_region: ${{ vars.AWS_REGION || 'us-east-1' }}
 
       - name: Prove the Vocareum session is live
@@ -100,9 +105,9 @@ jobs:
 
       - uses: ./.github/actions/resolve-vocareum-aws
         with:
-          aws_access_key_id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws_secret_access_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws_session_token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws_access_key_id: ${{ inputs.aws_access_key_id || secrets.AWS_ACCESS_KEY_ID }}
+          aws_secret_access_key: ${{ inputs.aws_secret_access_key || secrets.AWS_SECRET_ACCESS_KEY }}
+          aws_session_token: ${{ inputs.aws_session_token || secrets.AWS_SESSION_TOKEN }}
           aws_region: ${{ vars.AWS_REGION || 'us-east-1' }}
 
       - name: asg-rest InService + SSM Online + secret shell
@@ -245,9 +250,9 @@ jobs:
 
       - uses: ./.github/actions/resolve-vocareum-aws
         with:
-          aws_access_key_id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws_secret_access_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws_session_token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws_access_key_id: ${{ inputs.aws_access_key_id || secrets.AWS_ACCESS_KEY_ID }}
+          aws_secret_access_key: ${{ inputs.aws_secret_access_key || secrets.AWS_SECRET_ACCESS_KEY }}
+          aws_session_token: ${{ inputs.aws_session_token || secrets.AWS_SESSION_TOKEN }}
           aws_region: ${{ vars.AWS_REGION || 'us-east-1' }}
 
       - name: Session Manager plugin
@@ -279,6 +284,7 @@ jobs:
           PRICING_DEFAULT_DISTANCE_KM: ${{ vars.PRICING_DEFAULT_DISTANCE_KM }}
           PRICING_ORIGIN_POSTAL_CODE: ${{ vars.PRICING_ORIGIN_POSTAL_CODE }}
           PRICING_DISTANCE_LOOKUP_ENABLED: ${{ vars.PRICING_DISTANCE_LOOKUP_ENABLED }}
+          APP_SEED_DATA_SQL: ${{ vars.APP_SEED_DATA_SQL }}
         working-directory: deploy-pipeline/ansible
         run: |
           set -euo pipefail
@@ -310,12 +316,13 @@ jobs:
               "PRICING_DEFAULT_DISTANCE_KM",
               "PRICING_ORIGIN_POSTAL_CODE",
               "PRICING_DISTANCE_LOOKUP_ENABLED",
+              "APP_SEED_DATA_SQL",
           )
           overlay = {k: os.environ[k] for k in keys if os.environ.get(k, "").strip()}
           path = Path("rest-profile-overlay.json")
           path.write_text(json.dumps({"rest_profile_overlay": overlay}))
           path.chmod(0o600)
-          print(f"Pricing overlay keys: {', '.join(sorted(overlay)) or '(none — SM/app defaults)'}")
+          print(f"REST overlay keys: {', '.join(sorted(overlay)) or '(none — SM/app defaults)'}")
           PY
           ansible-playbook playbooks/rest.yml \
             --limit rest \
@@ -351,9 +358,9 @@ jobs:
 
       - uses: ./.github/actions/resolve-vocareum-aws
         with:
-          aws_access_key_id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws_secret_access_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws_session_token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws_access_key_id: ${{ inputs.aws_access_key_id || secrets.AWS_ACCESS_KEY_ID }}
+          aws_secret_access_key: ${{ inputs.aws_secret_access_key || secrets.AWS_SECRET_ACCESS_KEY }}
+          aws_session_token: ${{ inputs.aws_session_token || secrets.AWS_SESSION_TOKEN }}
           aws_region: ${{ vars.AWS_REGION || 'us-east-1' }}
 
       - name: SSM GET :8080 on asg-rest
