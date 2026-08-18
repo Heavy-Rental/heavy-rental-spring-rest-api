@@ -1,5 +1,7 @@
 package com.heavy_rental.rest_api.service;
 
+import java.util.List;
+
 import org.springframework.http.HttpStatus;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
@@ -29,6 +31,24 @@ public class CurrentUserService {
 
     public void assertOwnerOrAdmin(Jwt jwt, User owner) {
         if (JwtService.rolesFrom(jwt).contains("ROLE_ADMIN")) {
+            return;
+        }
+        String email = jwt.getSubject();
+        if (owner == null || owner.getEmail() == null || !owner.getEmail().equalsIgnoreCase(email)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "You do not have access to this resource");
+        }
+    }
+
+    /**
+     * Same as {@link #assertOwnerOrAdmin}, but also bypasses ownership for {@code ROLE_DRIVER} —
+     * for the mobile ops app's booking screens, where drivers (not just admins) legitimately need
+     * every customer's booking, not only their own. Deliberately separate from
+     * {@code assertOwnerOrAdmin}, which stays admin-only for payments/recommendations, where a
+     * driver has no business bypassing ownership.
+     */
+    public void assertOwnerOrStaff(Jwt jwt, User owner) {
+        List<String> roles = JwtService.rolesFrom(jwt);
+        if (roles.contains("ROLE_ADMIN") || roles.contains("ROLE_DRIVER")) {
             return;
         }
         String email = jwt.getSubject();

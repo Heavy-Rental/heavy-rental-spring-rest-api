@@ -32,6 +32,7 @@ import com.heavy_rental.rest_api.repository.BookingItemRepository;
 import com.heavy_rental.rest_api.repository.BookingRepository;
 import com.heavy_rental.rest_api.repository.RentalPlanRecordRepository;
 import com.heavy_rental.rest_api.repository.RentalPlanRepository;
+import com.heavy_rental.rest_api.security.JwtService;
 
 @Service
 public class BookingService {
@@ -212,20 +213,29 @@ public class BookingService {
     }
 
     @Transactional(readOnly = true)
-    public List<BookingResponse> getBookings() {
-        return bookingRepository.findAll().stream()
+    public List<BookingResponse> getBookings(Jwt jwt) {
+        if (isStaff(jwt)) {
+            return bookingRepository.findAll().stream()
+                    .map(this::toResponse)
+                    .toList();
+        }
+        User customer = currentUserService.getUser(jwt);
+        return bookingRepository.findByCustomerId(customer.getId()).stream()
                 .map(this::toResponse)
                 .toList();
     }
 
     @Transactional(readOnly = true)
-    public BookingResponse getBooking(Long bookingId) {
-        return toResponse(findByIdOr404(bookingId));
+    public BookingResponse getBooking(Long bookingId, Jwt jwt) {
+        Booking booking = findByIdOr404(bookingId);
+        currentUserService.assertOwnerOrStaff(jwt, booking.getCustomer());
+        return toResponse(booking);
     }
 
     @Transactional
-    public BookingResponse updateBooking(Long bookingId, BookingUpdateRequest request) {
+    public BookingResponse updateBooking(Long bookingId, BookingUpdateRequest request, Jwt jwt) {
         Booking booking = findByIdOr404(bookingId);
+        currentUserService.assertOwnerOrStaff(jwt, booking.getCustomer());
 
         booking.setStartDate(request.startDate());
         booking.setEndDate(request.endDate());
@@ -236,13 +246,9 @@ public class BookingService {
         return toResponse(booking);
     }
 
-    @Transactional
-    public BookingResponse updateStatus(Long bookingId, String requestedStatus) {
-        Booking booking = findByIdOr404(bookingId);
-        Booking.BookingStatus status = parseStatusOr400(requestedStatus);
-        booking.setStatus(status);
-        bookingRepository.save(booking);
-        return toResponse(booking);
+    private boolean isStaff(Jwt jwt) {
+        List<String> roles = JwtService.rolesFrom(jwt);
+        return roles.contains("ROLE_ADMIN") || roles.contains("ROLE_DRIVER");
     }
 
     private BookingResponse toResponse(Booking booking) {

@@ -35,16 +35,16 @@ May also include amount fields when booking-create branch is present (`totalAmou
 
 ## Routes
 
-| Method | Path | Body | Success |
-|--------|------|------|---------|
-| `GET` | `/api/bookings` | — | `BookingResponse[]` |
-| `GET` | `/api/bookings/{id}` | — | `BookingResponse` |
-| `PUT` | `/api/bookings/{id}` | `BookingUpdateRequest` (`siteAddress` MUST end with a 6-digit postal code or `400 validation_failed`) | `BookingResponse` |
-| `GET` | `/api/deliveries` | — | `DeliveryItemResponse[]` |
-| `PATCH` | `/api/deliveries/{id}/status` | `{ "bookingStatus": "MOBILISED" }` | `DeliveryItemResponse` |
-| `GET` | `/api/returns` | — | `ReturnItemResponse[]` (incl. `returnNotes`) |
-| `PATCH` | `/api/returns/{id}/status` | `{ "bookingStatus":"COMPLETED", "returnNotes"? }` | `ReturnItemResponse` |
+| Method | Path | Roles | Body | Success |
+|--------|------|-------|------|---------|
+| `GET` | `/api/bookings` | USER (own only) / ADMIN / DRIVER | — | `BookingResponse[]` |
+| `GET` | `/api/bookings/{id}` | USER (own only, else `403`) / ADMIN / DRIVER | — | `BookingResponse` |
+| `PUT` | `/api/bookings/{id}` | USER (own only, else `403`) / ADMIN / DRIVER | `BookingUpdateRequest` (`siteAddress` MUST end with a 6-digit postal code or `400 validation_failed`) | `BookingResponse` |
+| `GET` | `/api/deliveries` | ADMIN / DRIVER only | — | `DeliveryItemResponse[]` |
+| `PATCH` | `/api/deliveries/{id}/status` | ADMIN / DRIVER only | `{ "bookingStatus": "MOBILISED" }` | `DeliveryItemResponse` |
+| `GET` | `/api/returns` | ADMIN / DRIVER only | — | `ReturnItemResponse[]` (incl. `returnNotes`) |
+| `PATCH` | `/api/returns/{id}/status` | ADMIN / DRIVER only | `{ "bookingStatus":"COMPLETED", "returnNotes"? }` | `ReturnItemResponse` |
 
-Errors: shared `{ "error", "message" }` — `400` invalid transition/enum or `validation_failed` (bad `siteAddress`), `404` missing.
+Errors: shared `{ "error", "message" }` — `400` invalid transition/enum or `validation_failed` (bad `siteAddress`), `403` role/ownership denied, `404` missing.
 
 `POST /api/bookings` (create): `siteAddress` postal-code rule on `CreateBookingRequest`. With `rentalPlanId`, items/dates are ignored and the booking is derived from the plan — [`../../rental-plan-quote/contracts/checkout.md`](../../rental-plan-quote/contracts/checkout.md). Direct create uses inclusive day count (FR-BDR-010). Extra `409` codes: `quote_not_ready`, `quote_expired`.

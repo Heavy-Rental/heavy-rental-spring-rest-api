@@ -14,20 +14,20 @@ Legend: **Shared** = web + mobile; **Web** / **Mobile** / **Admin** = primary cl
 | `GET` | `/api/auth/getBearerToken` | Public | [auth-interim-token](../../auth-interim-token/) |
 | `POST` | `/api/auth/login` | `ROLE_INTERIM` | [auth-login-logout](../../auth-login-logout/) |
 | `POST` | `/api/auth/google` | `ROLE_INTERIM` | [auth-login-logout](../../auth-login-logout/) — mobile-only; auto-provisions `ROLE_DRIVER` on first sign-in |
-| `POST` | `/api/auth/logout` | `ROLE_USER`, `ROLE_ADMIN` | [auth-login-logout](../../auth-login-logout/) |
+| `POST` | `/api/auth/logout` | `ROLE_USER`, `ROLE_ADMIN`, `ROLE_DRIVER` | [auth-login-logout](../../auth-login-logout/) |
 
 ## Bookings / deliveries / returns / payments
 
 | Method | Path | Client | Roles | Contract |
 |--------|------|--------|-------|----------|
 | `POST` | `/api/bookings` | Shared | USER/ADMIN (caller = customer) | create + plan-backed checkout [booking-delivery-return](../../booking-delivery-return/) · [checkout](../../rental-plan-quote/contracts/checkout.md) |
-| `GET` | `/api/bookings` | Mobile+ | USER/ADMIN | [booking-delivery-return](../../booking-delivery-return/) |
-| `GET` | `/api/bookings/{id}` | Mobile+ | USER/ADMIN | same |
-| `PUT` | `/api/bookings/{id}` | Mobile+ | USER/ADMIN | same |
-| `GET` | `/api/deliveries` | Mobile | USER/ADMIN | same |
-| `PATCH` | `/api/deliveries/{id}/status` | Mobile | USER/ADMIN | same |
-| `GET` | `/api/returns` | Mobile | USER/ADMIN | same |
-| `PATCH` | `/api/returns/{id}/status` | Mobile | USER/ADMIN | same |
+| `GET` | `/api/bookings` | Mobile+ | USER (own only) / ADMIN / DRIVER | [booking-delivery-return](../../booking-delivery-return/) |
+| `GET` | `/api/bookings/{id}` | Mobile+ | USER (own only, else `403`) / ADMIN / DRIVER | same |
+| `PUT` | `/api/bookings/{id}` | Mobile+ | USER (own only, else `403`) / ADMIN / DRIVER | same |
+| `GET` | `/api/deliveries` | Mobile | `ROLE_ADMIN`/`ROLE_DRIVER` only | same |
+| `PATCH` | `/api/deliveries/{id}/status` | Mobile | `ROLE_ADMIN`/`ROLE_DRIVER` only | same |
+| `GET` | `/api/returns` | Mobile | `ROLE_ADMIN`/`ROLE_DRIVER` only | same |
+| `PATCH` | `/api/returns/{id}/status` | Mobile | `ROLE_ADMIN`/`ROLE_DRIVER` only | same |
 | `POST` | `/api/payments/deposit-intent` | Shared | USER/ADMIN (owner/admin) | [payments-stripe](../../payments-stripe/) |
 | `POST` | `/api/payments/webhook` | Stripe | Public + signature | [payments-stripe](../../payments-stripe/) |
 

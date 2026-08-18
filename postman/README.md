@@ -38,6 +38,10 @@ Routes other than interim token, login, health, and Stripe webhook need an **acc
 | `mei.lin@example.sg` | `customer456` | USER (no plans — cart → quote → checkout) |
 | `admin@localhost` | `admin1234` | ADMIN |
 
+No seed `DRIVER` account exists — a `ROLE_DRIVER` token can only be obtained via **Auth → 2b.
+Login with Google** (first-time sign-in auto-provisions one) or by promoting a seeded user's role
+directly in the DB.
+
 ## Folders
 
 | Folder | Notes |
@@ -46,8 +50,8 @@ Routes other than interim token, login, health, and Stripe webhook need an **acc
 | **1. Auth** | Interim → login/google → logout |
 | **2. Recommendations (S2b)** | Submit quote · knowledge-query · get session |
 | **3. Equipment** | Browse / CRUD |
-| **4. Bookings** | Direct create / **checkout from plan** / list / get / update |
-| **5. Deliveries & Returns** | List + status patch (`CONFIRMED→MOBILISED`, `MOBILISED→COMPLETED`) |
+| **4. Bookings** | Direct create / **checkout from plan** / list / get / update — list/get/update are ownership-scoped (USER sees only their own; ADMIN/DRIVER see all) |
+| **5. Deliveries & Returns** | List + status patch (`CONFIRMED→MOBILISED`, `MOBILISED→COMPLETED`) — **ADMIN/DRIVER only**, USER gets 403 |
 | **6. Payments** | Deposit intent (needs Stripe key); webhook (signature) |
 | **7. Rental Plans** | Create / list / get / add item / remove item / **update site address** / quote / cancel (`/api/rentalPlans`) |
 | **8. Stubs** | Depots empty list only |

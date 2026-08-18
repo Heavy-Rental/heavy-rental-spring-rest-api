@@ -442,6 +442,7 @@
     },
     {
       "name": "4. Bookings (mobile)",
+      "description": "List/get/update are ownership-scoped: a USER token only sees/edits their own bookings (403 on another customer's), ADMIN and DRIVER tokens see/edit every booking.",
       "item": [
         {
           "name": "Create booking",
@@ -552,6 +553,7 @@
     },
     {
       "name": "5. Deliveries & Returns",
+      "description": "ROLE_ADMIN or ROLE_DRIVER only — a USER token gets 403 on every route in this folder. Log in as admin@localhost, or as a driver via Auth → 2b. Login with Google, before running these.",
       "item": [
         {
           "name": "List deliveries",

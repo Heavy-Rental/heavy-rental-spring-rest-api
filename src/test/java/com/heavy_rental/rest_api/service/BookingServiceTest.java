@@ -9,6 +9,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -32,6 +35,7 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.server.ResponseStatusException;
 
 import com.heavy_rental.rest_api.dto.BookingResponse;
+import com.heavy_rental.rest_api.dto.BookingUpdateRequest;
 import com.heavy_rental.rest_api.dto.CreateBookingItemRequest;
 import com.heavy_rental.rest_api.dto.CreateBookingRequest;
 import com.heavy_rental.rest_api.entity.Asset;
@@ -72,7 +76,10 @@ class BookingServiceTest {
         customer.setEmail("mei.lin@example.sg");
 
         jwt = mock(Jwt.class);
-        when(currentUserService.getUser(jwt)).thenReturn(customer);
+        // Only the ownership-scoped branch of getBookings() reaches this; the staff (findAll)
+        // branch and the getBooking/updateBooking tests (which stub assertOwnerOrStaff instead)
+        // never touch it, so it must be lenient rather than required by every test.
+        lenient().when(currentUserService.getUser(jwt)).thenReturn(customer);
     }
 
     // Simulates IDENTITY generation: a real save() assigns an id to a new row. Only needed by
@@ -240,5 +247,124 @@ class BookingServiceTest {
         assertThat(response.totalAmount()).isEqualByComparingTo("1800.00"); // 450 x 4 inclusive days
         assertThat(response.depositAmount()).isEqualByComparingTo("540.00");
         assertThat(response.remainingBalance()).isEqualByComparingTo("1260.00");
+    }
+
+    // --- HR-189: mobile ops app authorization — bookings ownership vs. staff bypass ---------
+
+    private void stubRoles(String... roles) {
+        when(jwt.getClaim("roles")).thenReturn(List.of(roles));
+    }
+
+    private Booking bookingFor(Long id, User owner) {
+        Booking booking = new Booking();
+        booking.setId(id);
+        booking.setCustomer(owner);
+        booking.setStatus(Booking.BookingStatus.PENDING_DEPOSIT);
+        // Not reached by tests where the ownership check throws before toResponse() runs.
+        lenient().when(bookingItemRepository.findByBookingId(id)).thenReturn(List.of());
+        return booking;
+    }
+
+    @Test
+    void getBookings_forAdmin_returnsEveryCustomersBookings() {
+        stubRoles("ROLE_ADMIN");
+        User otherCustomer = new User();
+        otherCustomer.setId(2L);
+        Booking own = bookingFor(1L, customer);
+        Booking other = bookingFor(2L, otherCustomer);
+        when(bookingRepository.findAll()).thenReturn(List.of(own, other));
+
+        List<BookingResponse> result = service.getBookings(jwt);
+
+        assertThat(result).hasSize(2);
+        verify(bookingRepository, never()).findByCustomerId(any());
+    }
+
+    @Test
+    void getBookings_forDriver_returnsEveryCustomersBookings() {
+        stubRoles("ROLE_DRIVER");
+        User otherCustomer = new User();
+        otherCustomer.setId(2L);
+        Booking own = bookingFor(1L, customer);
+        Booking other = bookingFor(2L, otherCustomer);
+        when(bookingRepository.findAll()).thenReturn(List.of(own, other));
+
+        List<BookingResponse> result = service.getBookings(jwt);
+
+        assertThat(result).hasSize(2);
+        verify(bookingRepository, never()).findByCustomerId(any());
+    }
+
+    @Test
+    void getBookings_forCustomer_returnsOnlyTheirOwnBookings() {
+        stubRoles("ROLE_USER");
+        Booking own = bookingFor(1L, customer);
+        when(bookingRepository.findByCustomerId(customer.getId())).thenReturn(List.of(own));
+
+        List<BookingResponse> result = service.getBookings(jwt);
+
+        assertThat(result).hasSize(1);
+        verify(bookingRepository, never()).findAll();
+    }
+
+    // getBooking/updateBooking delegate the actual owner-vs-staff decision to
+    // CurrentUserService.assertOwnerOrStaff, which is mocked here (its own logic — ADMIN/DRIVER
+    // bypass, owner-email match — is covered directly by CurrentUserServiceTest). What
+    // BookingService itself is responsible for, and what these tests verify: it asks the right
+    // question (correct booking owner) before returning/mutating, propagates a denial without
+    // mutating, and proceeds normally when allowed.
+
+    @Test
+    void getBooking_returnsBookingWhenOwnershipCheckPasses() {
+        Booking booking = bookingFor(1L, customer);
+        when(bookingRepository.findById(1L)).thenReturn(Optional.of(booking));
+
+        BookingResponse response = service.getBooking(1L, jwt);
+
+        assertThat(response.bookingId()).isEqualTo(1L);
+        verify(currentUserService).assertOwnerOrStaff(jwt, customer);
+    }
+
+    @Test
+    void getBooking_propagatesForbiddenFromOwnershipCheck() {
+        Booking booking = bookingFor(1L, customer);
+        when(bookingRepository.findById(1L)).thenReturn(Optional.of(booking));
+        doThrow(new ResponseStatusException(HttpStatus.FORBIDDEN, "You do not have access to this resource"))
+                .when(currentUserService).assertOwnerOrStaff(eq(jwt), any(User.class));
+
+        assertThatThrownBy(() -> service.getBooking(1L, jwt))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(ex -> assertThat(((ResponseStatusException) ex).getStatusCode())
+                        .isEqualTo(HttpStatus.FORBIDDEN));
+    }
+
+    @Test
+    void updateBooking_propagatesForbiddenAndDoesNotSave() {
+        Booking booking = bookingFor(1L, customer);
+        when(bookingRepository.findById(1L)).thenReturn(Optional.of(booking));
+        doThrow(new ResponseStatusException(HttpStatus.FORBIDDEN, "You do not have access to this resource"))
+                .when(currentUserService).assertOwnerOrStaff(eq(jwt), any(User.class));
+
+        BookingUpdateRequest request = new BookingUpdateRequest(
+                LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 5), "1 Test St, 123456", null);
+
+        assertThatThrownBy(() -> service.updateBooking(1L, request, jwt))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(ex -> assertThat(((ResponseStatusException) ex).getStatusCode())
+                        .isEqualTo(HttpStatus.FORBIDDEN));
+        verify(bookingRepository, never()).save(any(Booking.class));
+    }
+
+    @Test
+    void updateBooking_updatesWhenOwnershipCheckPasses() {
+        Booking booking = bookingFor(1L, customer);
+        when(bookingRepository.findById(1L)).thenReturn(Optional.of(booking));
+
+        BookingUpdateRequest request = new BookingUpdateRequest(
+                LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 5), "1 Test St, 123456", null);
+        BookingResponse response = service.updateBooking(1L, request, jwt);
+
+        assertThat(response.siteAddress()).isEqualTo("1 Test St, 123456");
+        verify(bookingRepository).save(any(Booking.class));
     }
 }

@@ -79,7 +79,7 @@ public class SecurityConfig {
 				.requestMatchers(HttpMethod.POST, "/api/auth/login").hasAuthority("ROLE_INTERIM")
 				.requestMatchers(HttpMethod.POST, "/api/auth/google").hasAuthority("ROLE_INTERIM")
 				.requestMatchers(HttpMethod.POST, "/api/auth/logout")
-					.hasAnyAuthority("ROLE_USER", "ROLE_ADMIN")
+					.hasAnyAuthority("ROLE_USER", "ROLE_ADMIN", "ROLE_DRIVER")
 				.requestMatchers("/error").permitAll()
 				.requestMatchers("/actuator/health", "/actuator/info").permitAll()
 				.requestMatchers("/api/monthly-utilization").hasAuthority("ROLE_ADMIN")
@@ -91,6 +91,12 @@ public class SecurityConfig {
 				// Stripe cannot present a JWT; the Stripe-Signature check inside the
 				// controller is the auth mechanism for this one route.
 				.requestMatchers(HttpMethod.POST, "/api/payments/webhook").permitAll()
+				// Mobile ops app (bookings/deliveries/returns): drivers need bookings for shared
+				// state, plus deliveries/returns for dispatch — but nothing else the catch-all
+				// below covers (assets, rental plans, payments, recommendations, admin routes).
+				.requestMatchers("/api/bookings/**").hasAnyAuthority("ROLE_USER", "ROLE_ADMIN", "ROLE_DRIVER")
+				.requestMatchers("/api/deliveries/**").hasAnyAuthority("ROLE_ADMIN", "ROLE_DRIVER")
+				.requestMatchers("/api/returns/**").hasAnyAuthority("ROLE_ADMIN", "ROLE_DRIVER")
 				.anyRequest().hasAnyAuthority("ROLE_USER", "ROLE_ADMIN"))
 			.oauth2ResourceServer(oauth2 -> oauth2
 				.jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter()))
