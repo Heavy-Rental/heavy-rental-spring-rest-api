@@ -7,9 +7,19 @@
 #   2. A pull request is opened/updated from develop → master
 #
 # Do NOT set `environment:` on this caller job (invalid with uses:).
-# Release QC starts a local Docker Postgres from workflow env (QC_POSTGRES_*).
-# Do not add REST_API_CLOUD_DB_* or REST_API_DB_* here. Academy RDS is
-# Secrets Manager heavy-rental/rest (infra sync-secrets), not GitHub.
+# QC inside the reusable workflow uses environment: production.
+#
+# Add secrets (Environment "production" and/or Repository secrets):
+#   REST_API_DB_NAME
+#   REST_API_DB_USER
+#   REST_API_DB_PASSWORD
+#   REST_API_DB_PORT
+#
+# REST_API_DB_URL is optional — after Docker Postgres starts, QC builds:
+#   jdbc:postgresql://localhost:<PORT>/<NAME>
+#
+# These start a local Docker Postgres for tests. They are not Academy RDS.
+# Guest CD reads heavy-rental/rest (infra sync-secrets).
 # =============================================================================
 
 name: Release
@@ -41,3 +51,10 @@ jobs:
        github.head_ref == 'develop' &&
        github.base_ref == 'master')
     uses: ./.github/workflows/release-pipeline.yml
+    with:
+      github_environment: production
+    secrets:
+      REST_API_DB_NAME: ${{ secrets.REST_API_DB_NAME }}
+      REST_API_DB_USER: ${{ secrets.REST_API_DB_USER }}
+      REST_API_DB_PASSWORD: ${{ secrets.REST_API_DB_PASSWORD }}
+      REST_API_DB_PORT: ${{ secrets.REST_API_DB_PORT }}
