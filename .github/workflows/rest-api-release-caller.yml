@@ -6,25 +6,20 @@
 #   1. A GitHub Release is published, or
 #   2. A pull request is opened/updated from develop → master
 #
-# Secrets (in heavy-rental-spring-rest-api)
-# ----------------------------------------
 # Do NOT set `environment:` on this caller job (invalid with uses:).
 # QC inside the reusable workflow uses environment: production.
 #
 # Add secrets (Environment "production" and/or Repository secrets):
-#   REST_API_CLOUD_DB_HOST     e.g. mydb.postgres.database.azure.com
-#   REST_API_CLOUD_DB_NAME
-#   REST_API_CLOUD_DB_USER
-#   REST_API_CLOUD_DB_PASSWORD
-#   REST_API_CLOUD_DB_PORT
+#   REST_API_DB_NAME
+#   REST_API_DB_USER
+#   REST_API_DB_PASSWORD
+#   REST_API_DB_PORT
 #
-# JDBC URLs are derived (not secrets):
-#   QC tests:    jdbc:postgresql://localhost:<PORT>/<NAME>
-#   Cloud deploy: jdbc:postgresql://<HOST>:<PORT>/<NAME>
-# Packaging writes spring-datasource.env for deploy (no password).
+# REST_API_DB_URL is optional — after Docker Postgres starts, QC builds:
+#   jdbc:postgresql://localhost:<PORT>/<NAME>
 #
-# explicit secrets: map forwards repository secrets; Environment secrets load on QC
-# via environment: production (PR develop→master and published release).
+# These start a local Docker Postgres for tests. They are not Academy RDS.
+# Guest CD reads heavy-rental/rest (infra sync-secrets).
 # =============================================================================
 
 name: Release
@@ -58,10 +53,8 @@ jobs:
     uses: ./.github/workflows/release-pipeline.yml
     with:
       github_environment: production
-    # Explicit secrets only (Semgrep: avoid secrets: inherit)
     secrets:
-      REST_API_CLOUD_DB_HOST: ${{ secrets.REST_API_CLOUD_DB_HOST }}
-      REST_API_CLOUD_DB_NAME: ${{ secrets.REST_API_CLOUD_DB_NAME }}
-      REST_API_CLOUD_DB_USER: ${{ secrets.REST_API_CLOUD_DB_USER }}
-      REST_API_CLOUD_DB_PASSWORD: ${{ secrets.REST_API_CLOUD_DB_PASSWORD }}
-      REST_API_CLOUD_DB_PORT: ${{ secrets.REST_API_CLOUD_DB_PORT }}
+      REST_API_DB_NAME: ${{ secrets.REST_API_DB_NAME }}
+      REST_API_DB_USER: ${{ secrets.REST_API_DB_USER }}
+      REST_API_DB_PASSWORD: ${{ secrets.REST_API_DB_PASSWORD }}
+      REST_API_DB_PORT: ${{ secrets.REST_API_DB_PORT }}

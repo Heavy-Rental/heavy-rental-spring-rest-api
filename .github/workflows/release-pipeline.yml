@@ -26,8 +26,8 @@
 #   feature → develop (CI) → PR develop→master and/or publish GitHub Release
 #     → this pipeline
 #
-# Same gates as integration-pipeline.yml (secrets, Java 21, Maven, Postgres,
-# Semgrep, Trivy), plus Packaging for deploy consumers.
+# Same gates as integration-pipeline.yml (Java 21, Maven, local Docker
+# Postgres, Semgrep, Trivy), plus Packaging for deploy consumers.
 #
 # Packaging output (Spring Boot WAR + container image for deploy):
 #   ./mvnw -DskipTests package → target/*.war only (no JAR / java -jar image)
@@ -42,7 +42,8 @@
 #   Image saved as gzipped tar artifact; also pushed to GHCR outside PRs
 #   as ghcr.io/<owner>/heavy_rental_rest_api:<x.y.z> and :latest.
 #   <x.y.z> is the previous GHCR semver patch-bumped (first publish: 1.0.0).
-#   spring-datasource.env is a workflow artifact (no password), not copied into the image.
+#   spring-datasource.env is a workflow artifact (localhost JDBC, no
+#   password). Not copied into the image. Guest CD reads heavy-rental/rest.
 #
 # Application:
 #   https://github.com/SA62-team1/heavy-rental-spring-rest-api
@@ -69,35 +70,22 @@
 #   actionlint heavy-rental-rest-api/release-pipeline/release-pipeline.yml
 #   actionlint .github/workflows/rest-api-release.yml
 #
-# Required GitHub Actions secrets (no credentials in this YAML)
-# -------------------------------------------------------------
-# Configure under Settings → Secrets and variables → Actions on:
-#   - heavy-rental-spring-rest-api  (via rest-api-release-caller.yml + explicit secrets map)
-#
-# Cloud deployment secrets (distinct from CI REST_API_DB_* used by integration-pipeline).
-# Secrets (configure in the APPLICATION repo: heavy-rental-spring-rest-api)
-# -----------------------------------------------------------------------
 # Quality Control uses environment: production (hardcoded) and explicit secrets map.
 #
 # Recommended (either works):
 #   A) Settings → Environments → production → Environment secrets
 #   B) Settings → Secrets and variables → Actions → Repository secrets
 #
-# Names (exact match):
-#   REST_API_CLOUD_DB_HOST     Cloud Postgres hostname (e.g. db.example.com)
-#   REST_API_CLOUD_DB_NAME
-#   REST_API_CLOUD_DB_USER
-#   REST_API_CLOUD_DB_PASSWORD
-#   REST_API_CLOUD_DB_PORT
+# Names (exact match, same as Integration CI):
+#   REST_API_DB_NAME
+#   REST_API_DB_USER
+#   REST_API_DB_PASSWORD
+#   REST_API_DB_PORT
 #
-# JDBC URLs are derived (not stored as secrets):
-#   After Start PostgreSQL (for Spring tests on the runner):
-#     jdbc:postgresql://localhost:<PORT>/<NAME>
-#   Cloud JDBC (for packaging / deploy after QC):
-#     jdbc:postgresql://<HOST>:<PORT>/<NAME>
-#   Password is never embedded in either URL.
-#
-# Do not reuse REST_API_DB_* here — those are for integration CI.
+# REST_API_DB_URL is NOT required. After Start PostgreSQL, QC builds:
+#   jdbc:postgresql://localhost:<PORT>/<NAME>
+# These start a local Docker Postgres for tests. They are not Academy RDS.
+# Guest CD reads heavy-rental/rest (infra sync-secrets).
 # Caller must use explicit secrets map. Do not set environment: on the caller uses: job.
 # Never commit real values.
 # =============================================================================
@@ -125,27 +113,25 @@ on:
         default: ""
       github_environment:
         description: >
-          GitHub Environment name for the Quality Control job (default production).
+          Unused. Kept so older callers that pass github_environment: production
+          still validate. Release QC does not load Environment secrets.
         required: false
         type: string
         default: production
     secrets:
-      REST_API_CLOUD_DB_HOST:
-        description: Cloud deploy — PostgreSQL hostname (not localhost)
+      REST_API_DB_NAME:
+        description: PostgreSQL database name (local Docker QC)
         required: false
-      REST_API_CLOUD_DB_NAME:
-        description: Cloud deploy — PostgreSQL database name
+      REST_API_DB_USER:
+        description: PostgreSQL username
         required: false
-      REST_API_CLOUD_DB_USER:
-        description: Cloud deploy — PostgreSQL username
+      REST_API_DB_PASSWORD:
+        description: PostgreSQL password
         required: false
-      REST_API_CLOUD_DB_PASSWORD:
-        description: Cloud deploy — PostgreSQL password
+      REST_API_DB_PORT:
+        description: Host port for CI Postgres container
         required: false
-      REST_API_CLOUD_DB_PORT:
-        description: Cloud deploy — PostgreSQL port (also mapped for local Docker tests)
-        required: false
-      # JDBC URLs are derived: localhost for QC tests, HOST for cloud deploy
+      # REST_API_DB_URL is derived after Docker Postgres starts (not a secret)
 
 # One run per release tag or develop→master PR; do not cancel in-flight packaging
 concurrency:
@@ -164,15 +150,19 @@ env:
   JAVA_VERSION: "21"
   JAVA_DISTRIBUTION: temurin
   APP_PATH: app
-  DEFAULT_APP_REPOSITORY: SA62-team1/heavy-rental-spring-rest-api
+  DEFAULT_APP_REPOSITORY: Heavy-Rental/heavy-rental-spring-rest-api
   DEFAULT_APP_REF: master
   # Docker image naming (Tomcat hosts the Spring Boot WAR)
   IMAGE_NAME: heavy_rental_rest_api
   TOMCAT_BASE_IMAGE: tomcat:10.1-jdk21-temurin
-  # Non-sensitive Spring/JPA settings only — credentials come from GitHub Secrets
+  # Non-sensitive Spring/JPA settings. QC Postgres is local Docker, not GitHub secrets.
   SPRING_DATASOURCE_DRIVER_CLASS_NAME: org.postgresql.Driver
   SPRING_JPA_DATABASE_PLATFORM: org.hibernate.dialect.PostgreSQLDialect
   MAVEN_OPTS: "-Dhttps.protocols=TLSv1.2 -Dmaven.wagon.http.retryHandler.count=3"
+  QC_POSTGRES_DB: heavy_rental
+  QC_POSTGRES_USER: heavy_rental
+  QC_POSTGRES_PASSWORD: rest-api-release-qc
+  QC_POSTGRES_PORT: "5432"
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -268,20 +258,20 @@ jobs:
 
       - name: Checkout calling repository (release / push head)
         if: steps.meta.outputs.checkout_mode == 'caller'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: ${{ env.APP_PATH }}
 
       - name: Checkout remote application repository
         if: steps.meta.outputs.checkout_mode == 'remote'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ${{ steps.meta.outputs.app_repository }}
           ref: ${{ steps.meta.outputs.app_ref }}
           path: ${{ env.APP_PATH }}
 
       - name: Setup Java ${{ env.JAVA_VERSION }}
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: ${{ env.JAVA_DISTRIBUTION }}
           java-version: ${{ env.JAVA_VERSION }}
@@ -338,7 +328,7 @@ jobs:
           echo "Integration checks passed."
 
       - name: Upload Maven project fingerprint
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-integration-metadata
           path: |
@@ -352,33 +342,23 @@ jobs:
     name: Quality Control
     runs-on: ubuntu-latest
     needs: [integration]
-    # Hardcoded Environment name (reliable for Environment secrets).
-    # Also receives repository secrets via explicit secrets map from the caller.
-    environment: production
+    # Local Docker Postgres from workflow env. No GitHub Environment secrets.
     timeout-minutes: 30
-    outputs:
-      # Cloud JDBC for packaging/deploy (host:port/db — no password)
-      cloud_jdbc_url: ${{ steps.dburl.outputs.cloud_jdbc_url }}
-      cloud_db_host: ${{ steps.dburl.outputs.cloud_db_host }}
-      cloud_db_port: ${{ steps.dburl.outputs.cloud_db_port }}
-      cloud_db_name: ${{ steps.dburl.outputs.cloud_db_name }}
     steps:
       - name: Verify required database secrets are configured
         env:
-          REST_API_CLOUD_DB_HOST: ${{ secrets.REST_API_CLOUD_DB_HOST }}
-          REST_API_CLOUD_DB_NAME: ${{ secrets.REST_API_CLOUD_DB_NAME }}
-          REST_API_CLOUD_DB_USER: ${{ secrets.REST_API_CLOUD_DB_USER }}
-          REST_API_CLOUD_DB_PASSWORD: ${{ secrets.REST_API_CLOUD_DB_PASSWORD }}
-          REST_API_CLOUD_DB_PORT: ${{ secrets.REST_API_CLOUD_DB_PORT }}
+          REST_API_DB_NAME: ${{ secrets.REST_API_DB_NAME }}
+          REST_API_DB_USER: ${{ secrets.REST_API_DB_USER }}
+          REST_API_DB_PASSWORD: ${{ secrets.REST_API_DB_PASSWORD }}
+          REST_API_DB_PORT: ${{ secrets.REST_API_DB_PORT }}
         run: |
           set -euo pipefail
           echo "Quality Control secrets source: GitHub Environment 'production' and/or repository secrets (via explicit secrets map)."
           missing=()
-          [ -n "${REST_API_CLOUD_DB_HOST}" ] || missing+=(REST_API_CLOUD_DB_HOST)
-          [ -n "${REST_API_CLOUD_DB_NAME}" ] || missing+=(REST_API_CLOUD_DB_NAME)
-          [ -n "${REST_API_CLOUD_DB_USER}" ] || missing+=(REST_API_CLOUD_DB_USER)
-          [ -n "${REST_API_CLOUD_DB_PASSWORD}" ] || missing+=(REST_API_CLOUD_DB_PASSWORD)
-          [ -n "${REST_API_CLOUD_DB_PORT}" ] || missing+=(REST_API_CLOUD_DB_PORT)
+          [ -n "${REST_API_DB_NAME}" ] || missing+=(REST_API_DB_NAME)
+          [ -n "${REST_API_DB_USER}" ] || missing+=(REST_API_DB_USER)
+          [ -n "${REST_API_DB_PASSWORD}" ] || missing+=(REST_API_DB_PASSWORD)
+          [ -n "${REST_API_DB_PORT}" ] || missing+=(REST_API_DB_PORT)
           if [ "${#missing[@]}" -gt 0 ]; then
             echo "::error::Missing required secrets: ${missing[*]}"
             echo ""
@@ -388,37 +368,35 @@ jobs:
             echo "  2) Settings → Secrets and variables → Actions → Repository secrets"
             echo ""
             echo "Required names (exact, case-sensitive):"
-            echo "  REST_API_CLOUD_DB_HOST, REST_API_CLOUD_DB_NAME, REST_API_CLOUD_DB_USER,"
-            echo "  REST_API_CLOUD_DB_PASSWORD, REST_API_CLOUD_DB_PORT"
-            echo "  (JDBC URLs are derived — localhost for tests, HOST for cloud deploy)"
+            echo "  REST_API_DB_NAME, REST_API_DB_USER, REST_API_DB_PASSWORD, REST_API_DB_PORT"
+            echo "  (REST_API_DB_URL is optional — built after Docker Postgres starts)"
             echo ""
             echo "Caller must include: explicit secrets map"
             echo "This job uses: environment: production"
-            echo "Do not use REST_API_DB_* here (those are for CI / Environment integration)."
             exit 1
           fi
-          if ! [[ "${REST_API_CLOUD_DB_PORT}" =~ ^[0-9]+$ ]]; then
-            echo "::error::REST_API_CLOUD_DB_PORT must be a numeric TCP port."
+          if ! [[ "${REST_API_DB_PORT}" =~ ^[0-9]+$ ]]; then
+            echo "::error::REST_API_DB_PORT must be a numeric TCP port."
             exit 1
           fi
-          echo "All required cloud secrets are present (values not logged)."
+          echo "All required database secrets are present (values not logged)."
 
       - name: Checkout calling repository (release / push head)
         if: needs.integration.outputs.checkout_mode == 'caller'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: ${{ env.APP_PATH }}
 
       - name: Checkout remote application repository
         if: needs.integration.outputs.checkout_mode == 'remote'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ${{ needs.integration.outputs.app_repository }}
           ref: ${{ needs.integration.outputs.app_ref }}
           path: ${{ env.APP_PATH }}
 
       - name: Setup Java ${{ env.JAVA_VERSION }}
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: ${{ env.JAVA_DISTRIBUTION }}
           java-version: ${{ env.JAVA_VERSION }}
@@ -429,66 +407,47 @@ jobs:
         working-directory: ${{ env.APP_PATH }}
         run: chmod +x ./mvnw
 
-      - name: Start PostgreSQL (Docker; cloud deploy secrets)
+      - name: Start PostgreSQL (Docker; credentials and port from secrets)
         id: dburl
         env:
-          REST_API_CLOUD_DB_HOST: ${{ secrets.REST_API_CLOUD_DB_HOST }}
-          REST_API_CLOUD_DB_NAME: ${{ secrets.REST_API_CLOUD_DB_NAME }}
-          REST_API_CLOUD_DB_USER: ${{ secrets.REST_API_CLOUD_DB_USER }}
-          REST_API_CLOUD_DB_PASSWORD: ${{ secrets.REST_API_CLOUD_DB_PASSWORD }}
-          REST_API_CLOUD_DB_PORT: ${{ secrets.REST_API_CLOUD_DB_PORT }}
+          REST_API_DB_NAME: ${{ secrets.REST_API_DB_NAME }}
+          REST_API_DB_USER: ${{ secrets.REST_API_DB_USER }}
+          REST_API_DB_PASSWORD: ${{ secrets.REST_API_DB_PASSWORD }}
+          REST_API_DB_PORT: ${{ secrets.REST_API_DB_PORT }}
         run: |
           set -euo pipefail
           docker rm -f rest-api-release-postgres >/dev/null 2>&1 || true
-          # Host port from secret → container listens on Postgres image default 5432
           docker run -d --name rest-api-release-postgres \
-            -e POSTGRES_DB="${REST_API_CLOUD_DB_NAME}" \
-            -e POSTGRES_USER="${REST_API_CLOUD_DB_USER}" \
-            -e POSTGRES_PASSWORD="${REST_API_CLOUD_DB_PASSWORD}" \
-            -p "${REST_API_CLOUD_DB_PORT}:5432" \
+            -e POSTGRES_DB="${REST_API_DB_NAME}" \
+            -e POSTGRES_USER="${REST_API_DB_USER}" \
+            -e POSTGRES_PASSWORD="${REST_API_DB_PASSWORD}" \
+            -p "${REST_API_DB_PORT}:5432" \
             postgres:16-alpine
 
-          # 1) Local JDBC for Spring tests on this runner (Docker Postgres)
-          LOCAL_JDBC="jdbc:postgresql://localhost:${REST_API_CLOUD_DB_PORT}/${REST_API_CLOUD_DB_NAME}"
-          # 2) Cloud JDBC for packaging/deploy after QC (uses cloud host secret)
-          CLOUD_JDBC="jdbc:postgresql://${REST_API_CLOUD_DB_HOST}:${REST_API_CLOUD_DB_PORT}/${REST_API_CLOUD_DB_NAME}"
-
-          # GITHUB_ENV: available to later steps in this QC job
+          JDBC_URL="jdbc:postgresql://localhost:${REST_API_DB_PORT}/${REST_API_DB_NAME}"
           {
-            echo "REST_API_CLOUD_DB_URL=${LOCAL_JDBC}"
-            echo "REST_API_CLOUD_DB_URL_CLOUD=${CLOUD_JDBC}"
-            echo "REST_API_CLOUD_DB_HOST=${REST_API_CLOUD_DB_HOST}"
-            echo "REST_API_CLOUD_DB_NAME=${REST_API_CLOUD_DB_NAME}"
-            echo "REST_API_CLOUD_DB_USER=${REST_API_CLOUD_DB_USER}"
-            echo "REST_API_CLOUD_DB_PORT=${REST_API_CLOUD_DB_PORT}"
+            echo "REST_API_DB_URL=${JDBC_URL}"
+            echo "REST_API_DB_NAME=${REST_API_DB_NAME}"
+            echo "REST_API_DB_USER=${REST_API_DB_USER}"
+            echo "REST_API_DB_PORT=${REST_API_DB_PORT}"
           } >> "$GITHUB_ENV"
 
-          # Job outputs: packaging (and other jobs after QC) use cloud JDBC with HOST
-          {
-            echo "cloud_jdbc_url=${CLOUD_JDBC}"
-            echo "cloud_db_host=${REST_API_CLOUD_DB_HOST}"
-            echo "cloud_db_port=${REST_API_CLOUD_DB_PORT}"
-            echo "cloud_db_name=${REST_API_CLOUD_DB_NAME}"
-          } >> "$GITHUB_OUTPUT"
-
           echo "PostgreSQL container started."
-          echo "Local test URL: jdbc:postgresql://localhost:${REST_API_CLOUD_DB_PORT}/<db>"
-          echo "Cloud deploy URL: jdbc:postgresql://<host>:${REST_API_CLOUD_DB_PORT}/<db> (host from REST_API_CLOUD_DB_HOST)."
+          echo "Derived REST_API_DB_URL=jdbc:postgresql://localhost:${REST_API_DB_PORT}/<db> (password not in URL)."
 
       - name: Wait for PostgreSQL
         env:
-          REST_API_CLOUD_DB_PORT: ${{ secrets.REST_API_CLOUD_DB_PORT }}
-          REST_API_CLOUD_DB_USER: ${{ secrets.REST_API_CLOUD_DB_USER }}
+          REST_API_DB_PORT: ${{ secrets.REST_API_DB_PORT }}
+          REST_API_DB_USER: ${{ secrets.REST_API_DB_USER }}
         run: |
           set -euo pipefail
-          PORT="${REST_API_CLOUD_DB_PORT}"
+          PORT="${REST_API_DB_PORT}"
           for i in $(seq 1 30); do
-            if docker exec rest-api-release-postgres pg_isready -U "${REST_API_CLOUD_DB_USER}" >/dev/null 2>&1; then
+            if docker exec rest-api-release-postgres pg_isready -U "${REST_API_DB_USER}" >/dev/null 2>&1; then
               echo "PostgreSQL is accepting connections on localhost:${PORT}"
               exit 0
             fi
             if timeout 1 bash -c "cat < /dev/null > /dev/tcp/127.0.0.1/${PORT}" 2>/dev/null; then
-              # TCP open; give pg_isready one more chance next loop
               :
             fi
             echo "Waiting for PostgreSQL... ($i)"
@@ -507,16 +466,16 @@ jobs:
         env:
           # Spring Boot binds these env vars automatically — do not pass passwords
           # on the Maven CLI (would appear in process listings).
-          # REST_API_CLOUD_DB_URL was built after Start PostgreSQL and written to GITHUB_ENV.
-          SPRING_DATASOURCE_URL: ${{ env.REST_API_CLOUD_DB_URL }}
-          SPRING_DATASOURCE_USERNAME: ${{ secrets.REST_API_CLOUD_DB_USER }}
-          SPRING_DATASOURCE_PASSWORD: ${{ secrets.REST_API_CLOUD_DB_PASSWORD }}
+          # REST_API_DB_URL was built after Start PostgreSQL and written to GITHUB_ENV.
+          SPRING_DATASOURCE_URL: ${{ env.REST_API_DB_URL }}
+          SPRING_DATASOURCE_USERNAME: ${{ secrets.REST_API_DB_USER }}
+          SPRING_DATASOURCE_PASSWORD: ${{ secrets.REST_API_DB_PASSWORD }}
           SPRING_DATASOURCE_DRIVER_CLASS_NAME: ${{ env.SPRING_DATASOURCE_DRIVER_CLASS_NAME }}
           SPRING_JPA_DATABASE_PLATFORM: ${{ env.SPRING_JPA_DATABASE_PLATFORM }}
         run: |
           set -euo pipefail
-          if [ -z "${REST_API_CLOUD_DB_URL:-}" ]; then
-            echo "::error::REST_API_CLOUD_DB_URL is empty — Start PostgreSQL must export it via GITHUB_ENV."
+          if [ -z "${REST_API_DB_URL:-}" ]; then
+            echo "::error::REST_API_DB_URL is empty — Start PostgreSQL must export it via GITHUB_ENV."
             exit 1
           fi
           echo "Running tests with SPRING_DATASOURCE_URL derived from Docker Postgres (password not logged)."
@@ -564,7 +523,7 @@ jobs:
 
       - name: Upload test reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-quality-test-reports
           path: |
@@ -575,7 +534,7 @@ jobs:
           if-no-files-found: warn
 
       - name: Upload packaged artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: rest-api-release-build
           path: |
@@ -596,13 +555,13 @@ jobs:
     steps:
       - name: Checkout calling repository (release / push head)
         if: needs.integration.outputs.checkout_mode == 'caller'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: ${{ env.APP_PATH }}
 
       - name: Checkout remote application repository
         if: needs.integration.outputs.checkout_mode == 'remote'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ${{ needs.integration.outputs.app_repository }}
           ref: ${{ needs.integration.outputs.app_ref }}
@@ -613,7 +572,7 @@ jobs:
 
       # --- SAST: static analysis (standard report format: SARIF) ---
       - name: Setup Python (Semgrep)
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -671,7 +630,7 @@ jobs:
 
       # --- SCA + filesystem: dependency and secret/vuln scan via Trivy (SARIF) ---
       - name: Setup Java ${{ env.JAVA_VERSION }} (for dependency resolution before scan)
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: ${{ env.JAVA_DISTRIBUTION }}
           java-version: ${{ env.JAVA_VERSION }}
@@ -695,7 +654,7 @@ jobs:
         run: echo "week=$(date -u +%Y-W%V)" >> "$GITHUB_OUTPUT"
 
       - name: Cache Trivy DBs
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ github.workspace }}/.cache/trivy
           key: trivy-db-${{ runner.os }}-${{ steps.trivy-cache-meta.outputs.week }}
@@ -769,7 +728,7 @@ jobs:
 
       - name: Upload security reports (SARIF)
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-security-reports-sarif
           path: |
@@ -794,13 +753,13 @@ jobs:
     steps:
       - name: Checkout calling repository (release / push head)
         if: needs.integration.outputs.checkout_mode == 'caller'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: ${{ env.APP_PATH }}
 
       - name: Checkout remote application repository
         if: needs.integration.outputs.checkout_mode == 'remote'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ${{ needs.integration.outputs.app_repository }}
           ref: ${{ needs.integration.outputs.app_ref }}
@@ -815,7 +774,7 @@ jobs:
           queries: security-and-quality
 
       - name: Setup Java ${{ env.JAVA_VERSION }}
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: ${{ env.JAVA_DISTRIBUTION }}
           java-version: ${{ env.JAVA_VERSION }}
@@ -868,58 +827,34 @@ jobs:
     runs-on: ubuntu-latest
     # Integration first; packaging waits for QC, Security, and CodeQL
     needs: [integration, quality-control, security-testing, codeql]
-    # Same Environment as QC so cloud secrets are available if rebuild is needed
     environment: production
     timeout-minutes: 30
     steps:
-      - name: Resolve cloud JDBC URL (from QC outputs / secrets)
-        id: cloud-jdbc
+      - name: Write datasource env template
         env:
-          # Prefer URL built in QC (includes REST_API_CLOUD_DB_HOST)
-          QC_CLOUD_JDBC: ${{ needs.quality-control.outputs.cloud_jdbc_url }}
-          REST_API_CLOUD_DB_HOST: ${{ secrets.REST_API_CLOUD_DB_HOST }}
-          REST_API_CLOUD_DB_NAME: ${{ secrets.REST_API_CLOUD_DB_NAME }}
-          REST_API_CLOUD_DB_PORT: ${{ secrets.REST_API_CLOUD_DB_PORT }}
-          REST_API_CLOUD_DB_USER: ${{ secrets.REST_API_CLOUD_DB_USER }}
+          REST_API_DB_NAME: ${{ secrets.REST_API_DB_NAME }}
+          REST_API_DB_USER: ${{ secrets.REST_API_DB_USER }}
+          REST_API_DB_PORT: ${{ secrets.REST_API_DB_PORT }}
         run: |
           set -euo pipefail
-          if [ -n "${QC_CLOUD_JDBC}" ]; then
-            CLOUD_JDBC="${QC_CLOUD_JDBC}"
-            echo "Using cloud JDBC URL from Quality Control job outputs."
-          else
-            # Rebuild if outputs missing (same formula as QC)
-            if [ -z "${REST_API_CLOUD_DB_HOST}" ] || [ -z "${REST_API_CLOUD_DB_NAME}" ] || [ -z "${REST_API_CLOUD_DB_PORT}" ]; then
-              echo "::error::Cannot build cloud JDBC URL: need QC outputs or REST_API_CLOUD_DB_HOST/NAME/PORT secrets."
-              exit 1
-            fi
-            CLOUD_JDBC="jdbc:postgresql://${REST_API_CLOUD_DB_HOST}:${REST_API_CLOUD_DB_PORT}/${REST_API_CLOUD_DB_NAME}"
-            echo "Rebuilt cloud JDBC URL from production secrets."
-          fi
-          {
-            echo "cloud_jdbc_url=${CLOUD_JDBC}"
-          } >> "$GITHUB_OUTPUT"
-          {
-            echo "REST_API_CLOUD_DB_URL_CLOUD=${CLOUD_JDBC}"
-          } >> "$GITHUB_ENV"
-          # Deploy env file for overall-project-deploy (no password)
+          LOCAL_JDBC="jdbc:postgresql://localhost:${REST_API_DB_PORT}/${REST_API_DB_NAME}"
           mkdir -p "${GITHUB_WORKSPACE}/release-deploy-config"
           {
-            echo "# Generated by rest-api release packaging — cloud datasource (no password)"
-            echo "SPRING_DATASOURCE_URL=${CLOUD_JDBC}"
-            echo "SPRING_DATASOURCE_USERNAME=${REST_API_CLOUD_DB_USER}"
+            echo "# Generated by rest-api release packaging — local QC JDBC (no password)."
+            echo "# Guest compose reads heavy-rental/rest (infra sync-secrets)."
+            echo "SPRING_DATASOURCE_URL=${LOCAL_JDBC}"
+            echo "SPRING_DATASOURCE_USERNAME=${REST_API_DB_USER}"
             echo "SPRING_DATASOURCE_DRIVER_CLASS_NAME=org.postgresql.Driver"
             echo "SPRING_JPA_DATABASE_PLATFORM=org.hibernate.dialect.PostgreSQLDialect"
-            echo "# Set SPRING_DATASOURCE_PASSWORD from production secret at deploy time"
+            echo "# Set SPRING_DATASOURCE_PASSWORD and replace URL from Secrets Manager at deploy."
           } > "${GITHUB_WORKSPACE}/release-deploy-config/spring-datasource.env"
           {
-            echo "### Cloud JDBC (for deploy)"
+            echo "### Datasource env artifact"
             echo ""
-            echo "Built after Quality Control using \`REST_API_CLOUD_DB_HOST\`."
-            echo ""
-            echo "\`SPRING_DATASOURCE_URL\` = \`jdbc:postgresql://<host>:<port>/<db>\` (password not stored in artifact)."
+            echo "Localhost QC URL from \`REST_API_DB_*\` (no password). Academy CD does not use this file."
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload cloud deploy datasource config
+      - name: Upload datasource env template
         uses: actions/upload-artifact@v4
         with:
           name: rest-api-release-cloud-datasource
@@ -929,20 +864,20 @@ jobs:
 
       - name: Checkout calling repository (release / push head)
         if: needs.integration.outputs.checkout_mode == 'caller'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: ${{ env.APP_PATH }}
 
       - name: Checkout remote application repository
         if: needs.integration.outputs.checkout_mode == 'remote'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ${{ needs.integration.outputs.app_repository }}
           ref: ${{ needs.integration.outputs.app_ref }}
           path: ${{ env.APP_PATH }}
 
       - name: Setup Java ${{ env.JAVA_VERSION }}
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: ${{ env.JAVA_DISTRIBUTION }}
           java-version: ${{ env.JAVA_VERSION }}
@@ -1110,7 +1045,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Upload target WAR/JAR build outputs
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: rest-api-release-target
           path: |
@@ -1120,7 +1055,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload versioned release package (WAR)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: rest-api-release-package
           path: |
@@ -1371,7 +1306,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload Docker image archive
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: rest-api-release-docker-image
           path: ${{ github.workspace }}/${{ steps.package.outputs.image_tar }}
@@ -1380,7 +1315,7 @@ jobs:
 
       - name: Login to GitHub Container Registry
         if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
