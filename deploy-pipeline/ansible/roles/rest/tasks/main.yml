@@ -86,10 +86,13 @@
   until: rest_health is succeeded
   failed_when: false
 
+# Prefer actuator (200 when UP). Spring Security often returns 401 on /.
+# curl -f on / fails the play even though Tomcat is up (CD verify accepts 401/403).
 - name: REST must answer on 8080
-  ansible.builtin.command: curl -fsS -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/
-  register: rest_code
+  ansible.builtin.uri:
+    url: http://127.0.0.1:8080/actuator/health
+    status_code: [200, 401, 403]
+  register: rest_live
   retries: 15
   delay: 5
-  until: rest_code.rc == 0 or (rest_code.stdout | default('000') | int) >= 200
-  changed_when: false
+  until: rest_live is succeeded
