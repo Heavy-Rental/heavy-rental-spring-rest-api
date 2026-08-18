@@ -284,7 +284,6 @@ jobs:
           PRICING_DEFAULT_DISTANCE_KM: ${{ vars.PRICING_DEFAULT_DISTANCE_KM }}
           PRICING_ORIGIN_POSTAL_CODE: ${{ vars.PRICING_ORIGIN_POSTAL_CODE }}
           PRICING_DISTANCE_LOOKUP_ENABLED: ${{ vars.PRICING_DISTANCE_LOOKUP_ENABLED }}
-          APP_SEED_DATA_SQL: ${{ vars.APP_SEED_DATA_SQL }}
         working-directory: deploy-pipeline/ansible
         run: |
           set -euo pipefail
@@ -316,13 +315,12 @@ jobs:
               "PRICING_DEFAULT_DISTANCE_KM",
               "PRICING_ORIGIN_POSTAL_CODE",
               "PRICING_DISTANCE_LOOKUP_ENABLED",
-              "APP_SEED_DATA_SQL",
           )
           overlay = {k: os.environ[k] for k in keys if os.environ.get(k, "").strip()}
           path = Path("rest-profile-overlay.json")
           path.write_text(json.dumps({"rest_profile_overlay": overlay}))
           path.chmod(0o600)
-          print(f"REST overlay keys: {', '.join(sorted(overlay)) or '(none — SM/app defaults)'}")
+          print(f"Pricing overlay keys: {', '.join(sorted(overlay)) or '(none — SM/app defaults)'}")
           PY
           ansible-playbook playbooks/rest.yml \
             --limit rest \
