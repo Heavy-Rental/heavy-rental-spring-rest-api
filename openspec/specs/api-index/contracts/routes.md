@@ -13,6 +13,7 @@ Legend: **Shared** = web + mobile; **Web** / **Mobile** / **Admin** = primary cl
 |--------|------|-------|----------|
 | `GET` | `/api/auth/getBearerToken` | Public | [auth-interim-token](../../auth-interim-token/) |
 | `POST` | `/api/auth/login` | `ROLE_INTERIM` | [auth-login-logout](../../auth-login-logout/) |
+| `POST` | `/api/auth/google` | `ROLE_INTERIM` | [auth-login-logout](../../auth-login-logout/) — mobile-only; auto-provisions `ROLE_DRIVER` on first sign-in |
 | `POST` | `/api/auth/logout` | `ROLE_USER`, `ROLE_ADMIN` | [auth-login-logout](../../auth-login-logout/) |
 
 ## Bookings / deliveries / returns / payments

@@ -27,6 +27,7 @@
     { "key": "rentalPlanItemId", "value": "1" },
     { "key": "equipmentId", "value": "1" },
     { "key": "correlationId", "value": "postman-corr-001" },
+    { "key": "googleIdToken", "value": "" },
     { "key": "postalCode", "value": "619094" }
   ],
   "item": [
@@ -48,7 +49,7 @@
     },
     {
       "name": "1. Auth",
-      "description": "Two-step JWT: interim (public) → login (ROLE_INTERIM) → access token (ROLE_USER/ADMIN).",
+      "description": "Two-step JWT: interim (public) → login/google (ROLE_INTERIM) → access token (ROLE_USER/ADMIN/DRIVER). `POST /api/auth/google` is the mobile ops app's sign-in path and only ever provisions `ROLE_DRIVER` accounts.",
       "item": [
         {
           "name": "1. Get interim Bearer token",
@@ -109,6 +110,42 @@
             },
             "url": "{{baseUrl}}/api/auth/login",
             "description": "Requires interim Bearer. Body: email + password. Saves `accessToken` for collection auth."
+          },
+          "response": []
+        },
+        {
+          "name": "2b. Login with Google (mobile)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('Has accessToken', () => pm.expect(body.accessToken).to.be.a('string').and.not.empty);",
+                  "pm.collectionVariables.set('accessToken', body.accessToken);",
+                  "console.log('accessToken saved; username=' + body.username);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{interimToken}}", "type": "string" }]
+            },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idToken\": \"{{googleIdToken}}\"\n}"
+            },
+            "url": "{{baseUrl}}/api/auth/google",
+            "description": "Mobile ops app only — alternative to Login using a Google ID token instead of a password. Requires interim Bearer. Set collection variable `googleIdToken` to a real Google-issued ID token (from Android Credential Manager) before running — there is no way to obtain one from Postman itself. First-time sign-in auto-provisions a `ROLE_DRIVER` account; an existing account keeps its current role."
           },
           "response": []
         },

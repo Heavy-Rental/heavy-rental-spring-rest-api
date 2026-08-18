@@ -77,6 +77,7 @@ public class SecurityConfig {
 			.authorizeHttpRequests(auth -> auth
 				.requestMatchers(HttpMethod.GET, "/api/auth/getBearerToken").permitAll()
 				.requestMatchers(HttpMethod.POST, "/api/auth/login").hasAuthority("ROLE_INTERIM")
+				.requestMatchers(HttpMethod.POST, "/api/auth/google").hasAuthority("ROLE_INTERIM")
 				.requestMatchers(HttpMethod.POST, "/api/auth/logout")
 					.hasAnyAuthority("ROLE_USER", "ROLE_ADMIN")
 				.requestMatchers("/error").permitAll()

@@ -10,17 +10,19 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.heavy_rental.rest_api.dto.GoogleLoginRequest;
 import com.heavy_rental.rest_api.dto.LoginRequest;
 import com.heavy_rental.rest_api.dto.LoginResponse;
 import com.heavy_rental.rest_api.dto.MessageResponse;
 import com.heavy_rental.rest_api.service.AuthService;
 
 /**
- * JWT authentication REST endpoints (multi-step: interim → login → logout).
+ * JWT authentication REST endpoints (multi-step: interim → login/google → logout).
  *
  * <ul>
  *   <li>{@code GET /api/auth/getBearerToken} — public interim JWT</li>
  *   <li>{@code POST /api/auth/login} — interim Bearer + credentials → access JWT</li>
+ *   <li>{@code POST /api/auth/google} — interim Bearer + Google ID token → access JWT</li>
  *   <li>{@code POST /api/auth/logout} — access Bearer → revoke</li>
  * </ul>
  */
@@ -34,10 +36,6 @@ public class Authentication {
 		this.authService = authService;
 	}
 
-	/**
-	 * Issue an interim JWT (random UUID + date/time, {@code ROLE_INTERIM}).
-	 * Plain text body, no {@code Bearer} prefix.
-	 */
 	@GetMapping(value = "/getBearerToken", produces = MediaType.TEXT_PLAIN_VALUE)
 	public ResponseEntity<String> getBearerToken() {
 		return ResponseEntity.ok()
@@ -45,10 +43,6 @@ public class Authentication {
 				.body(authService.getBearerToken());
 	}
 
-	/**
-	 * Authenticate with email/password using an interim Bearer token.
-	 * Returns a session access JWT.
-	 */
 	@PostMapping("/login")
 	public ResponseEntity<LoginResponse> login(
 			@AuthenticationPrincipal Jwt interimJwt,
@@ -57,8 +51,16 @@ public class Authentication {
 	}
 
 	/**
-	 * Revoke the current access Bearer token.
+	 * Authenticate with a Google-issued ID token using an interim Bearer token.
+	 * Returns a session access JWT; auto-provisions a ROLE_USER account on first sign-in.
 	 */
+	@PostMapping("/google")
+	public ResponseEntity<LoginResponse> loginWithGoogle(
+			@AuthenticationPrincipal Jwt interimJwt,
+			@RequestBody GoogleLoginRequest request) {
+		return ResponseEntity.ok(authService.loginWithGoogle(request, interimJwt));
+	}
+
 	@PostMapping("/logout")
 	public ResponseEntity<MessageResponse> logout(@AuthenticationPrincipal Jwt accessJwt) {
 		return ResponseEntity.ok(authService.logout(accessJwt));
