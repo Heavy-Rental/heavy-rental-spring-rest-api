@@ -12,12 +12,19 @@ Define as-built local/dev seeding via `src/main/resources/data.sql`: order, idem
 
 ### Requirement: FR-SEED-001 SQL init after schema
 
-The system MUST load `data.sql` after Hibernate schema update using `spring.jpa.defer-datasource-initialization=true` and `spring.sql.init.mode=always`. Seeding MUST NOT depend on a Java `ApplicationRunner` for the fleet catalog.
+The system MUST load `data.sql` after Hibernate schema update on the default profile using `spring.jpa.defer-datasource-initialization=true` and `spring.sql.init.mode=always`. Seeding MUST NOT depend on a Java `ApplicationRunner` for the fleet catalog. Production MUST keep `spring.sql.init.mode=never`. Production MAY run `data.sql` after Flyway when Academy overlay `APP_SEED_DATA_SQL=true` (`app.seed.data-sql`); the default is `false`.
 
 #### Scenario: Boot seeds tables
 - GIVEN a reachable Postgres and empty or existing schema
+- WHEN the application starts in the default profile
+- THEN Hibernate updates schema (Flyway is disabled)
+- AND `data.sql` runs after DDL and inserts/updates seed rows
+
+#### Scenario: Academy deploy opts into seed
+- GIVEN profile `prod` and `APP_SEED_DATA_SQL=true`
 - WHEN the application starts
-- THEN `data.sql` runs after DDL and inserts/updates seed rows
+- THEN Flyway migrates first
+- AND `data.sql` runs next (idempotent `ON CONFLICT`)
 
 ### Requirement: FR-SEED-002 FK dependency order
 
@@ -66,5 +73,4 @@ Seeded user plaintext passwords MAY be documented for local/dev only and MUST be
 
 ## Out of scope
 
-- Environment-profile gating of seed (none as-built)
-- Production data migration tooling
+- Moving seed rows into Flyway repeatable migrations (schema only; `data.sql` remains the seed SoT)

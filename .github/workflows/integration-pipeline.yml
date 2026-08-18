@@ -473,7 +473,7 @@ jobs:
             exit 1
           fi
           echo "Running tests with SPRING_DATASOURCE_URL derived from Docker Postgres (password not logged)."
-          # Use runner-native $GITHUB_WORKSPACE (never ${{ github.* }} inside run: scripts)
+          # Use runner-native $GITHUB_WORKSPACE (never github context interpolation inside run scripts)
           mkdir -p "${GITHUB_WORKSPACE}/test-reports"
           ./mvnw -B -ntp test
           # Collect surefire / failsafe reports when present

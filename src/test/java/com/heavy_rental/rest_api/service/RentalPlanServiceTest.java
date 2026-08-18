@@ -21,14 +21,17 @@ import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpStatus;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.web.server.ResponseStatusException;
 
 import com.heavy_rental.rest_api.dto.RentalPlanCreateRequest;
 import com.heavy_rental.rest_api.dto.RentalPlanItemRequest;
 import com.heavy_rental.rest_api.dto.RentalPlanResponse;
+import com.heavy_rental.rest_api.dto.RentalPlanUpdateRequest;
 import com.heavy_rental.rest_api.entity.Asset;
 import com.heavy_rental.rest_api.entity.RentalPlan;
 import com.heavy_rental.rest_api.entity.RentalPlanRecord;
@@ -48,14 +51,23 @@ class RentalPlanServiceTest {
     @Mock private UserRepository userRepository;
     @Mock private AssetRepository assetRepository;
     @Mock private PricingClient pricingClient;
+    @Mock private DynamicPricingService dynamicPricingService;
+    @Mock private PlatformTransactionManager transactionManager;
 
     private RentalPlanService service;
     private User customer;
 
     @BeforeEach
     void setUp() {
+        // dynamicPricingService.isEnabled() defaults to false (unstubbed boolean mock), so these
+        // existing tests exercise the pre-dynamic-pricing behavior unchanged.
+        // transactionManager is an unstubbed mock — TransactionTemplate.execute() just invokes
+        // the callback directly against it (getTransaction()/commit()/rollback() are no-ops),
+        // so requestQuote's two-phase read/write split runs synchronously here, same as real
+        // transactions would, without needing a real DB transaction manager.
         service = new RentalPlanService(
-                rentalPlanRepository, rentalPlanRecordRepository, userRepository, assetRepository, pricingClient);
+                rentalPlanRepository, rentalPlanRecordRepository, userRepository, assetRepository, pricingClient,
+                dynamicPricingService, transactionManager);
 
         customer = new User();
         customer.setId(1L);
@@ -94,7 +106,7 @@ class RentalPlanServiceTest {
         item.setSubtotal(new BigDecimal("2250.00"));
         when(rentalPlanRecordRepository.findByRentalPlanId(9L)).thenReturn(List.of(item));
 
-        RentalPlanResponse response = service.requestQuote(9L, EMAIL);
+        RentalPlanResponse response = service.requestQuote(9L, EMAIL, null);
 
         assertThat(response.status()).isEqualTo("QUOTED");
         assertThat(response.totalAmount()).isEqualByComparingTo("2250.00");
@@ -106,10 +118,87 @@ class RentalPlanServiceTest {
         RentalPlan plan = ownedPlan(9L, RentalPlan.PlanStatus.CONVERTED);
         when(rentalPlanRepository.findById(9L)).thenReturn(Optional.of(plan));
 
-        assertThatThrownBy(() -> service.requestQuote(9L, EMAIL))
+        assertThatThrownBy(() -> service.requestQuote(9L, EMAIL, null))
                 .isInstanceOf(ResponseStatusException.class)
                 .satisfies(ex -> assertThat(((ResponseStatusException) ex).getStatusCode())
                         .isEqualTo(HttpStatus.CONFLICT));
+    }
+
+    @Test
+    void requestQuote_withDynamicPricingEnabled_usesRefreshedPricesFromDynamicPricingService() {
+        RentalPlan plan = ownedPlan(9L, RentalPlan.PlanStatus.DRAFT);
+        when(rentalPlanRepository.findById(9L)).thenReturn(Optional.of(plan));
+
+        RentalPlanRecord item = new RentalPlanRecord();
+        item.setId(1L);
+        Asset asset = new Asset();
+        asset.setId(1L);
+        asset.setName("CAT 320 Excavator");
+        item.setAsset(asset);
+        item.setDailyRate(new BigDecimal("450.00"));
+        item.setSubtotal(new BigDecimal("2250.00"));
+        when(rentalPlanRecordRepository.findByRentalPlanId(9L)).thenReturn(List.of(item));
+
+        when(dynamicPricingService.isEnabled()).thenReturn(true);
+        when(dynamicPricingService.priceItems(eq(plan), eq(List.of(item)), any()))
+                .thenReturn(List.of(new PricingClient.ItemPrice(new BigDecimal("500.00"), new BigDecimal("2500.00"))));
+
+        RentalPlanResponse response = service.requestQuote(9L, EMAIL, null);
+
+        assertThat(response.status()).isEqualTo("QUOTED");
+        assertThat(response.totalAmount()).isEqualByComparingTo("2500.00");
+        assertThat(item.getDailyRate()).isEqualByComparingTo("500.00");
+        assertThat(item.getSubtotal()).isEqualByComparingTo("2500.00");
+        verify(rentalPlanRecordRepository).save(item);
+    }
+
+    @Test
+    void requestQuote_propagatesInboundCorrelationIdToDynamicPricingService() {
+        // The portal's X-Correlation-Id (RentalPlanController) must reach DynamicPricingService
+        // unchanged, same tracing convention as RecommenderSagaService — required so a customer's
+        // "Get Quote" request and its downstream haystack call share one correlation id in logs.
+        RentalPlan plan = ownedPlan(9L, RentalPlan.PlanStatus.DRAFT);
+        when(rentalPlanRepository.findById(9L)).thenReturn(Optional.of(plan));
+
+        RentalPlanRecord item = new RentalPlanRecord();
+        item.setId(1L);
+        Asset asset = new Asset();
+        asset.setId(1L);
+        item.setAsset(asset);
+        item.setDailyRate(new BigDecimal("450.00"));
+        item.setSubtotal(new BigDecimal("2250.00"));
+        when(rentalPlanRecordRepository.findByRentalPlanId(9L)).thenReturn(List.of(item));
+
+        when(dynamicPricingService.isEnabled()).thenReturn(true);
+        when(dynamicPricingService.priceItems(eq(plan), eq(List.of(item)), eq("corr-quote-1")))
+                .thenReturn(List.of(new PricingClient.ItemPrice(new BigDecimal("500.00"), new BigDecimal("2500.00"))));
+
+        service.requestQuote(9L, EMAIL, "corr-quote-1");
+
+        verify(dynamicPricingService).priceItems(eq(plan), eq(List.of(item)), eq("corr-quote-1"));
+    }
+
+    @Test
+    void requestQuote_withDynamicPricingDisabled_neverCallsDynamicPricingServiceForPrices() {
+        // dynamicPricingService.isEnabled() defaults to false on the unstubbed mock — this is
+        // the same path exercised by requestQuote_onAlreadyQuotedPlan_succeedsAndRefreshesUpdatedAt,
+        // asserted explicitly here so the flag-off contract has its own regression test.
+        RentalPlan plan = ownedPlan(9L, RentalPlan.PlanStatus.DRAFT);
+        when(rentalPlanRepository.findById(9L)).thenReturn(Optional.of(plan));
+
+        RentalPlanRecord item = new RentalPlanRecord();
+        item.setId(1L);
+        Asset asset = new Asset();
+        asset.setId(1L);
+        item.setAsset(asset);
+        item.setDailyRate(new BigDecimal("450.00"));
+        item.setSubtotal(new BigDecimal("2250.00"));
+        when(rentalPlanRecordRepository.findByRentalPlanId(9L)).thenReturn(List.of(item));
+
+        RentalPlanResponse response = service.requestQuote(9L, EMAIL, null);
+
+        assertThat(response.totalAmount()).isEqualByComparingTo("2250.00");
+        verify(dynamicPricingService, never()).priceItems(any(), any(), any());
     }
 
     @Test
@@ -118,7 +207,7 @@ class RentalPlanServiceTest {
         when(rentalPlanRepository.findById(9L)).thenReturn(Optional.of(plan));
         when(rentalPlanRecordRepository.findByRentalPlanId(9L)).thenReturn(List.of());
 
-        assertThatThrownBy(() -> service.requestQuote(9L, EMAIL))
+        assertThatThrownBy(() -> service.requestQuote(9L, EMAIL, null))
                 .isInstanceOf(ResponseStatusException.class)
                 .satisfies(ex -> assertThat(((ResponseStatusException) ex).getStatusCode())
                         .isEqualTo(HttpStatus.BAD_REQUEST));
@@ -223,6 +312,132 @@ class RentalPlanServiceTest {
 
         assertThat(response.status()).isEqualTo("DRAFT");
         assertThat(response.createdAt()).isNotNull();
+    }
+
+    @Test
+    void create_populatesSitePostalCode_fromTrailing6DigitsOfSiteAddress() {
+        // DistanceService (openspec/changes/pricing-postal-distance/) reads this column at quote
+        // time rather than re-parsing siteAddress — create() must populate it up front.
+        when(rentalPlanRecordRepository.findByRentalPlanId(any())).thenReturn(List.of());
+
+        RentalPlanCreateRequest request = new RentalPlanCreateRequest(
+                LocalDate.of(2026, 10, 1), LocalDate.of(2026, 10, 3), "20 Jurong Port Road, 619094");
+
+        service.create(request, EMAIL);
+
+        ArgumentCaptor<RentalPlan> savedPlan = ArgumentCaptor.forClass(RentalPlan.class);
+        verify(rentalPlanRepository).save(savedPlan.capture());
+        assertThat(savedPlan.getValue().getSitePostalCode()).isEqualTo("619094");
+    }
+
+    @Test
+    void create_withSiteAddressOmitted_succeedsWithNullAddressAndPostalCode() {
+        // "Skip for now" cart flow (openspec/changes/pricing-postal-distance/ "Follow-on"): a plan
+        // must be persistable before the customer has chosen an address at all.
+        when(rentalPlanRecordRepository.findByRentalPlanId(any())).thenReturn(List.of());
+
+        RentalPlanCreateRequest request =
+                new RentalPlanCreateRequest(LocalDate.of(2026, 10, 1), LocalDate.of(2026, 10, 3), null);
+
+        RentalPlanResponse response = service.create(request, EMAIL);
+
+        assertThat(response.status()).isEqualTo("DRAFT");
+        assertThat(response.siteAddress()).isNull();
+
+        ArgumentCaptor<RentalPlan> savedPlan = ArgumentCaptor.forClass(RentalPlan.class);
+        verify(rentalPlanRepository).save(savedPlan.capture());
+        assertThat(savedPlan.getValue().getSiteAddress()).isNull();
+        assertThat(savedPlan.getValue().getSitePostalCode()).isNull();
+    }
+
+    // --- updateSiteAddress (PATCH) ------------------------------------------------------------
+
+    @Test
+    void updateSiteAddress_onDraftPlan_setsAddressAndPostalCodeWithoutTouchingStatus() {
+        RentalPlan plan = ownedPlan(9L, RentalPlan.PlanStatus.DRAFT);
+        when(rentalPlanRepository.findById(9L)).thenReturn(Optional.of(plan));
+        when(rentalPlanRecordRepository.findByRentalPlanId(9L)).thenReturn(List.of());
+
+        RentalPlanResponse response =
+                service.updateSiteAddress(9L, new RentalPlanUpdateRequest("20 Jurong Port Road, 619094"), EMAIL);
+
+        assertThat(response.status()).isEqualTo("DRAFT");
+        assertThat(response.siteAddress()).isEqualTo("20 Jurong Port Road, 619094");
+        assertThat(plan.getSitePostalCode()).isEqualTo("619094");
+        assertThat(plan.getUpdatedAt()).isNotNull();
+        verify(rentalPlanRepository).save(plan);
+    }
+
+    @Test
+    void updateSiteAddress_onQuotedPlan_revertsToDraftAndClearsTotal() {
+        // The frozen totalAmount was priced using distance_km, which depends on siteAddress —
+        // same "stale total" reasoning as add/remove item on a QUOTED plan (FR-RP-002/FR-RP-003).
+        RentalPlan plan = ownedPlan(9L, RentalPlan.PlanStatus.QUOTED);
+        plan.setTotalAmount(new BigDecimal("2250.00"));
+        when(rentalPlanRepository.findById(9L)).thenReturn(Optional.of(plan));
+        when(rentalPlanRecordRepository.findByRentalPlanId(9L)).thenReturn(List.of());
+
+        RentalPlanResponse response =
+                service.updateSiteAddress(9L, new RentalPlanUpdateRequest("20 Jurong Port Road, 619094"), EMAIL);
+
+        assertThat(response.status()).isEqualTo("DRAFT");
+        assertThat(response.totalAmount()).isNull();
+        assertThat(response.siteAddress()).isEqualTo("20 Jurong Port Road, 619094");
+    }
+
+    @Test
+    void updateSiteAddress_withNullAddress_clearsAddressAndPostalCode() {
+        RentalPlan plan = ownedPlan(9L, RentalPlan.PlanStatus.DRAFT);
+        plan.setSiteAddress("20 Jurong Port Road, 619094");
+        plan.setSitePostalCode("619094");
+        when(rentalPlanRepository.findById(9L)).thenReturn(Optional.of(plan));
+        when(rentalPlanRecordRepository.findByRentalPlanId(9L)).thenReturn(List.of());
+
+        RentalPlanResponse response = service.updateSiteAddress(9L, new RentalPlanUpdateRequest(null), EMAIL);
+
+        assertThat(response.siteAddress()).isNull();
+        assertThat(plan.getSitePostalCode()).isNull();
+    }
+
+    @Test
+    void updateSiteAddress_nonOwner_rejectedWith404() {
+        User otherCustomer = new User();
+        otherCustomer.setId(99L);
+        RentalPlan plan = new RentalPlan();
+        plan.setId(9L);
+        plan.setCustomer(otherCustomer);
+        plan.setStatus(RentalPlan.PlanStatus.DRAFT);
+        when(rentalPlanRepository.findById(9L)).thenReturn(Optional.of(plan));
+
+        RentalPlanUpdateRequest request = new RentalPlanUpdateRequest("20 Jurong Port Road, 619094");
+        assertThatThrownBy(() -> service.updateSiteAddress(9L, request, EMAIL))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(ex -> assertThat(((ResponseStatusException) ex).getStatusCode())
+                        .isEqualTo(HttpStatus.NOT_FOUND));
+    }
+
+    @Test
+    void updateSiteAddress_onConvertedPlan_rejectedWith409AlreadyConverted() {
+        RentalPlan plan = ownedPlan(9L, RentalPlan.PlanStatus.CONVERTED);
+        when(rentalPlanRepository.findById(9L)).thenReturn(Optional.of(plan));
+
+        RentalPlanUpdateRequest request = new RentalPlanUpdateRequest("20 Jurong Port Road, 619094");
+        assertThatThrownBy(() -> service.updateSiteAddress(9L, request, EMAIL))
+                .isInstanceOf(RentalPlanConflictException.class)
+                .satisfies(ex -> assertThat(((RentalPlanConflictException) ex).getCode())
+                        .isEqualTo("already_converted"));
+    }
+
+    @Test
+    void updateSiteAddress_onCancelledPlan_rejectedWith409AlreadyCancelled() {
+        RentalPlan plan = ownedPlan(9L, RentalPlan.PlanStatus.CANCELLED);
+        when(rentalPlanRepository.findById(9L)).thenReturn(Optional.of(plan));
+
+        RentalPlanUpdateRequest request = new RentalPlanUpdateRequest("20 Jurong Port Road, 619094");
+        assertThatThrownBy(() -> service.updateSiteAddress(9L, request, EMAIL))
+                .isInstanceOf(RentalPlanConflictException.class)
+                .satisfies(ex -> assertThat(((RentalPlanConflictException) ex).getCode())
+                        .isEqualTo("already_cancelled"));
     }
 
     // --- cancel ------------------------------------------------------------------------------

@@ -49,8 +49,9 @@ Routes other than interim token, login, health, and Stripe webhook need an **acc
 | **4. Bookings** | Direct create / **checkout from plan** / list / get / update |
 | **5. Deliveries & Returns** | List + status patch (`CONFIRMED→MOBILISED`, `MOBILISED→COMPLETED`) |
 | **6. Payments** | Deposit intent (needs Stripe key); webhook (signature) |
-| **7. Rental Plans** | Create / list / get / add item / remove item / quote / cancel (`/api/rentalPlans`) |
+| **7. Rental Plans** | Create / list / get / add item / remove item / **update site address** / quote / cancel (`/api/rentalPlans`) |
 | **8. Stubs** | Depots empty list only |
+| **9. Postal Codes** | Real-time validation (`/api/postalCodes/{postalCode}`) — 200 VALID/INVALID, 503 UNAVAILABLE |
 
 ## Recommendations (S2b) checklist
 
@@ -72,7 +73,7 @@ Submit test script asserts the portal body is **quote-shaped** and stores `recom
 6. If `409 quote_expired`, run **Request quote** again then retry checkout.
 7. Alex Tan can skip Create: **Request quote** on seeded plan `3`, then checkout.
 
-`siteAddress` must end with a 6-digit postal code or the API returns `400 validation_failed`.
+`siteAddress` is optional at **Create** (the "Skip for now" cart flow — omit it or send `null`); WHEN provided it must end with a 6-digit postal code or the API returns `400 validation_failed`. Same rule applies to **Update site address**, which sets it later on a plan created without one. Setting it on a `QUOTED` plan reverts status to `DRAFT` and clears `totalAmount` — same as add/remove item.
 
 ## Variables
 
@@ -89,6 +90,7 @@ Submit test script asserts the portal body is **quote-shaped** and stores `recom
 | `rentalPlanItemId` | `1` | Add item |
 | `equipmentId` | `1` | you |
 | `correlationId` | `postman-corr-001` | optional header on submit |
+| `postalCode` | `619094` | you — real Singapore postal code; set to a malformed value (e.g. `12345`) to see the `400` case |
 
 ## Contracts
 
@@ -103,5 +105,7 @@ Submit test script asserts the portal body is **quote-shaped** and stores `recom
 - Admin users: [`../openspec/specs/admin-users/`](../openspec/specs/admin-users/)
 - Monthly utilization: [`../openspec/specs/monthly-utilization/`](../openspec/specs/monthly-utilization/)
 - Pricing estimate (design): [`../openspec/changes/pricing-estimate/`](../openspec/changes/pricing-estimate/)
+- Postal code validation: [`../openspec/changes/pricing-postal-distance/contracts/postal-code-validation.md`](../openspec/changes/pricing-postal-distance/contracts/postal-code-validation.md)
+- Rental plan site address (optional at creation + PATCH): [`../openspec/changes/pricing-postal-distance/contracts/rental-plan-site-address.md`](../openspec/changes/pricing-postal-distance/contracts/rental-plan-site-address.md)
 - Recommender: [`../openspec/specs/haystack-recommender/`](../openspec/specs/haystack-recommender/) · [`contracts/portal-api.md`](../openspec/specs/haystack-recommender/contracts/portal-api.md)
 - OpenSpec guide: [`../openspec/AGENTS.md`](../openspec/AGENTS.md)

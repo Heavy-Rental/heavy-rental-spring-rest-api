@@ -31,12 +31,18 @@ The system MUST NOT configure JPA cascade/orphanRemoval on these associations. F
 
 ### Requirement: FR-DATA-003 Schema lifecycle
 
-Schema management MUST use Hibernate `spring.jpa.hibernate.ddl-auto=update` (as-built in `application.properties`) against PostgreSQL. Introducing Flyway/Liquibase requires an explicit OpenSpec change and constitution update.
+The default profile MUST use Hibernate `spring.jpa.hibernate.ddl-auto=update` with Flyway disabled. Production (`SPRING_PROFILES_ACTIVE=prod`) MUST apply Flyway versioned SQL in `src/main/resources/db/migration` and then Hibernate `ddl-auto=validate`. Entity mapping changes that need a new production column, table, constraint, or type MUST add a new Flyway version.
 
-#### Scenario: App starts against Postgres
-- GIVEN reachable PostgreSQL and `ddl-auto=update`
+#### Scenario: Default profile starts against Postgres
+- GIVEN reachable PostgreSQL and the default profile
 - WHEN the application context starts
-- THEN Hibernate updates tables from entity annotations without requiring Flyway
+- THEN Hibernate updates tables from entity annotations without Flyway
+
+#### Scenario: Prod starts against empty Postgres
+- GIVEN reachable PostgreSQL, no application tables, and profile `prod`
+- WHEN the application context starts
+- THEN Flyway creates tables from `V1__baseline_jpa_schema.sql`
+- AND Hibernate validates those tables against entity annotations
 
 ### Requirement: FR-DATA-004 AIRecommendation holds S2b handles
 

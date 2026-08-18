@@ -75,6 +75,8 @@ public class HaystackProperties {
 		private Duration recommendRead = Duration.ofSeconds(90);
 		/** Call 1 ingest read timeout (longest; measure p95 in ops). */
 		private Duration ingestRead = Duration.ofSeconds(180);
+		/** Rental-plan quote pricing read timeout. */
+		private Duration pricingRead = Duration.ofSeconds(20);
 
 		public Duration getConnect() {
 			return connect;
@@ -115,6 +117,14 @@ public class HaystackProperties {
 		public void setIngestRead(Duration ingestRead) {
 			this.ingestRead = ingestRead;
 		}
+
+		public Duration getPricingRead() {
+			return pricingRead;
+		}
+
+		public void setPricingRead(Duration pricingRead) {
+			this.pricingRead = pricingRead;
+		}
 	}
 
 	/** Retry policy knobs; ingest retries only when {@link #ingestEnabled} is true. */
@@ -124,6 +134,7 @@ public class HaystackProperties {
 		private int ingestMaxAttempts = 2;
 		private int recommendMaxAttempts = 2;
 		private int qaMaxAttempts = 2;
+		private int pricingMaxAttempts = 1;
 
 		public boolean isIngestEnabled() {
 			return ingestEnabled;
@@ -156,6 +167,14 @@ public class HaystackProperties {
 		public void setQaMaxAttempts(int qaMaxAttempts) {
 			this.qaMaxAttempts = qaMaxAttempts;
 		}
+
+		public int getPricingMaxAttempts() {
+			return pricingMaxAttempts;
+		}
+
+		public void setPricingMaxAttempts(int pricingMaxAttempts) {
+			this.pricingMaxAttempts = pricingMaxAttempts;
+		}
 	}
 
 	/** Circuit breaker and bulkhead concurrency limits. */
@@ -167,6 +186,7 @@ public class HaystackProperties {
 		private int bulkheadIngestMaxConcurrent = 5;
 		private int bulkheadRecommendMaxConcurrent = 10;
 		private int bulkheadQaMaxConcurrent = 10;
+		private int bulkheadPricingMaxConcurrent = 10;
 
 		public float getCircuitBreakerFailureRateThreshold() {
 			return circuitBreakerFailureRateThreshold;
@@ -222,6 +242,14 @@ public class HaystackProperties {
 
 		public void setBulkheadQaMaxConcurrent(int bulkheadQaMaxConcurrent) {
 			this.bulkheadQaMaxConcurrent = bulkheadQaMaxConcurrent;
+		}
+
+		public int getBulkheadPricingMaxConcurrent() {
+			return bulkheadPricingMaxConcurrent;
+		}
+
+		public void setBulkheadPricingMaxConcurrent(int bulkheadPricingMaxConcurrent) {
+			this.bulkheadPricingMaxConcurrent = bulkheadPricingMaxConcurrent;
 		}
 	}
 }
