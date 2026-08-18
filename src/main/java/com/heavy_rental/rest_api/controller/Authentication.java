@@ -10,6 +10,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import jakarta.validation.Valid;
+
 import com.heavy_rental.rest_api.dto.GoogleLoginRequest;
 import com.heavy_rental.rest_api.dto.LoginRequest;
 import com.heavy_rental.rest_api.dto.LoginResponse;
@@ -46,7 +48,7 @@ public class Authentication {
 	@PostMapping("/login")
 	public ResponseEntity<LoginResponse> login(
 			@AuthenticationPrincipal Jwt interimJwt,
-			@RequestBody LoginRequest request) {
+			@Valid @RequestBody LoginRequest request) {
 		return ResponseEntity.ok(authService.login(request, interimJwt));
 	}
 

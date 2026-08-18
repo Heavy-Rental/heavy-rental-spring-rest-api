@@ -29,6 +29,12 @@
 	</scm>
 	<properties>
 		<java.version>21</java.version>
+		<!-- Spring Boot 4.1.0 manages 42.7.11 (CVE-2026-54291). -->
+		<postgresql.version>42.7.12</postgresql.version>
+		<!-- Spring Boot 4.1.0 manages 2.25.4 (CVE-2026-49844). -->
+		<log4j2.version>2.25.5</log4j2.version>
+		<!-- Spring Boot 4.1.0 manages 3.1.4 (CVE-2026-59889). -->
+		<jackson-bom.version>3.1.5</jackson-bom.version>
 	</properties>
 	<dependencies>
 

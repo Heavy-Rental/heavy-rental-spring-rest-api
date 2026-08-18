@@ -75,18 +75,15 @@ public class AuthService {
 	 * Denylists the interim {@code jti} so it cannot be reused.
 	 */
 	public LoginResponse login(LoginRequest request, Jwt interimJwt) {
+		// Always authenticate first. Blank credentials are rejected by @Valid LoginRequest
+		// before this method. Do not gate authenticate() on request fields or the Bearer
+		// token — CodeQL java/user-controlled-bypass treats that as a login skip.
+		Authentication authentication = authenticationManager.authenticate(
+				new UsernamePasswordAuthenticationToken(request.email(), request.password()));
+
 		if (interimJwt == null || !JwtService.isInterim(interimJwt)) {
 			throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Interim bearer token required");
 		}
-
-		if (request == null
-				|| request.email() == null || request.email().isBlank()
-				|| request.password() == null || request.password().isBlank()) {
-			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Email and password are required");
-		}
-
-		Authentication authentication = authenticationManager.authenticate(
-				new UsernamePasswordAuthenticationToken(request.email().trim(), request.password()));
 
 		List<String> roles = authentication.getAuthorities().stream()
 				.map(GrantedAuthority::getAuthority)
