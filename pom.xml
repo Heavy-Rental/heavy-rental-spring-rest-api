@@ -83,7 +83,7 @@
 		<dependency>
 			<groupId>com.stripe</groupId>
 			<artifactId>stripe-java</artifactId>
-			<version>24.0.0</version>
+			<version>33.3.0</version>
 		</dependency>
 
 		<!-- Loads .env (workspace root, one level up — see springdotenv.directory in the
