@@ -15,7 +15,6 @@ public final class DevSecOpsDemoSecrets {
     private DevSecOpsDemoSecrets() {
     }
 
-    // Fake AWS-style access key — placeholder value only, not a real credential.
     public static final String DEMO_AWS_ACCESS_KEY_ID = "AKIAIOSFODNN7EXAMPLE";
     public static final String DEMO_AWS_SECRET_ACCESS_KEY = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
 }
