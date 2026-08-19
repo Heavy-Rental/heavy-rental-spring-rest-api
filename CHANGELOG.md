@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+### Added or Changed
+- Docs: note that the REST API CI pipeline runs Semgrep, Trivy, and CodeQL as parallel security gates before the GitHub Flow CI Gate.
+
 ## v1.0.0
 
 ### Added or Changed
