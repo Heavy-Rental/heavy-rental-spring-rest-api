@@ -55,7 +55,7 @@ Seeded money and lifecycle data MUST be internally consistent: line subtotals al
 
 ### Requirement: FR-SEED-005 Fleet scale for utilization
 
-The seeded fleet MUST include multiple assets per category with real capacity/height bands and mixed conditions so utilization-style queries can return non-degenerate fractions (as-built: 27 assets, 90 bookings scale).
+The seeded fleet MUST include multiple assets per category with real capacity/height bands and mixed conditions so utilization-style queries can return non-degenerate fractions (as-built: 27 assets, 91 bookings scale).
 
 #### Scenario: Category has multi-asset depth
 - GIVEN seeded assets for a category
