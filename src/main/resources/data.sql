@@ -266,7 +266,8 @@ INSERT INTO bookings (id, customer_id, rental_plan_id, start_date, end_date, sta
   (87, (SELECT id FROM users WHERE name = 'Mei Ling'), NULL, CURRENT_DATE - 4, CURRENT_DATE + 2, 'MOBILISED', 660.00, 198.00, 0.00, '22 Kranji Way, Singapore 739450', '', CURRENT_DATE - 9 + TIME '09:00:00'),
   (88, (SELECT id FROM users WHERE name = 'Farid Rahman'), NULL, CURRENT_DATE - 35, CURRENT_DATE - 30, 'COMPLETED', 550.00, 165.00, 0.00, '8 Senoko Drive, Singapore 758196', '', CURRENT_DATE - 40 + TIME '09:00:00'),
   (89, (SELECT id FROM users WHERE name = 'Alex Tan'), NULL, CURRENT_DATE + 1, CURRENT_DATE + 6, 'CANCELLED', 1050.00, 315.00, 0.00, '3 Benoi Road, Singapore 629895', '', CURRENT_DATE - 4 + TIME '09:00:00'),
-  (90, (SELECT id FROM users WHERE name = 'Mei Ling'), NULL, CURRENT_DATE + 5, CURRENT_DATE + 9, 'PENDING_CONFIRMED', 840.00, 252.00, 588.00, '6 Gul Circle, Singapore 629563', '', CURRENT_DATE + TIME '09:00:00')
+  (90, (SELECT id FROM users WHERE name = 'Mei Ling'), NULL, CURRENT_DATE + 5, CURRENT_DATE + 9, 'PENDING_CONFIRMED', 840.00, 252.00, 588.00, '6 Gul Circle, Singapore 629563', '', CURRENT_DATE + TIME '09:00:00'),
+  (91, (SELECT id FROM users WHERE name = 'Farid Rahman'), NULL, CURRENT_DATE - 3, CURRENT_DATE, 'MOBILISED', 1425.00, 427.50, 0.00, '3 Pandan Loop, Singapore 128215', '', CURRENT_DATE - 8 + TIME '09:00:00')
 ON CONFLICT (id) DO NOTHING;
 
 -- Sync sequence so runtime inserts don't collide with the explicit ids above
@@ -375,7 +376,9 @@ INSERT INTO booking_items (id, booking_id, asset_id, daily_rate, subtotal, start
   (95, 88, 26, 110.00, 550.00, 1305.0, 1329.0, 'GOOD', 'GOOD'),
   (96, 89, 27, 210.00, 1050.00, NULL, NULL, NULL, NULL),
   (97, 90, 27, 210.00, 840.00, NULL, NULL, NULL, NULL),
-  (98, 11, 3,  120.00, 360.00, NULL, NULL, NULL, NULL)
+  (98, 11, 3,  120.00, 360.00, NULL, NULL, NULL, NULL),
+  (99,  91, 11, 320.00, 960.00, NULL, NULL, NULL, NULL),
+  (100, 91, 24, 155.00, 465.00, NULL, NULL, NULL, NULL)
 ON CONFLICT (id) DO NOTHING;
 
 -- Sync sequence so runtime inserts don't collide with the explicit ids above
