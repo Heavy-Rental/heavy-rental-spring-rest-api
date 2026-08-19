@@ -85,11 +85,11 @@ its original `exp`, same as `FR-AUTH-L-001`.
 
 ### Requirement: FR-AUTH-L-002 Token tier authorization
 
-Interim tokens MUST only authorize login. Access tokens with `ROLE_USER` / `ROLE_ADMIN` MUST authorize logout and business APIs. Interim alone MUST receive `403` on session-only routes (including logout).
+Interim tokens MUST only authorize login. Access tokens MUST authorize logout regardless of role (`ROLE_USER` / `ROLE_ADMIN` / `ROLE_DRIVER`); business APIs beyond logout remain role-appropriate (see [`booking-delivery-return`](../booking-delivery-return/) for the `ROLE_DRIVER` routes). Interim alone MUST receive `403` on session-only routes (including logout).
 
 #### Scenario: Interim blocked from protected routes
 - GIVEN only an interim JWT
-- WHEN the client calls a route requiring USER/ADMIN (including logout)
+- WHEN the client calls a route requiring an access token (including logout)
 - THEN response is `403`
 
 #### Scenario: Access allowed on protected routes
@@ -129,7 +129,7 @@ Login MUST pass the **plain** password from the request into `AuthenticationMana
 | `GET /api/auth/getBearerToken` | `permitAll` (auth-interim-token) |
 | `POST /api/auth/login` | `hasAuthority("ROLE_INTERIM")` |
 | `POST /api/auth/google` | `hasAuthority("ROLE_INTERIM")` |
-| `POST /api/auth/logout` | `hasAnyAuthority("ROLE_USER", "ROLE_ADMIN")` |
+| `POST /api/auth/logout` | `hasAnyAuthority("ROLE_USER", "ROLE_ADMIN", "ROLE_DRIVER")` |
 | Other API requests | `hasAnyAuthority("ROLE_USER", "ROLE_ADMIN")` |
 
 #### Scenario: Matcher matrix holds

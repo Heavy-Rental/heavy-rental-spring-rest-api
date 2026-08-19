@@ -4,20 +4,30 @@
 
 Mobile-oriented booking list/update and delivery/return status workflow: only `CONFIRMED → MOBILISED` and `MOBILISED → COMPLETED` are advanced through this API.
 
-**Status:** **As-built** (also documents known gaps: no ownership scope, full-replace PUT)  
+**Status:** **As-built** (also documents known gaps: full-replace PUT)  
 **HTTP shapes:** [`contracts/api.md`](./contracts/api.md)  
-**Auth:** access JWT (`ROLE_USER` / `ROLE_ADMIN`)
+**Auth:** `/api/bookings*` — `ROLE_USER` (own bookings only), `ROLE_ADMIN`, `ROLE_DRIVER` (admin/driver see every booking, matching `RentalPlanService`'s ownership-scoping pattern for the `ROLE_USER` case). `/api/deliveries*` and `/api/returns*` — `ROLE_ADMIN` or `ROLE_DRIVER` only; `ROLE_USER` gets `403`. HR-189: previously all three route families were open to any authenticated user (`ROLE_USER`/`ROLE_ADMIN`) with no ownership check — any customer could see and edit every other customer's bookings, deliveries, and returns.
 
 ## Requirements
 
-### Requirement: FR-BDR-001 List and get bookings
+### Requirement: FR-BDR-001 List and get bookings, ownership-scoped
 
-The system MUST provide `GET /api/bookings` and `GET /api/bookings/{id}` returning `BookingResponse` including all booking items (asset name + serial). Missing id → `404`.
+The system MUST provide `GET /api/bookings` and `GET /api/bookings/{id}` returning `BookingResponse` including all booking items (asset name + serial). A `ROLE_USER` caller MUST only see/access their own bookings (`GET /api/bookings/{id}` on another customer's booking → `403`, via `CurrentUserService.assertOwnerOrStaff`, a sibling of the existing `assertOwnerOrAdmin` used by `PaymentService`). `ROLE_ADMIN` and `ROLE_DRIVER` callers MUST see/access every booking. Missing id → `404`.
 
-#### Scenario: List all bookings
-- GIVEN a valid access Bearer
+#### Scenario: Customer sees only their own bookings
+- GIVEN a valid access Bearer with `ROLE_USER`
 - WHEN `GET /api/bookings`
-- THEN `200` with every booking (as-built: not filtered by caller)
+- THEN `200` with only bookings owned by that customer
+
+#### Scenario: Admin or driver sees every booking
+- GIVEN a valid access Bearer with `ROLE_ADMIN` or `ROLE_DRIVER`
+- WHEN `GET /api/bookings`
+- THEN `200` with every booking regardless of owner
+
+#### Scenario: Customer forbidden from another customer's booking
+- GIVEN a `ROLE_USER` Bearer and a booking owned by a different customer
+- WHEN `GET /api/bookings/{id}` or `PUT /api/bookings/{id}`
+- THEN `403`
 
 ### Requirement: FR-BDR-002 Update booking details without status
 
@@ -116,10 +126,16 @@ When `rentalPlanId` is absent, `POST /api/bookings` MUST price with inclusive da
 
 ## Known gaps (documented, not fixed here)
 
-- List/get not ownership-scoped beyond blanket JWT roles  
-- `DeliveryRecord` / `ReturnRecord` not written by these status endpoints  
+- `DeliveryRecord` / `ReturnRecord` not written by these status endpoints
 
 ## Out of scope
 
 - Full lifecycle to CONFIRMED / CANCELLED via these routes  
 - Payments
+
+## Removed (HR-189)
+
+- `PATCH /api/bookings/{id}/status` — an undocumented, untested route that allowed any
+  authenticated caller to set any booking to any status with no transition rules or ownership
+  check. It was never part of this contract and is fully superseded by the state-machine-gated
+  `PATCH /api/deliveries/{id}/status` and `PATCH /api/returns/{id}/status` above.

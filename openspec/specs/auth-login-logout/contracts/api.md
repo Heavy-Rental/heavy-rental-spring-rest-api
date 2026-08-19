@@ -24,7 +24,7 @@
 | `sub` | Random UUID | Authenticated **email** |
 | `tokenType` | `"interim"` | `"access"` |
 | `roles` | `["ROLE_INTERIM"]` | DB roles e.g. `ROLE_USER`, `ROLE_ADMIN`, `ROLE_DRIVER` |
-| May call | Login/Google only | Logout + USER/ADMIN APIs |
+| May call | Login/Google only | Logout (USER/ADMIN/DRIVER) + role-appropriate business APIs |
 
 Signing: HS256; same `app.jwt.*` config as project constitution.
 

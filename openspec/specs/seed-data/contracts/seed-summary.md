@@ -28,7 +28,7 @@ Excavator · Scissors Lift · Boom Lift · Fork Lift
 | Table group | Approx volume |
 |-------------|----------------|
 | Assets | 27 (spec-band depth + coverage) |
-| Bookings | 90 (all statuses exercised) |
+| Bookings | 91 (all statuses exercised) |
 | Images | Reused mock-image base64 set |
 
 Exact rows: inspect `data.sql`.
