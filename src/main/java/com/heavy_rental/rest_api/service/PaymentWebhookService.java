@@ -71,8 +71,9 @@ public class PaymentWebhookService {
      * covers on the client side when confirmPayment itself returns an error.
      */
     @Transactional
-    public void reconcilePending(Payment payment) {
-        if (payment.getStatus() != Payment.PaymentStatus.PENDING) {
+    public void reconcilePending(Long paymentId) {
+        Payment payment = paymentRepository.findById(paymentId).orElse(null);
+        if (payment == null || payment.getStatus() != Payment.PaymentStatus.PENDING) {
             return;
         }
 

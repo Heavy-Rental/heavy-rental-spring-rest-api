@@ -39,7 +39,7 @@ public class PaymentReconciliationSchedulerService {
                 .toList();
 
         for (Payment payment : stale) {
-            paymentWebhookService.reconcilePending(payment);
+            paymentWebhookService.reconcilePending(payment.getId());
         }
     }
 }
