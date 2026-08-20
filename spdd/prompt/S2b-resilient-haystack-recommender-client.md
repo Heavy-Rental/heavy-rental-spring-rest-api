@@ -18,7 +18,7 @@
 Spring must orchestrate haystack-fast-api **Call 1 (ingest)**, **Call 2 (recommend / quote)**, and **Call 3 (chatbot Q&A)** with timeouts, Resilience4j, idempotent ingest retries, correlation, saga persistence of `ingest_id`, and thin portal REST — without inventing equipment when the recommender is down.
 
 ### Definition of Done
-- FR-S2B-001…010 implemented and covered by WireMock (or equivalent) tests (incl. nested portal `items[].equipment`)
+- FR-S2B-001…011 implemented and covered by WireMock (or equivalent) tests (incl. nested portal `items[].equipment` and collapsed `items[].quantity`)
 - Portal: `POST /api/recommendations/project-spec` (Call 1+2 → **quote**), `POST .../knowledge-query` (Call 3 → **answer**), `GET .../{id}`
 - Prod default: `haystack.retry.ingest-enabled=false` until S2a confirmed
 - Shared error JSON; no re-ingest on Call 2/3 failure; same `Idempotency-Key` on ingest retry
@@ -36,7 +36,7 @@ C2 202/SSE, C3 gRPC/queues, C/W/D in Spring, Q&A history table, Flyway, `recomme
 | Portal user | existing `User` / JWT via `CurrentUserService` |
 | Haystack ingest response | lean FR-IX-023 DTO |
 | Haystack recommend (Call 2) | `GetAssetRecommendationsResponse` — `quoteRef`, nested `items[]` |
-| Portal quote item | `RecommendItemResponse` — `rankOrder`, `matchScore`, `reason`, `lineTotal`, `quantity`, nested `equipment` |
+| Portal quote item | `RecommendItemResponse` — `rankOrder`, `matchScore`, `reason`, `lineTotal`, `quantity` (Haystack pass-through; FR-S2B-011 MAY be greater than 1 after Call 2 FR-P-013 collapse), nested `equipment` |
 | Portal equipment | `RecommendEquipmentResponse` — `id`, `name`, `category`, `baseDailyRate`, `weekly`, `capacity`, `platformHeight` (JSON omitted when null), `purchaseYear`, `location`, `available`, `img`, `desc`, `tags`. Haystack pass-through except: `img` is the catalog JPEG data URI when numeric `id` matches `asset_images`; never invent equipment/rates. |
 | Haystack Q&A (Call 3) | `ProjectKnowledgeQueryResponse` — `answer`, `sources_used`; not persisted in S2b |
 | Haystack error | `{error, message}` |
@@ -48,7 +48,7 @@ C2 202/SSE, C3 gRPC/queues, C/W/D in Spring, Q&A history table, Flyway, `recomme
 
 1. **RestClient** to haystack base URL with per-op read timeouts (health / qa / recommend / ingest).
 2. **Resilience4j** CB + bulkheads (ingest / recommend / qa) + limited retry (ingest only with same key when flag on).
-3. **Saga service** owns keys, Call order (1→2 on submit; 3 on knowledge-query), persistence, and “no re-ingest” rule. After Call 2, map nested `items[].equipment`; omit null `platformHeight`; batch-load `asset_images` for numeric catalog ids and set `img` to the browse JPEG data URI.
+3. **Saga service** owns keys, Call order (1→2 on submit; 3 on knowledge-query), persistence, and “no re-ingest” rule. After Call 2, map nested `items[].equipment`; copy `items[].quantity` as-is (FR-S2B-011; do not default to 1); omit null `platformHeight`; batch-load `asset_images` for numeric catalog ids and set `img` to the browse JPEG data URI.
 4. **Thin controller** for portal; derive user identity server-side.
 5. **WireMock** for default CI; optional joint test against real haystack later.
 6. Sticky/single FastAPI instance for Call 1→2 is an **ops** constraint, not Spring clustering logic.
@@ -112,6 +112,7 @@ Feasibility wire docs remain normative for HTTP shapes:
    - call `recommend` (Call 2) with stored `ingest_id`
      - optional focus: portal `query` → Call 1 summary → fixed default
    - return portal response with Call 2 **quote** (`quoteRef`, `items`, …)
+     - `items[].quantity` is Haystack pass-through (FR-S2B-011; collapsed counts such as 3)
      - nested `equipment.platformHeight` omitted from JSON when null
      - nested `equipment.img` from `asset_images` when `id` is a numeric catalog PK
    - if Call 2 fails: **do not** re-ingest; session remains for retry / Call 3
@@ -132,7 +133,7 @@ Feasibility wire docs remain normative for HTTP shapes:
 3. CB test forces N failures then fail-fast.
 4. Saga test: ingest 200 + recommend 500 → one ingest; happy path quote body; catalog `img` by numeric id.
 5. Knowledge-query uses Call 3 only.
-6. Portal MockMvc: nested equipment JSON; omit-null `platformHeight`; catalog `img` data URI.
+6. Portal MockMvc: nested equipment JSON; omit-null `platformHeight`; catalog `img` data URI; collapsed `quantity: 3`.
 
 ### O8 — Closeout
 1. Document runbook in living SPEC.
@@ -168,6 +169,7 @@ Feasibility wire docs remain normative for HTTP shapes:
 9. **MUST** keep max upload size configurable and documented for gateway alignment.
 10. **MUST NOT** invent `equipment.img` when `id` is not a numeric catalog PK or `asset_images` has no row.
 11. **MUST** omit portal `equipment.platformHeight` from JSON when null.
+12. **MUST NOT** default portal `items[].quantity` to 1 when Haystack omits it, re-collapse Call 2 rows, or invent quantity from `lineTotal` / days / Call 1 needs (FR-S2B-011).
 
 ---
 

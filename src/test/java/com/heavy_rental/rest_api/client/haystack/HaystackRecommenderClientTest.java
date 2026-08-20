@@ -211,6 +211,59 @@ class HaystackRecommenderClientTest {
 	}
 
 	@Test
+	@DisplayName("Scenario: Call 2 maps collapsed quantity from realistic Haystack JSON (FR-P-013)")
+	void recommend_mapsCollapsedQuantityFromHaystackPayload() {
+		wireMock.stubFor(post(urlEqualTo(HaystackRecommenderClient.PATH_RECOMMEND))
+				.willReturn(aResponse()
+						.withStatus(200)
+						.withHeader("Content-Type", "application/json")
+						.withBody("""
+								{
+								  "user_id": "42",
+								  "ingest_id": "ing_test_1",
+								  "query": "Need three forklifts",
+								  "quoteRef": "QUO-136",
+								  "confidenceScore": 0.8,
+								  "days": 10,
+								  "estimatedTotal": 5318.4,
+								  "items": [
+								    {
+								      "rankOrder": 3,
+								      "matchScore": 0.8,
+								      "reason": "Matched forklift to Hyster H4.2FT Forklift",
+								      "lineTotal": 5318.4,
+								      "quantity": 3,
+								      "needId": "need_3",
+								      "mlPredictedPrice": 177.28,
+								      "equipment": {
+								        "id": "27",
+								        "name": "Hyster H4.2FT Forklift",
+								        "category": "Fork Lift",
+								        "baseDailyRate": 177.28,
+								        "capacity": 4200.0,
+								        "extra": {
+								          "availability": "available",
+								          "currency": "SGD"
+								        }
+								      }
+								    }
+								  ],
+								  "warnings": []
+								}
+								""")));
+
+		GetAssetRecommendationsResponse resp = client.recommend(
+				new GetAssetRecommendationsRequest("42", "ing_test_1", "Need three forklifts", 5),
+				"corr-qty");
+
+		assertEquals(1, resp.items().size());
+		assertEquals(Integer.valueOf(3), resp.items().get(0).quantity());
+		assertEquals(new BigDecimal("5318.4"), resp.items().get(0).lineTotal());
+		assertEquals("27", resp.items().get(0).equipment().id());
+		assertEquals("Hyster H4.2FT Forklift", resp.items().get(0).equipment().name());
+	}
+
+	@Test
 	@DisplayName("Scenario: Call 3 chatbot uses .../query path and maps answer")
 	void queryHappyPath_usesCall3PathAndMapsAnswer() {
 		wireMock.stubFor(post(urlEqualTo(HaystackRecommenderClient.PATH_QUERY))

@@ -793,7 +793,7 @@ Max upload size: `haystack.max-in-memory-size` / servlet multipart (default **20
 | `specSummary` / `rationale` | Call 2 | |
 | `items[]` | Call 2 | Ranked quote lines with nested `equipment` |
 
-Each `items[]` element includes `rankOrder`, `matchScore`, `reason`, `lineTotal`, `quantity`, and nested `equipment` (`id`, `name`, `category`, rates, `img`, `tags`, …). `platformHeight` may be omitted from JSON when null.
+Each `items[]` element includes `rankOrder`, `matchScore`, `reason`, `lineTotal`, `quantity` (Haystack pass-through; may be greater than 1 when Call 2 collapses duplicate equipment), and nested `equipment` (`id`, `name`, `category`, rates, `img`, `tags`, …). `platformHeight` may be omitted from JSON when null.
 
 **Not returned on submit:** Call 3 `answer` / `sourcesUsed` (use knowledge-query).
 
@@ -1019,6 +1019,7 @@ Do not treat design docs as as-built API behavior.
 | [`heavy-rental-spring-rest-api/openspec/specs/api-index/contracts/routes.md`](heavy-rental-spring-rest-api/openspec/specs/api-index/contracts/routes.md) | Living route map |
 | [`heavy-rental-spring-rest-api/openspec/specs/`](heavy-rental-spring-rest-api/openspec/specs/) | Per-capability behavior + contracts |
 | [`heavy-rental-spring-rest-api/openspec/specs/haystack-recommender/contracts/portal-api.md`](heavy-rental-spring-rest-api/openspec/specs/haystack-recommender/contracts/portal-api.md) | Portal recommender request/response detail |
+| [`heavy-rental-spring-rest-api/openspec/changes/2026-08-20-call2-quote-quantity-passthrough/`](heavy-rental-spring-rest-api/openspec/changes/2026-08-20-call2-quote-quantity-passthrough/) | FR-S2B-011 Call 2 quantity pass-through (OpenSpec + OpenSPDD + ADR) |
 | [`heavy-rental-spring-rest-api/openspec/specs/spring-proxy-endpoints/spec.md`](heavy-rental-spring-rest-api/openspec/specs/spring-proxy-endpoints/spec.md) | Which routes hop to Haystack |
 | [`heavy-rental-spring-rest-api/Feasibility_Study_Spring/`](heavy-rental-spring-rest-api/Feasibility_Study_Spring/) | Spring ↔ Haystack wire notes and handoff |
 | [`heavy-rental-spring-rest-api/postman/`](heavy-rental-spring-rest-api/postman/) | Manual API collection |

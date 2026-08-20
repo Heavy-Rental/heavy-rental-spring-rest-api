@@ -29,7 +29,8 @@
 
 | Canvas | Change | Status |
 |--------|--------|--------|
-| [`prompt/S2b-resilient-haystack-recommender-client.md`](./prompt/S2b-resilient-haystack-recommender-client.md) | S2b haystack recommender client | **As-built** |
+| [`prompt/S2b-resilient-haystack-recommender-client.md`](./prompt/S2b-resilient-haystack-recommender-client.md) | S2b haystack recommender client | **As-built** (incl. FR-S2B-011 quantity pass-through) |
+| [`../openspec/changes/2026-08-20-call2-quote-quantity-passthrough/design.md`](../openspec/changes/2026-08-20-call2-quote-quantity-passthrough/design.md) | Call 2 collapsed quantity pass-through | **As-built** REASONS + ADR |
 
 ## Related
 

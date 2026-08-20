@@ -2,8 +2,8 @@
 
 | Field | Value |
 |-------|--------|
-| **Version** | **2.0.1** |
-| **Date** | 2026-08-13 |
+| **Version** | **2.0.2** |
+| **Date** | 2026-08-20 |
 | **Status** | As-built: Call 2 **recommend**, Call 3 **chatbot Q&A** |
 | **Base URL (local)** | `http://localhost:8000` |
 | **Auth** | None yet — private network only |
@@ -79,7 +79,7 @@ See lean FR-IX-023 fields in [`call1-ingest-response-for-spring.md`](./call1-ing
 | `quoteRef` | `QUO-…` |
 | `confidenceScore`, `days`, `estimatedTotal` | When known |
 | `specSummary`, `rationale` | From session / synthesis |
-| `items[]` | `rankOrder`, `matchScore`, `reason`, `lineTotal`, `quantity`, nested `equipment{id,name,category,baseDailyRate,…}` |
+| `items[]` | `rankOrder`, `matchScore`, `reason`, `lineTotal`, `quantity` (FR-P-013 collapse: duplicate count, e.g. 3), nested `equipment{id,name,category,baseDailyRate,…}` |
 | `items[].mlPredictedPrice` | Predicted **daily** rate from haystack pricing path (when item returned; upstream as-built) |
 | `items[].equipment.baseDailyRate` | Same daily rate family as `mlPredictedPrice` when present (compat) |
 | `warnings` | Soft issues |
@@ -90,7 +90,8 @@ See lean FR-IX-023 fields in [`call1-ingest-response-for-spring.md`](./call1-ing
 **Safeguard:** do not invent `equipment.id` or rates — catalog/pricing path only.
 
 Spring portal mapping of nested items: [`../openspec/specs/haystack-recommender/contracts/portal-api.md`](../openspec/specs/haystack-recommender/contracts/portal-api.md)  
-(Spring omits null `platformHeight` and sets `img` from `asset_images` when `equipment.id` is a numeric catalog PK).
+(Spring omits null `platformHeight` and sets `img` from `asset_images` when `equipment.id` is a numeric catalog PK).  
+`items[].quantity` is Haystack pass-through (**FR-S2B-011**); Spring does not re-collapse FR-P-013 rows.
 
 ---
 
@@ -124,6 +125,7 @@ Spring portal mapping of nested items: [`../openspec/specs/haystack-recommender/
 
 | Version | Date | Notes |
 |---------|------|--------|
+| **2.0.2** | 2026-08-20 | FR-P-013 / FR-S2B-011: Call 2 `items[].quantity` MAY be greater than 1 after duplicate collapse; Spring pass-through |
 | **2.0.1** | 2026-08-13 | Read-only sync with haystack `develop` @ `12f89dda`; document `mlPredictedPrice` + nested items; Spring OpenSpec links |
 | **2.0.0** | 2026-08-12 | Call 2 recommend; Call 3 query; full path inventory |
 | **1.1.1** | 2026-08-12 | Prior Call 2 = Q&A (superseded) |

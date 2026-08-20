@@ -20,7 +20,7 @@
 | Rental plans | `rental-plan-quote` + `spring-proxy-endpoints` |
 | Admin users | `admin-users` |
 | Admin overview | `monthly-utilization` |
-| Recommender | `haystack-recommender` + portal contract + `../Feasibility_Study_Spring/` |
+| Recommender | `haystack-recommender` + portal contract + `../Feasibility_Study_Spring/` + FR-S2B-011 quantity change [`changes/2026-08-20-call2-quote-quantity-passthrough/`](./changes/2026-08-20-call2-quote-quantity-passthrough/) |
 | Data / seed / tests | `entity-repository`, `seed-data`, `testing` |
 | Estimate (not built) | `changes/pricing-estimate/` |
 | Plan checkout | `rental-plan-quote` + `booking-delivery-return` (as-built); archive `changes/archive/2026-08-13-rental-plan-checkout-conversion/` |

@@ -282,6 +282,38 @@ class RecommenderSagaServiceTest {
 				RecommenderSagaService.resolveCall2Query("  ", "  "));
 	}
 
+	@DisplayName("Scenario: Call 2 collapsed quantities pass through to portal items (FR-P-013)")
+	@Test
+	void submitProjectSpec_passesThroughHaystackItemQuantities() {
+		// GIVEN Haystack Call 2 collapsed unit-need siblings (PR #136): qty 1, 1, 3, 1
+		stubIngestAndSave(99L);
+		when(haystackClient.recommend(any(), eq("corr-qty"))).thenReturn(quoteWithItems(
+				List.of(
+						quoteLine(1, "0.8", "Matched excavator", "4341.5", 1,
+								equip("2", "Komatsu PC210 Excavator", "Excavator", "434.15")),
+						quoteLine(2, "0.8", "Matched boom lift", "3246.9", 1,
+								equip("22", "Genie S-85 Boom Lift", "Boom Lift", "324.69")),
+						quoteLine(3, "0.8", "Matched forklift", "5318.4", 3,
+								equip("27", "Hyster H4.2FT Forklift", "Fork Lift", "177.28")),
+						quoteLine(4, "0.8", "Matched scissor lift", "935.5", 1,
+								equip("3", "Genie GS-1930 Scissor Lift", "Scissors Lift", "93.55")))));
+
+		// WHEN the portal project-spec response is built
+		SubmitProjectSpecResponse resp = saga.submitProjectSpec(
+				jwt,
+				new SubmitProjectSpecRequest("Need excavator boom lift forklifts scissor", null, null, null, null, null),
+				"corr-qty");
+
+		// THEN each quote line keeps Haystack quantity (forklift is 3, not defaulted to 1)
+		assertEquals(4, resp.items().size());
+		assertEquals(Integer.valueOf(1), resp.items().get(0).quantity());
+		assertEquals(Integer.valueOf(1), resp.items().get(1).quantity());
+		assertEquals(Integer.valueOf(3), resp.items().get(2).quantity());
+		assertEquals(Integer.valueOf(1), resp.items().get(3).quantity());
+		assertEquals(new BigDecimal("5318.4"), resp.items().get(2).lineTotal());
+		assertEquals("Hyster H4.2FT Forklift", resp.items().get(2).equipment().name());
+	}
+
 	@DisplayName("Scenario: Submit response exposes nested equipment (FR-S2B-010)")
 	@Test
 	void submitProjectSpec_exposesNestedEquipment_withOptionalFields() {
@@ -519,6 +551,32 @@ class RecommenderSagaServiceTest {
 								null,
 								null),
 						new BigDecimal("150.00"))));
+	}
+
+	private static RecommendItemDto quoteLine(
+			int rank,
+			String matchScore,
+			String reason,
+			String lineTotal,
+			Integer quantity,
+			RecommendEquipmentDto equipment) {
+		return new RecommendItemDto(
+				rank,
+				new BigDecimal(matchScore),
+				reason,
+				new BigDecimal(lineTotal),
+				quantity,
+				equipment,
+				null);
+	}
+
+	private static RecommendEquipmentDto equip(String id, String name, String category, String dailyRate) {
+		return new RecommendEquipmentDto(
+				id,
+				name,
+				category,
+				new BigDecimal(dailyRate),
+				null, null, null, null, null, true, null, null, List.of());
 	}
 
 	private static GetAssetRecommendationsResponse quoteWithItems(List<RecommendItemDto> items) {

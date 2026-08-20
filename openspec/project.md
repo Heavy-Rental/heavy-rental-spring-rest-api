@@ -55,6 +55,7 @@ HTTP tables: `specs/<capability>/contracts/`.
 | Change | Status |
 |--------|--------|
 | [`changes/pricing-estimate/`](./changes/pricing-estimate/) | **Design only** — open availability decision; not implemented |
+| [`changes/2026-08-20-call2-quote-quantity-passthrough/`](./changes/2026-08-20-call2-quote-quantity-passthrough/) | **As-built** — FR-S2B-011 Call 2 quantity pass-through (Haystack FR-P-013) |
 
 ## Archives
 
