@@ -1,0 +1,54 @@
+# =============================================================================
+# Install into: heavy-rental-spring-rest-api
+# Path:         .github/workflows/rest-api-security-report-caller.yml
+# =============================================================================
+# Security Report caller — schedules + manually triggers the reusable report.
+# Reads this repo's existing Code Scanning alerts (Semgrep / Trivy / CodeQL,
+# already uploaded by integration-pipeline.yml / release-pipeline.yml) and
+# publishes a Job Summary + downloadable markdown artifact. No new scanning.
+#
+# Place both files in this repository:
+#   .github/workflows/rest-api-security-report-caller.yml  ← this file (triggers)
+#   .github/workflows/security-report-pipeline.yml         ← reusable pipeline
+#
+# When this runs
+# --------------
+#   Weekly, Monday 06:00 UTC
+#   Manual workflow_dispatch (Actions tab → Security Report → Run workflow)
+#
+#   Does NOT run on push or pull_request — won't interfere with existing
+#   branch protection checks.
+#
+# Reusable workflow (same repository):
+#   ./.github/workflows/security-report-pipeline.yml
+#
+# Job
+# ---
+#   1. Report — fetch open Code Scanning alerts, summarize, publish
+#
+# Setup
+# -----
+# 1. Copy into this repo:
+#      .github/workflows/rest-api-security-report-caller.yml
+#      .github/workflows/security-report-pipeline.yml
+# 2. No secrets needed — uses the default GITHUB_TOKEN
+#    (contents: read + security-events: read only).
+# =============================================================================
+
+name: Security Report
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # Every Monday, 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: read
+
+jobs:
+  security-report-pipeline:
+    name: Security report pipeline
+    # Same-repo reusable workflow — both files live under .github/workflows/
+    uses: ./.github/workflows/security-report-pipeline.yml
+    # No secrets, no inputs: reports on this repo's own Code Scanning alerts

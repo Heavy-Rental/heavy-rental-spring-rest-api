@@ -1,0 +1,177 @@
+# =============================================================================
+# Heavy Rental — Security Report (reusable)
+# =============================================================================
+# Purpose: summarize the Code Scanning alerts a repo already has (Semgrep /
+# Trivy / CodeQL — whatever that repo's own pipelines already upload) into a
+# markdown report. Adds no new scanning capability.
+#
+# Reads via the GitHub REST API through actions/github-script, which ships on
+# every runner — no extra dependency, no new secret. Two outputs:
+#   1. Job Summary   — appears directly on the Actions run page
+#   2. Artifact       — `security-report` (security-report.md), 30-day retention
+#
+# This file is IDENTICAL across all three app repos — copy-paste, no
+# repo-specific edits:
+#   heavy-rental-spring-rest-api
+#   heavy-rental-react-web-portal
+#   haystack-fast-api
+#
+# Install both files in each repo:
+#   .github/workflows/security-report-pipeline.yml        ← this file (reusable only)
+#   .github/workflows/<repo>-security-report-caller.yml   ← sole allowed entry point
+#     (rest-api-security-report-caller.yml / portal-security-report-caller.yml /
+#      haystack-security-report-caller.yml)
+#
+# This file exposes only workflow_call (no push / PR / workflow_dispatch of its
+# own). A gate job rejects any caller that isn't a *-security-report-caller.yml
+# file living in the same repository.
+#
+# Permissions: contents: read + security-events: read only — strictly less than
+# several of this repo's existing jobs already request. No PAT, no repo secret.
+# =============================================================================
+
+name: Security Report
+
+# Reusable only — no push, pull_request, or workflow_dispatch of its own.
+# Sole allowed callers: *-security-report-caller.yml in the same repository.
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+  security-events: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 0. Caller gate — only a *-security-report-caller.yml file in this same
+  #    repository may invoke this workflow.
+  # ---------------------------------------------------------------------------
+  assert-caller:
+    name: Assert caller
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Allow only *-security-report-caller.yml
+        env:
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_NAME: ${{ github.workflow }}
+        run: |
+          set -euo pipefail
+          echo "github.workflow_ref=${WORKFLOW_REF}"
+          echo "github.event_name=${EVENT_NAME}"
+          echo "github.workflow=${WORKFLOW_NAME}"
+          case "${WORKFLOW_REF}" in
+            */.github/workflows/*-security-report-caller.yml@*)
+              echo "Allowed caller: *-security-report-caller.yml"
+              {
+                echo "### Caller gate"
+                echo ""
+                echo "Invoked by a \`*-security-report-caller.yml\` file — OK."
+              } >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            *)
+              echo "::error::security-report-pipeline.yml may only be invoked by a *-security-report-caller.yml file in this repository (got: ${WORKFLOW_REF})"
+              exit 1
+              ;;
+          esac
+
+  # ---------------------------------------------------------------------------
+  # 1. Report — pull open Code Scanning alerts via the REST API, summarize by
+  #    tool and severity, publish as Job Summary + downloadable artifact.
+  # ---------------------------------------------------------------------------
+  report:
+    name: Generate report
+    runs-on: ubuntu-latest
+    needs: [assert-caller]
+    timeout-minutes: 10
+    steps:
+      - name: Fetch open Code Scanning alerts and build report
+        id: build
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            const fs = require('fs');
+
+            const alerts = await github.paginate(
+              github.rest.codeScanning.listAlertsForRepo,
+              { owner: context.repo.owner, repo: context.repo.repo, state: 'open', per_page: 100 }
+            );
+
+            const severityOf = (alert) =>
+              alert.rule?.security_severity_level || alert.rule?.severity || 'unspecified';
+
+            const severityOrder = ['critical', 'high', 'medium', 'low', 'warning', 'note', 'error', 'unspecified'];
+            const rank = (s) => {
+              const i = severityOrder.indexOf(s);
+              return i === -1 ? severityOrder.length : i;
+            };
+
+            const bySeverity = {};
+            const byTool = {};
+            for (const alert of alerts) {
+              const severity = severityOf(alert);
+              const tool = alert.tool?.name || 'unknown';
+              bySeverity[severity] = (bySeverity[severity] || 0) + 1;
+              byTool[tool] = (byTool[tool] || 0) + 1;
+            }
+
+            const severityRows = Object.keys(bySeverity)
+              .sort((a, b) => rank(a) - rank(b))
+              .map((s) => `| ${s} | ${bySeverity[s]} |`)
+              .join('\n');
+            const toolRows = Object.keys(byTool)
+              .sort()
+              .map((t) => `| ${t} | ${byTool[t]} |`)
+              .join('\n');
+
+            const escapeCell = (value) => String(value || '').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
+            const alertRows = [...alerts]
+              .sort((a, b) => rank(severityOf(a)) - rank(severityOf(b)))
+              .map((a) => {
+                const rule = escapeCell(a.rule?.description || a.rule?.id);
+                const path = escapeCell(a.most_recent_instance?.location?.path);
+                return `| #${a.number} | ${a.tool?.name || 'unknown'} | ${severityOf(a)} | ${rule} | ${path} | [link](${a.html_url}) |`;
+              })
+              .join('\n');
+
+            const generatedAt = new Date().toISOString();
+            const report = [
+              `# Security Report — ${context.repo.owner}/${context.repo.repo}`,
+              '',
+              `Generated: ${generatedAt}`,
+              'Source: GitHub Code Scanning (open alerts, all tools already uploading to this repo)',
+              '',
+              `**Total open alerts: ${alerts.length}**`,
+              '',
+              '## By severity',
+              '',
+              '| Severity | Count |',
+              '| --- | --- |',
+              severityRows || '| _none_ | 0 |',
+              '',
+              '## By tool',
+              '',
+              '| Tool | Count |',
+              '| --- | --- |',
+              toolRows || '| _none_ | 0 |',
+              '',
+              '## Open alerts',
+              '',
+              alerts.length
+                ? '| # | Tool | Severity | Rule | Path | Link |\n| --- | --- | --- | --- | --- | --- |\n' + alertRows
+                : '_No open Code Scanning alerts._',
+              '',
+            ].join('\n');
+
+            fs.writeFileSync('security-report.md', report);
+            await core.summary.addRaw(report).write();
+            core.setOutput('total_alerts', alerts.length);
+            core.info(`Open Code Scanning alerts: ${alerts.length}`);
+
+      - name: Upload security report artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: security-report
+          path: security-report.md
+          retention-days: 30
