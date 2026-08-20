@@ -14,14 +14,14 @@
 
 | Class | Asserts |
 |-------|---------|
-| `HaystackRecommenderClientTest` | Call 1/2/3 mapping; headers; 4xx/5xx |
+| `HaystackRecommenderClientTest` | Call 1/2/3 mapping; headers; 4xx/5xx; FR-S2B-011 collapsed `quantity: 3` from realistic Call 2 JSON |
 | `HaystackRetryIdempotencyTest` | Same `Idempotency-Key` on 5xx retry |
 | `HaystackTimeoutRetryTest` | Timeout → retry same key; `recommender_timeout` |
 | `HaystackCircuitBreakerTest` | Open → fail-fast |
 | `HaystackBulkheadTest` | Concurrency limit |
-| `RecommenderSagaServiceTest` | Dual-hop quote; nested equipment; catalog `img` by numeric id; no re-ingest; Call 3 only on knowledge-query |
+| `RecommenderSagaServiceTest` | Dual-hop quote; nested equipment; catalog `img` by numeric id; no re-ingest; Call 3 only on knowledge-query; FR-S2B-011 quantities 1/1/3/1 |
 | `RecommenderSagaWireMockTest` | Real client dual-hop paths + correlation + quote |
-| `RecommendationControllerIntegrationTest` | MockMvc + JWT + WireMock submit/session/query; omit-null `platformHeight`; catalog `img` data URI |
+| `RecommendationControllerIntegrationTest` | MockMvc + JWT + WireMock submit/session/query; omit-null `platformHeight`; catalog `img` data URI; collapsed `quantity: 3` |
 
 ## Commands
 

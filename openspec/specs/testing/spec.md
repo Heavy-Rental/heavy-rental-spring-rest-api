@@ -47,7 +47,7 @@ Auth integration tests MUST cover interim mint claims, login success/failure, ro
 
 ### Requirement: FR-TEST-005 S2b coverage set
 
-The suite MUST include client mapping, retry idempotency, timeout retry, circuit breaker, bulkhead, saga unit, saga WireMock dual-hop, and recommendation controller MockMvc+JWT+WireMock tests (see inventory).
+The suite MUST include client mapping, retry idempotency, timeout retry, circuit breaker, bulkhead, saga unit, saga WireMock dual-hop, recommendation controller MockMvc+JWT+WireMock tests, and FR-S2B-011 collapsed `quantity` mapping (see inventory).
 
 #### Scenario: Full mvn test green without haystack
 - GIVEN Postgres available and no FastAPI

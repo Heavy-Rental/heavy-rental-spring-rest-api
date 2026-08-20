@@ -23,8 +23,8 @@
 
 | Topic | Haystack | This package |
 |-------|----------|--------------|
-| Portal saga | `implementation-plan.md` §1.2.0+ | [`portal-to-haystack-mapping.md`](./portal-to-haystack-mapping.md) **2.0** |
-| Call 2 recommend | OpenSpec recommend contract (+ `mlPredictedPrice`) | [`wire-contract-call1-call2.md`](./wire-contract-call1-call2.md) **2.0.1** |
+| Portal saga | `implementation-plan.md` §1.2.0+ | [`portal-to-haystack-mapping.md`](./portal-to-haystack-mapping.md) **2.0.3** |
+| Call 2 recommend | OpenSpec recommend contract (+ `mlPredictedPrice` + FR-P-013 quantity collapse) | [`wire-contract-call1-call2.md`](./wire-contract-call1-call2.md) **2.0.2** |
 | Call 3 Q&A | KG contract `project-knowledge-query.md` | Same wire doc § Call 3 |
 | S2a | `phase2-s2a-*.md` | [`s2a-haystack-dependency.md`](./s2a-haystack-dependency.md) |
 | S2b | pointer | [`phase2-s2b-spring-implementation-plan.md`](./phase2-s2b-spring-implementation-plan.md) **2.1** |
@@ -49,8 +49,8 @@ React  POST /api/recommendations/project-spec
 
 | Document | Version |
 |----------|---------|
-| portal-to-haystack-mapping.md | **2.0.1** |
-| wire-contract-call1-call2.md | **2.0.1** |
+| portal-to-haystack-mapping.md | **2.0.3** |
+| wire-contract-call1-call2.md | **2.0.2** |
 | call1-ingest-response-for-spring.md | **2.0.0** |
 | phase2-s2b-spring-implementation-plan.md | **2.1.0** |
 | spring-boot-fastapi-integration-resilience.md | **2.2.2** |

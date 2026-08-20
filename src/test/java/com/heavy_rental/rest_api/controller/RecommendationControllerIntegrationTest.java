@@ -257,6 +257,57 @@ class RecommendationControllerIntegrationTest {
 		WIRE_MOCK.verify(1, postRequestedFor(urlEqualTo(HaystackRecommenderClient.PATH_QUERY)));
 	}
 
+	@DisplayName("Scenario: Portal JSON keeps Haystack collapsed quantity (FR-P-013)")
+	@Test
+	void jsonSubmit_passesThroughCollapsedHaystackQuantity() throws Exception {
+		WIRE_MOCK.stubFor(com.github.tomakehurst.wiremock.client.WireMock.post(
+						urlEqualTo(HaystackRecommenderClient.PATH_RECOMMEND))
+				.willReturn(aResponse()
+						.withStatus(200)
+						.withHeader("Content-Type", "application/json")
+						.withBody("""
+								{
+								  "user_id": "u1",
+								  "ingest_id": "ing_it_1",
+								  "quoteRef": "QUO-IT-QTY",
+								  "confidenceScore": 0.8,
+								  "days": 10,
+								  "estimatedTotal": 5318.4,
+								  "specSummary": "Three forklifts",
+								  "rationale": "Matched forklift",
+								  "items": [
+								    {
+								      "rankOrder": 1,
+								      "matchScore": 0.8,
+								      "reason": "Matched forklift to Hyster H4.2FT Forklift",
+								      "quantity": 3,
+								      "needId": "need_3",
+								      "mlPredictedPrice": 177.28,
+								      "lineTotal": 5318.4,
+								      "equipment": {
+								        "id": "27",
+								        "name": "Hyster H4.2FT Forklift",
+								        "category": "Fork Lift",
+								        "baseDailyRate": 177.28,
+								        "capacity": 4200.0
+								      }
+								    }
+								  ],
+								  "warnings": []
+								}
+								""")));
+
+		mockMvc.perform(post("/api/recommendations/project-spec")
+						.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("{\"projectText\":\"Need three forklifts\"}"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.items.length()").value(1))
+				.andExpect(jsonPath("$.items[0].quantity").value(3))
+				.andExpect(jsonPath("$.items[0].lineTotal").value(5318.4))
+				.andExpect(jsonPath("$.items[0].equipment.name").value("Hyster H4.2FT Forklift"));
+	}
+
 	@DisplayName("Scenario: Null platformHeight is omitted from portal equipment JSON")
 	@Test
 	void jsonSubmit_omitsNullPlatformHeight() throws Exception {

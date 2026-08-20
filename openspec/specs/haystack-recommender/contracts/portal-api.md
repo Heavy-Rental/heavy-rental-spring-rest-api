@@ -56,7 +56,7 @@ Orchestrates **Call 1 then Call 2 recommend**. Success body is primarily the **C
 | `matchScore` | number \| null | When present from haystack |
 | `reason` | string \| null | Match rationale |
 | `lineTotal` | number \| null | Line total |
-| `quantity` | int \| null | Quantity |
+| `quantity` | int \| null | Haystack pass-through (**FR-S2B-011**). Usually `1`; after Call 2 FR-P-013 collapse, unit-need siblings that share `equipment.id` become one line whose quantity is the duplicate count (3 copies → `3`). `null` when omitted upstream — Spring MUST NOT default to 1 |
 | `equipment` | object \| null | Nested catalog equipment (see below) |
 
 ### `items[].equipment`
@@ -95,7 +95,26 @@ Portal type: `RecommendEquipmentResponse`. Haystack fields are pass-through (nev
 
 `platformHeight` is absent in the example because it is null. Other optional fields still serialize as `null` when omitted upstream.
 
-Upstream Call 2 may also send `mlPredictedPrice` (haystack contract); Spring maps known portal fields pass-through and MUST NOT invent rates.
+Upstream Call 2 may also send `needId` and `mlPredictedPrice` (haystack contract); Spring maps known portal fields pass-through and MUST NOT invent rates. `needId` / `mlPredictedPrice` are not on the portal item DTO in this as-built.
+
+Collapsed quantity example (FR-P-013 / FR-S2B-011):
+
+```json
+{
+  "rankOrder": 1,
+  "matchScore": 0.8,
+  "reason": "Matched forklift to Hyster H4.2FT Forklift",
+  "lineTotal": 5318.4,
+  "quantity": 3,
+  "equipment": {
+    "id": 27,
+    "name": "Hyster H4.2FT Forklift",
+    "category": "Fork Lift",
+    "baseDailyRate": 177.28,
+    "tags": []
+  }
+}
+```
 
 ---
 
@@ -150,3 +169,4 @@ Upstream contracts (read-only): haystack-fast-api `openspec/specs/...` (see [`AG
 
 - Rental date range is **not** an input to Call 2 pricing (`HR-111`); `startDate`/`endDate` are tentative session fields only.
 - Portal-facing summaries elsewhere MUST link here rather than re-derive field tables.
+- React `QuoteResultScreen` (as of `heavy-rental-react-web-portal` `develop`) hardcodes `Qty: 1` and does not put `quantity` on `RecItem`. Quote **totals** still use summed `lineTotal`. Displaying collapsed quantity and carrying it into the rental plan is a **React follow-up**, not a Spring field change.

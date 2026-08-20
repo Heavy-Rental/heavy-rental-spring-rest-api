@@ -325,6 +325,10 @@ public class RecommenderSagaService {
 		return new ExpectedBudgetResponse(b.amount(), b.currency(), b.source());
 	}
 
+	/**
+	 * Portal quote lines from Call 2. {@code quantity} is Haystack pass-through
+	 * (including FR-P-013 collapsed counts such as 3); never defaulted to 1.
+	 */
 	private List<RecommendItemResponse> mapItems(List<RecommendItemDto> items) {
 		if (items == null || items.isEmpty()) {
 			return List.of();
