@@ -68,7 +68,9 @@ class PaymentServiceTest {
     }
 
     @Test
-    void createFullPaymentIntent_chargesTotalAmountNotDeposit() throws Exception {
+    void createFullPaymentIntent_chargesGstInclusiveTotalNotDeposit() throws Exception {
+        // Booking.totalAmount is 1000; full payment is GST-inclusive (x1.09 = 1090.00),
+        // confirmed deliberate asymmetry vs deposit/balance (which never collect GST).
         when(bookingRepository.findById(10L)).thenReturn(Optional.of(booking));
         when(paymentRepository.findByBookingId(10L)).thenReturn(List.of());
 
@@ -85,7 +87,7 @@ class PaymentServiceTest {
             assertThat(result).isSameAs(fakeIntent);
         }
 
-        assertThat(paramsCaptor.getValue().getAmount()).isEqualTo(100000L);
+        assertThat(paramsCaptor.getValue().getAmount()).isEqualTo(109000L);
         assertThat(paramsCaptor.getValue().getSetupFutureUsage()).isNull();
 
         ArgumentCaptor<Payment> paymentCaptor = ArgumentCaptor.forClass(Payment.class);
@@ -93,7 +95,7 @@ class PaymentServiceTest {
         Payment saved = paymentCaptor.getValue();
         assertThat(saved.getPaymentType()).isEqualTo(Payment.PaymentType.FULL_PAYMENT);
         assertThat(saved.getStatus()).isEqualTo(Payment.PaymentStatus.PENDING);
-        assertThat(saved.getAmount()).isEqualByComparingTo(BigDecimal.valueOf(1000));
+        assertThat(saved.getAmount()).isEqualByComparingTo(BigDecimal.valueOf(1090));
     }
 
     @Test

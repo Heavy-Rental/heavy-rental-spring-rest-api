@@ -1,5 +1,7 @@
 package com.heavy_rental.rest_api.controller;
 
+import java.math.BigDecimal;
+
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -12,6 +14,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import com.heavy_rental.rest_api.dto.CreateDepositIntentRequest;
 import com.heavy_rental.rest_api.dto.CreateFullPaymentIntentRequest;
+import com.heavy_rental.rest_api.dto.FullPaymentIntentResponse;
 import com.heavy_rental.rest_api.dto.PaymentIntentResponse;
 import com.heavy_rental.rest_api.service.PaymentService;
 import com.stripe.exception.StripeException;
@@ -40,12 +43,14 @@ public class PaymentController {
     }
 
     @PostMapping("/full-payment-intent")
-    public ResponseEntity<PaymentIntentResponse> createFullPaymentIntent(
+    public ResponseEntity<FullPaymentIntentResponse> createFullPaymentIntent(
             @AuthenticationPrincipal Jwt jwt,
             @RequestBody CreateFullPaymentIntentRequest request) {
         try {
             PaymentIntent intent = paymentService.createFullPaymentIntent(jwt, request.bookingId());
-            return ResponseEntity.ok(new PaymentIntentResponse(intent.getClientSecret(), intent.getId()));
+            BigDecimal gstInclusiveAmount = BigDecimal.valueOf(intent.getAmount()).movePointLeft(2);
+            return ResponseEntity.ok(
+                    new FullPaymentIntentResponse(intent.getClientSecret(), intent.getId(), gstInclusiveAmount));
         } catch (StripeException e) {
             throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Stripe error: " + e.getMessage());
         }

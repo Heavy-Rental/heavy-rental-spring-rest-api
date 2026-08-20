@@ -27,13 +27,13 @@
 
 ### Requirement: FR-PAY-005 Full-payment one-shot intent
 
-`POST /api/payments/full-payment-intent` with `{ bookingId }` MUST verify the caller owns the booking (or is admin), compute/use server-side `Booking.totalAmount` (never trust client amount), create a Stripe PaymentIntent for the full amount (no `setup_future_usage`), persist a PENDING `FULL_PAYMENT` `Payment`, and return `clientSecret` + `paymentIntentId`. MUST reject (`409`) if a non-FAIL DEPOSIT, BALANCE, or FULL_PAYMENT payment already exists on the booking; the deposit-intent guard likewise MUST reject if a FULL_PAYMENT already exists, so a booking can't be paid twice. On webhook success, the booking transitions directly to CONFIRMED with `remainingBalance = 0`, skipping PENDING_CONFIRMED — so the booking is never picked up by the balance-charge scheduler (which only queries PENDING_CONFIRMED). A failed full payment does not set manual follow-up (same as a failed deposit — the customer sees the failure live at checkout).
+`POST /api/payments/full-payment-intent` with `{ bookingId }` MUST verify the caller owns the booking (or is admin), compute/use server-side `Booking.totalAmount` (never trust client amount), create a Stripe PaymentIntent for `totalAmount * (1 + GST_RATE)` (GST_RATE = 0.09; no `setup_future_usage`), persist a PENDING `FULL_PAYMENT` `Payment` with the GST-inclusive amount, and return `clientSecret` + `paymentIntentId` + the GST-inclusive `amount`. **Confirmed deliberate:** deposit/balance never collect GST, so paying in full costs 9% more in absolute terms than deposit+balance for the same booking (109% vs 100% of `totalAmount`) — not an oversight. MUST reject (`409`) if a non-FAIL DEPOSIT, BALANCE, or FULL_PAYMENT payment already exists on the booking; the deposit-intent guard likewise MUST reject if a FULL_PAYMENT already exists, so a booking can't be paid twice. On webhook success, the booking transitions directly to CONFIRMED with `remainingBalance = 0`, skipping PENDING_CONFIRMED — so the booking is never picked up by the balance-charge scheduler (which only queries PENDING_CONFIRMED). A failed full payment does not set manual follow-up (same as a failed deposit — the customer sees the failure live at checkout).
 
 #### Scenario: Owner pays in full
-- GIVEN an unpaid booking owned by the caller
+- GIVEN an unpaid booking owned by the caller with `totalAmount` = 1000
 - WHEN full-payment-intent is posted
-- THEN Stripe PI is created for `Booking.totalAmount`
-- AND response includes clientSecret
+- THEN Stripe PI is created for 1090.00 (GST-inclusive)
+- AND response includes clientSecret and amount = 1090.00
 
 #### Scenario: Full payment succeeds
 - GIVEN a PENDING FULL_PAYMENT payment
@@ -71,7 +71,7 @@ A daily scheduled job (Asia/Singapore) MUST find bookings starting tomorrow that
 
 ### Requirement: FR-PAY-004 Currency and deposit rate ownership
 
-Currency is SGD as-built. Deposit rate MUST live at booking-creation time (`Booking.depositAmount` / remaining balance), not recomputed ad hoc inside PaymentIntent creation.
+Currency is SGD as-built. Deposit rate MUST live at booking-creation time (`Booking.depositAmount` / remaining balance), not recomputed ad hoc inside PaymentIntent creation. GST (9%) applies only on the full-payment path, computed at charge time in `PaymentService`, not stored on `Booking`.
 
 ## Known gaps
 

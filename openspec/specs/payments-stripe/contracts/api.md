@@ -39,7 +39,9 @@ Content-Type: application/json
 
 One-shot payment for `Booking.totalAmount` — no deposit/balance split, no `setup_future_usage` (no later off-session charge to make).
 
-**Success:** `{ "clientSecret": "...", "paymentIntentId": "pi_..." }` (field names per `PaymentIntentResponse`).
+**GST-inclusive:** charged amount is `totalAmount * 1.09` (GST_RATE = 0.09). Confirmed deliberate: deposit/balance never collect GST, so full payment costs 9% more in absolute terms than deposit+balance for the same booking.
+
+**Success:** `{ "clientSecret": "...", "paymentIntentId": "pi_...", "amount": 1090.00 }` (field names per `FullPaymentIntentResponse` — note this is a distinct DTO from `PaymentIntentResponse`, since it carries the GST-inclusive amount the frontend needs to display).
 
 **409** if a non-FAIL DEPOSIT, BALANCE, or FULL_PAYMENT payment already exists on the booking.
 
