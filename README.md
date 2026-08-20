@@ -153,6 +153,32 @@ _Below is an example of how you can instruct your audience on installing and set
 
 
 
+### Stripe Webhooks (Local Dev)
+
+Testing checkout locally requires Stripe's webhook events to reach the backend, or a
+successful deposit/balance payment will never update `Payment`/`Booking` status
+(HR-203). Run the backend with:
+
+```sh
+./scripts/dev-with-webhooks.sh
+```
+
+instead of `./mvnw spring-boot:run` directly — it starts the app and Stripe's webhook
+forwarder (`stripe listen`) together as one command, each keeping its own output, and
+stops both together on Ctrl+C. It uses the shared team test-mode key already committed
+in `application.properties`, so no personal `stripe login` is required.
+
+If you'd rather run them apart (e.g. the app from your IDE), start the forwarder on
+its own instead:
+
+```sh
+./scripts/dev-webhook-listen.sh
+```
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+
+
 <!-- USAGE EXAMPLES -->
 ## Usage
 

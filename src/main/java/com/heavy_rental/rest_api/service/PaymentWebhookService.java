@@ -10,6 +10,7 @@ import com.heavy_rental.rest_api.entity.Booking;
 import com.heavy_rental.rest_api.entity.Payment;
 import com.heavy_rental.rest_api.repository.BookingRepository;
 import com.heavy_rental.rest_api.repository.PaymentRepository;
+import com.stripe.exception.StripeException;
 import com.stripe.model.Event;
 import com.stripe.model.PaymentIntent;
 import com.stripe.model.StripeError;
@@ -55,6 +56,36 @@ public class PaymentWebhookService {
             applySucceeded(payment, intent);
         } else {
             applyFailed(payment, intent);
+        }
+    }
+
+    /**
+     * Reconciliation entry point for PaymentReconciliationSchedulerService: re-checks a
+     * payment that's been stuck PENDING directly against Stripe, for cases where the
+     * payment_intent.succeeded webhook was never delivered (HR-203 — e.g. no `stripe
+     * listen` running locally at the time). Applies the same success logic as the webhook
+     * path, guarded by the same PENDING check. Only "succeeded" is reconciled here — any
+     * other Stripe-side status (still requires payment method, processing, canceled, etc.)
+     * is left alone, since those aren't stranded bookings, just payments genuinely still
+     * in progress or never completed, which the frontend's own failure screen already
+     * covers on the client side when confirmPayment itself returns an error.
+     */
+    @Transactional
+    public void reconcilePending(Long paymentId) {
+        Payment payment = paymentRepository.findById(paymentId).orElse(null);
+        if (payment == null || payment.getStatus() != Payment.PaymentStatus.PENDING) {
+            return;
+        }
+
+        PaymentIntent intent;
+        try {
+            intent = PaymentIntent.retrieve(payment.getStripePaymentIntentId());
+        } catch (StripeException e) {
+            return;
+        }
+
+        if ("succeeded".equals(intent.getStatus())) {
+            applySucceeded(payment, intent);
         }
     }
 
