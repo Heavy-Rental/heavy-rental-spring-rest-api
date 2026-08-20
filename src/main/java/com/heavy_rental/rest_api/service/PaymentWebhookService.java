@@ -102,6 +102,10 @@ public class PaymentWebhookService {
         } else if (payment.getPaymentType() == Payment.PaymentType.BALANCE) {
             booking.setStatus(Booking.BookingStatus.CONFIRMED);
             booking.setRemainingBalance(BigDecimal.ZERO);
+        } else if (payment.getPaymentType() == Payment.PaymentType.FULL_PAYMENT) {
+            // One-shot payment: skip PENDING_CONFIRMED entirely, there's no separate balance step.
+            booking.setStatus(Booking.BookingStatus.CONFIRMED);
+            booking.setRemainingBalance(BigDecimal.ZERO);
         }
         bookingRepository.save(booking);
     }

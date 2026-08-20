@@ -56,7 +56,8 @@ public class PaymentService {
         currentUserService.assertOwnerOrAdmin(jwt, booking.getCustomer());
 
         boolean depositAlreadyInitiatedOrPaid = paymentRepository.findByBookingId(bookingId).stream()
-                .anyMatch(p -> p.getPaymentType() == Payment.PaymentType.DEPOSIT
+                .anyMatch(p -> (p.getPaymentType() == Payment.PaymentType.DEPOSIT
+                        || p.getPaymentType() == Payment.PaymentType.FULL_PAYMENT)
                         && p.getStatus() != Payment.PaymentStatus.FAIL);
         if (depositAlreadyInitiatedOrPaid) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
@@ -86,6 +87,57 @@ public class PaymentService {
         payment.setStripeCustomerId(stripeCustomerId);
         payment.setAmount(booking.getDepositAmount());
         payment.setPaymentType(Payment.PaymentType.DEPOSIT);
+        payment.setStatus(Payment.PaymentStatus.PENDING);
+        payment.setCreatedAt(LocalDateTime.now());
+        paymentRepository.save(payment);
+
+        return intent;
+    }
+
+    /**
+     * Client-initiated: creates a PaymentIntent for the full booking amount in one shot,
+     * skipping the deposit/balance split entirely. Same ownership and transactional shape as
+     * {@link #createDepositPaymentIntent}; no setup_future_usage, since there's no later
+     * off-session charge to make.
+     */
+    @Transactional
+    public PaymentIntent createFullPaymentIntent(Jwt jwt, Long bookingId) throws StripeException {
+        Booking booking = bookingRepository.findById(bookingId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Booking not found"));
+        currentUserService.assertOwnerOrAdmin(jwt, booking.getCustomer());
+
+        boolean paymentAlreadyInitiatedOrPaid = paymentRepository.findByBookingId(bookingId).stream()
+                .anyMatch(p -> (p.getPaymentType() == Payment.PaymentType.DEPOSIT
+                        || p.getPaymentType() == Payment.PaymentType.BALANCE
+                        || p.getPaymentType() == Payment.PaymentType.FULL_PAYMENT)
+                        && p.getStatus() != Payment.PaymentStatus.FAIL);
+        if (paymentAlreadyInitiatedOrPaid) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Booking payment has already been initiated or paid");
+        }
+
+        String stripeCustomerId = resolveOrCreateStripeCustomer(booking.getCustomer());
+
+        PaymentIntentCreateParams params = PaymentIntentCreateParams.builder()
+                .setAmount(toCents(booking.getTotalAmount()))
+                .setCurrency("sgd")
+                .setCustomer(stripeCustomerId)
+                .setAutomaticPaymentMethods(
+                        PaymentIntentCreateParams.AutomaticPaymentMethods.builder()
+                                .setEnabled(true)
+                                .build())
+                .putMetadata("booking_id", String.valueOf(booking.getId()))
+                .putMetadata("payment_type", "FULL_PAYMENT")
+                .build();
+
+        PaymentIntent intent = PaymentIntent.create(params);
+
+        Payment payment = new Payment();
+        payment.setBooking(booking);
+        payment.setStripePaymentIntentId(intent.getId());
+        payment.setStripeCustomerId(stripeCustomerId);
+        payment.setAmount(booking.getTotalAmount());
+        payment.setPaymentType(Payment.PaymentType.FULL_PAYMENT);
         payment.setStatus(Payment.PaymentStatus.PENDING);
         payment.setCreatedAt(LocalDateTime.now());
         paymentRepository.save(payment);

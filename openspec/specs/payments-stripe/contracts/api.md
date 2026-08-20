@@ -26,6 +26,25 @@ Content-Type: application/json
 
 **Success:** `{ "clientSecret": "...", "paymentIntentId": "pi_..." }` (field names per `PaymentIntentResponse`).
 
+**409** if a non-FAIL DEPOSIT or FULL_PAYMENT payment already exists on the booking.
+
+## `POST /api/payments/full-payment-intent`
+
+```http
+Authorization: Bearer <access-jwt>
+Content-Type: application/json
+
+{ "bookingId": 1 }
+```
+
+One-shot payment for `Booking.totalAmount` — no deposit/balance split, no `setup_future_usage` (no later off-session charge to make).
+
+**Success:** `{ "clientSecret": "...", "paymentIntentId": "pi_..." }` (field names per `PaymentIntentResponse`).
+
+**409** if a non-FAIL DEPOSIT, BALANCE, or FULL_PAYMENT payment already exists on the booking.
+
+On webhook success, the booking goes straight to `CONFIRMED` with `remainingBalance = 0` (skips `PENDING_CONFIRMED`), so `BalanceChargeSchedulerService` — which only queries `PENDING_CONFIRMED` — never picks it up. A failed full payment does not set manual follow-up (same as a failed deposit).
+
 ## `POST /api/payments/webhook`
 
 ```http

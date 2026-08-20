@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 import com.heavy_rental.rest_api.dto.CreateDepositIntentRequest;
+import com.heavy_rental.rest_api.dto.CreateFullPaymentIntentRequest;
 import com.heavy_rental.rest_api.dto.PaymentIntentResponse;
 import com.heavy_rental.rest_api.service.PaymentService;
 import com.stripe.exception.StripeException;
@@ -32,6 +33,18 @@ public class PaymentController {
             @RequestBody CreateDepositIntentRequest request) {
         try {
             PaymentIntent intent = paymentService.createDepositPaymentIntent(jwt, request.bookingId());
+            return ResponseEntity.ok(new PaymentIntentResponse(intent.getClientSecret(), intent.getId()));
+        } catch (StripeException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Stripe error: " + e.getMessage());
+        }
+    }
+
+    @PostMapping("/full-payment-intent")
+    public ResponseEntity<PaymentIntentResponse> createFullPaymentIntent(
+            @AuthenticationPrincipal Jwt jwt,
+            @RequestBody CreateFullPaymentIntentRequest request) {
+        try {
+            PaymentIntent intent = paymentService.createFullPaymentIntent(jwt, request.bookingId());
             return ResponseEntity.ok(new PaymentIntentResponse(intent.getClientSecret(), intent.getId()));
         } catch (StripeException e) {
             throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Stripe error: " + e.getMessage());
