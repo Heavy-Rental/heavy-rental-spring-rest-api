@@ -153,6 +153,24 @@ _Below is an example of how you can instruct your audience on installing and set
 
 
 
+### Stripe Webhooks (Local Dev)
+
+Testing checkout locally requires Stripe's webhook events to reach the backend, or a
+successful deposit/balance payment will never update `Payment`/`Booking` status
+(HR-203). Before testing checkout, run:
+
+```sh
+./scripts/dev-webhook-listen.sh
+```
+
+and leave it running in its own terminal for the duration of your testing session. It
+uses the Stripe CLI (`stripe listen`) with the shared team test-mode key already
+committed in `application.properties`, so no personal `stripe login` is required.
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+
+
 <!-- USAGE EXAMPLES -->
 ## Usage
 
