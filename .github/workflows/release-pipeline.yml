@@ -1426,20 +1426,33 @@ jobs:
           docker push "${IMAGE_REMOTE_LATEST}"
           echo "Pushed ${IMAGE_REMOTE} and ${IMAGE_REMOTE_LATEST}"
 
-          BODY='{"visibility":"public"}'
+          # GitHub has no public REST endpoint to change package visibility
+          # (POST .../visibility is not in the Packages API and returns 404).
+          # Read current visibility; if it is already public, continue. Otherwise
+          # warn with the UI path and do not fail — the image is already on GHCR.
+          PKG_HTML="https://github.com/orgs/${OWNER}/packages/container/${PKG}/settings"
+          VISIBILITY=""
           set +e
-          echo "${BODY}" | gh api --method POST "/orgs/${OWNER}/packages/container/${PKG}/visibility" --input -
-          ORG_RC=$?
-          if [ "${ORG_RC}" -ne 0 ]; then
-            echo "${BODY}" | gh api --method POST "/users/${OWNER}/packages/container/${PKG}/visibility" --input -
-            USER_RC=$?
-            if [ "${USER_RC}" -ne 0 ]; then
-              echo "::error::Could not set GHCR package ${PKG} visibility to public. Enable public packages on the org."
-              exit 1
-            fi
+          VISIBILITY="$(gh api "/orgs/${OWNER}/packages/container/${PKG}" --jq '.visibility' 2>/dev/null)"
+          if [ -z "${VISIBILITY}" ]; then
+            VISIBILITY="$(gh api "/users/${OWNER}/packages/container/${PKG}" --jq '.visibility' 2>/dev/null)"
+            PKG_HTML="https://github.com/users/${OWNER}/packages/container/${PKG}/settings"
           fi
           set -e
-          echo "Package visibility set to public."
+          if [ "${VISIBILITY}" = "public" ]; then
+            echo "GHCR package ${PKG} is already public."
+          else
+            echo "::warning::GHCR package '${PKG}' visibility is '${VISIBILITY:-unknown}'. GITHUB_TOKEN cannot change it (no Packages visibility API). Image tags were still pushed."
+            echo "Make it public once (org owners): ${PKG_HTML} → Danger Zone → Change visibility → Public."
+            echo "Also enable org Package Creation → Public: https://github.com/organizations/${OWNER}/settings/packages"
+            {
+              echo "### GHCR visibility"
+              echo ""
+              echo "Pushed \`${IMAGE_REMOTE}\` and \`${IMAGE_REMOTE_LATEST}\`."
+              echo "Package visibility is **${VISIBILITY:-unknown}** (not flipped by this job)."
+              echo "One-time UI: [package settings](${PKG_HTML}) → Danger Zone → Public."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Create GitHub Release on master
         env:
