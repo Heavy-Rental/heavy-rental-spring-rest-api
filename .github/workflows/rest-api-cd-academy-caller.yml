@@ -65,6 +65,9 @@ concurrency:
 
 permissions:
   contents: read
+  # Required to call rest-api-cd-academy.yml (shared with paid OIDC).
+  # Academy still authenticates with Vocareum keys, not GitHub OIDC.
+  id-token: write
 
 jobs:
   refuse-non-academy:
@@ -86,6 +89,9 @@ jobs:
     name: REST CD pipeline
     needs: [refuse-non-academy]
     uses: ./.github/workflows/rest-api-cd-academy.yml
+    permissions:
+      contents: read
+      id-token: write
     with:
       action: ${{ inputs.action }}
       aws_environment: ${{ inputs.aws_environment }}
