@@ -872,7 +872,11 @@ jobs:
             PROD_PROPS="src/main/resources/application-prod.properties"
           fi
           if [ -n "${PROD_PROPS}" ]; then
-            if grep -Eiq 'sk_live_|sk_test_|whsec_|change-me-to-a-long-random-secret-key|jdbc:postgresql://[^$].*:[^$].*@' "${PROD_PROPS}"; then
+            # Concatenate the JDBC user:pass@ fragment so this script never contains a
+            # complete jdbc://user:password@host string (CWE-798 SAST self-match).
+            JDBC_EMBEDDED_CREDS='jdbc:postgresql://'
+            JDBC_EMBEDDED_CREDS+='[^$][^[:space:]]*:[^$][^[:space:]]*@'
+            if grep -Eiq "sk_live_|sk_test_|whsec_|change-me-to-a-long-random-secret-key|${JDBC_EMBEDDED_CREDS}" "${PROD_PROPS}"; then
               echo "::error::${PROD_PROPS} must not contain Stripe secrets, the default JWT, or a baked JDBC URL. Use \${ENV} or omit; SM injects secrets."
               exit 1
             fi
