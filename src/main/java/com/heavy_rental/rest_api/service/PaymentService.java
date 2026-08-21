@@ -26,6 +26,9 @@ import com.stripe.param.PaymentIntentCreateParams;
 @Service
 public class PaymentService {
 
+    /** GST on the one-shot full-payment path only; deposit/balance never collect GST (confirmed, not an oversight). */
+    private static final BigDecimal GST_RATE = new BigDecimal("0.09");
+
     private final PaymentRepository paymentRepository;
     private final BookingRepository bookingRepository;
     private final UserRepository userRepository;
@@ -56,7 +59,8 @@ public class PaymentService {
         currentUserService.assertOwnerOrAdmin(jwt, booking.getCustomer());
 
         boolean depositAlreadyInitiatedOrPaid = paymentRepository.findByBookingId(bookingId).stream()
-                .anyMatch(p -> p.getPaymentType() == Payment.PaymentType.DEPOSIT
+                .anyMatch(p -> (p.getPaymentType() == Payment.PaymentType.DEPOSIT
+                        || p.getPaymentType() == Payment.PaymentType.FULL_PAYMENT)
                         && p.getStatus() != Payment.PaymentStatus.FAIL);
         if (depositAlreadyInitiatedOrPaid) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
@@ -86,6 +90,63 @@ public class PaymentService {
         payment.setStripeCustomerId(stripeCustomerId);
         payment.setAmount(booking.getDepositAmount());
         payment.setPaymentType(Payment.PaymentType.DEPOSIT);
+        payment.setStatus(Payment.PaymentStatus.PENDING);
+        payment.setCreatedAt(LocalDateTime.now());
+        paymentRepository.save(payment);
+
+        return intent;
+    }
+
+    /**
+     * Client-initiated: creates a PaymentIntent for the full booking amount in one shot,
+     * skipping the deposit/balance split entirely. Same ownership and transactional shape as
+     * {@link #createDepositPaymentIntent}; no setup_future_usage, since there's no later
+     * off-session charge to make. Amount is GST-inclusive (totalAmount * 1.09) — confirmed
+     * deliberate that deposit/balance stay GST-exclusive, so full payment costs 9% more in
+     * absolute terms than deposit+balance for the same booking.
+     */
+    @Transactional
+    public PaymentIntent createFullPaymentIntent(Jwt jwt, Long bookingId) throws StripeException {
+        Booking booking = bookingRepository.findById(bookingId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Booking not found"));
+        currentUserService.assertOwnerOrAdmin(jwt, booking.getCustomer());
+
+        boolean paymentAlreadyInitiatedOrPaid = paymentRepository.findByBookingId(bookingId).stream()
+                .anyMatch(p -> (p.getPaymentType() == Payment.PaymentType.DEPOSIT
+                        || p.getPaymentType() == Payment.PaymentType.BALANCE
+                        || p.getPaymentType() == Payment.PaymentType.FULL_PAYMENT)
+                        && p.getStatus() != Payment.PaymentStatus.FAIL);
+        if (paymentAlreadyInitiatedOrPaid) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Booking payment has already been initiated or paid");
+        }
+
+        String stripeCustomerId = resolveOrCreateStripeCustomer(booking.getCustomer());
+
+        BigDecimal gstInclusiveAmount = booking.getTotalAmount()
+                .multiply(BigDecimal.ONE.add(GST_RATE))
+                .setScale(2, RoundingMode.HALF_UP);
+
+        PaymentIntentCreateParams params = PaymentIntentCreateParams.builder()
+                .setAmount(toCents(gstInclusiveAmount))
+                .setCurrency("sgd")
+                .setCustomer(stripeCustomerId)
+                .setAutomaticPaymentMethods(
+                        PaymentIntentCreateParams.AutomaticPaymentMethods.builder()
+                                .setEnabled(true)
+                                .build())
+                .putMetadata("booking_id", String.valueOf(booking.getId()))
+                .putMetadata("payment_type", "FULL_PAYMENT")
+                .build();
+
+        PaymentIntent intent = PaymentIntent.create(params);
+
+        Payment payment = new Payment();
+        payment.setBooking(booking);
+        payment.setStripePaymentIntentId(intent.getId());
+        payment.setStripeCustomerId(stripeCustomerId);
+        payment.setAmount(gstInclusiveAmount);
+        payment.setPaymentType(Payment.PaymentType.FULL_PAYMENT);
         payment.setStatus(Payment.PaymentStatus.PENDING);
         payment.setCreatedAt(LocalDateTime.now());
         paymentRepository.save(payment);
