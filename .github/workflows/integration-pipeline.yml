@@ -801,7 +801,8 @@ jobs:
               pattern-regex: >-
                 (?i)spring\.security\.enabled\s*[=:]\s*["']?false
           SEMGREP_CUSTOM_RULES
-          sed -i 's/^          //' "${RULES_FILE}"
+          # run: | already strips this step's indent from the heredoc. A second
+          # de-indent (sed) would pull nested list items to column 1 and break YAML.
           echo "==> Validating custom Semgrep rules"
           semgrep --validate --config="${RULES_FILE}" --metrics=off
           SEMGREP_COMMON=(
