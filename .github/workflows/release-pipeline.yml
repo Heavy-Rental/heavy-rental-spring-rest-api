@@ -151,6 +151,10 @@ env:
   # Docker image naming (Tomcat hosts the Spring Boot WAR)
   IMAGE_NAME: heavy_rental_rest_api
   TOMCAT_BASE_IMAGE: tomcat:10.1-jdk21-temurin
+  # Stable artifact names so DAST/Publish do not depend on packaging job outputs
+  # (needs.*.outputs is empty for jobs with environment: in this reusable workflow).
+  IMAGE_ARCHIVE: heavy_rental_rest_api-image.tar.gz
+  IMAGE_META: image-meta.env
   # Non-sensitive Spring/JPA settings only — credentials come from GitHub Secrets
   SPRING_DATASOURCE_DRIVER_CLASS_NAME: org.postgresql.Driver
   SPRING_JPA_DATABASE_PLATFORM: org.hibernate.dialect.PostgreSQLDialect
@@ -908,7 +912,6 @@ jobs:
           IMAGE_LOCAL_LATEST: ${{ steps.package.outputs.image_local_latest }}
           IMAGE_REMOTE: ${{ steps.package.outputs.image_remote }}
           IMAGE_REMOTE_LATEST: ${{ steps.package.outputs.image_remote_latest }}
-          IMAGE_TAR: ${{ steps.package.outputs.image_tar }}
         run: |
           set -euo pipefail
           # Enforce lowercase repository path (GHCR rejects mixed-case names)
@@ -934,8 +937,9 @@ jobs:
           docker images "${IMAGE_NAME_LC}" --format 'table {{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.Size}}'
           docker images "ghcr.io/${OWNER_LC}/${IMAGE_NAME_LC}" --format 'table {{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.Size}}' || true
 
-          # Export every tag so docker load matches compose / Docker Desktop (local + GHCR + :latest)
-          TAR_PATH="${GITHUB_WORKSPACE}/${IMAGE_TAR}"
+          # Export every tag so docker load matches compose / Docker Desktop (local + GHCR + :latest).
+          # Use the stable IMAGE_ARCHIVE name so DAST/Publish can find it without job outputs.
+          TAR_PATH="${GITHUB_WORKSPACE}/${IMAGE_ARCHIVE}"
           docker save \
             "${IMAGE_LOCAL}" \
             "${IMAGE_LOCAL_LATEST}" \
@@ -947,6 +951,16 @@ jobs:
             echo "::error::Docker image tar is missing or empty: ${TAR_PATH}"
             exit 1
           fi
+
+          {
+            echo "IMAGE_LOCAL=${IMAGE_LOCAL}"
+            echo "IMAGE_LOCAL_LATEST=${IMAGE_LOCAL_LATEST}"
+            echo "IMAGE_REMOTE=${IMAGE_REMOTE}"
+            echo "IMAGE_REMOTE_LATEST=${IMAGE_REMOTE_LATEST}"
+            echo "IMAGE_TAG=${IMAGE_LOCAL##*:}"
+          } > "${GITHUB_WORKSPACE}/${IMAGE_META}"
+          echo "==> ${IMAGE_META}"
+          cat "${GITHUB_WORKSPACE}/${IMAGE_META}"
 
           {
             echo "image_id=$(docker image inspect -f '{{.Id}}' "${IMAGE_LOCAL}")"
@@ -1007,10 +1021,19 @@ jobs:
           trap cleanup EXIT
           docker run -d --name "${NAME}" \
             -e SPRING_DATASOURCE_URL=jdbc:postgresql://sor.example.test:5432/heavy_rental \
-            -e POSTGRES_HOST=sor.example.test \
+            -e SPRING_DATASOURCE_USERNAME=ci \
+            -e SPRING_DATASOURCE_PASSWORD=ci \
+            -e POSTGRES_HOSTNAME=sor.example.test \
+            -e POSTGRES_PORT=5432 \
+            -e POSTGRES_DB=heavy_rental \
+            -e POSTGRES_USER=ci \
+            -e POSTGRES_PASSWORD=ci \
             -e HAYSTACK_BASE_URL=http://haystack.example.test:8000 \
-            -e STRIPE_PUBLISHABLE_KEY=pk_test_ci_dummy \
+            -e STRIPE_API_KEY=ci-stripe-api-key \
+            -e STRIPE_PUBLISHABLE_KEY=ci-stripe-publishable-key \
+            -e STRIPE_WEBHOOK_SECRET=ci-stripe-webhook-secret \
             -e APP_JWT_SECRET=ci-dummy-jwt-secret-at-least-32-chars \
+            -e APP_CORS_ALLOWED_ORIGINS=http://127.0.0.1:8080 \
             "${IMAGE_LOCAL}"
           ok=0
           for _ in $(seq 1 45); do
@@ -1041,7 +1064,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: rest-api-release-docker-image
-          path: ${{ github.workspace }}/${{ steps.package.outputs.image_tar }}
+          path: |
+            ${{ github.workspace }}/${{ env.IMAGE_ARCHIVE }}
+            ${{ github.workspace }}/${{ env.IMAGE_META }}
           retention-days: 14
           if-no-files-found: error
 
@@ -1079,14 +1104,14 @@ jobs:
             echo "| Docker image (local) | \`${IMAGE_LOCAL}\` |"
             echo "| Docker image (GHCR) | \`${IMAGE_REMOTE}\` |"
             echo "| Docker image (GHCR latest) | \`${IMAGE_REMOTE_LATEST}\` |"
-            echo "| Image archive | \`${IMAGE_TAR}\` |"
+            echo "| Image archive | \`${IMAGE_ARCHIVE}\` |"
             echo "| Image ID | \`${IMAGE_ID}\` |"
             echo "| Artifacts | \`rest-api-release-target\`, \`rest-api-release-package\`, \`rest-api-release-docker-image\` |"
             echo ""
             echo "### Deploy options"
             echo ""
             echo "1. **WAR** — download \`rest-api-release-package\` and deploy the \`.war\` as Tomcat \`ROOT.war\`."
-            echo "2. **Image archive** — \`docker load < ${IMAGE_TAR}\` then \`docker run -p 8080:8080 -e … ${IMAGE_LOCAL}\` (Docker Desktop or any Engine)."
+            echo "2. **Image archive** — \`gzip -dc ${IMAGE_ARCHIVE} | docker load\` then \`docker run -p 8080:8080 -e … ${IMAGE_LOCAL}\` (Docker Desktop or any Engine)."
             if [ "${EVENT_NAME}" != "pull_request" ]; then
               echo "3. **GHCR** — \`docker pull ${IMAGE_REMOTE}\` or \`docker pull ${IMAGE_REMOTE_LATEST}\`."
             else
@@ -1108,28 +1133,82 @@ jobs:
 
       - name: Load image and start target
         id: start-dast
-        env:
-          IMAGE_LOCAL: ${{ needs.packaging.outputs.image_local }}
-          IMAGE_TAR: ${{ needs.packaging.outputs.image_tar }}
         run: |
           set -euo pipefail
+          # Do not use needs.packaging.outputs here: packaging sets environment:
+          # production, and those job outputs are empty in this reusable workflow.
+          META="${GITHUB_WORKSPACE}/${IMAGE_META}"
+          ARCHIVE="${GITHUB_WORKSPACE}/${IMAGE_ARCHIVE}"
+          if [ -f "${META}" ]; then
+            set -a
+            # shellcheck disable=SC1090
+            . "${META}"
+            set +a
+          fi
+          if [ ! -f "${ARCHIVE}" ]; then
+            ARCHIVE="$(find "${GITHUB_WORKSPACE}" -maxdepth 2 -type f -name '*.tar.gz' | head -n 1 || true)"
+          fi
+          if [ -z "${ARCHIVE}" ] || [ ! -f "${ARCHIVE}" ]; then
+            echo "::error::Docker image archive not found after downloading rest-api-release-docker-image."
+            echo "Expected ${GITHUB_WORKSPACE}/${IMAGE_ARCHIVE} (and ${IMAGE_META})."
+            ls -la "${GITHUB_WORKSPACE}" || true
+            find "${GITHUB_WORKSPACE}" -maxdepth 2 -type f | head -n 50 || true
+            exit 1
+          fi
+          echo "Loading ${ARCHIVE} ($(wc -c < "${ARCHIVE}") bytes)"
+          gzip -dc "${ARCHIVE}" | docker load
+          docker images
+          if [ -z "${IMAGE_LOCAL:-}" ]; then
+            IMAGE_LOCAL="$(docker images --format '{{.Repository}}:{{.Tag}}' "${IMAGE_NAME}" \
+              | grep -vE ':(latest|<none>)$' | head -n 1 || true)"
+          fi
+          if [ -z "${IMAGE_LOCAL:-}" ]; then
+            echo "::error::Could not determine IMAGE_LOCAL after docker load. ${IMAGE_META} missing?"
+            exit 1
+          fi
           IMAGE_LOCAL="${IMAGE_LOCAL,,}"
-          TAR="${GITHUB_WORKSPACE}/${IMAGE_TAR}"
-          gzip -dc "${TAR}" | docker load
+          echo "Using IMAGE_LOCAL=${IMAGE_LOCAL}"
+
           docker network inspect dastnet >/dev/null 2>&1 || docker network create dastnet
+          docker rm -f dast-db dast-app >/dev/null 2>&1 || true
+          docker run -d --name dast-db --network dastnet --network-alias dast-db \
+            -e POSTGRES_DB=heavy_rental \
+            -e POSTGRES_USER=dast \
+            -e POSTGRES_PASSWORD=dast \
+            postgres:16-alpine
+          for i in $(seq 1 30); do
+            if docker exec dast-db pg_isready -U dast >/dev/null 2>&1; then
+              echo "DAST Postgres is ready."
+              break
+            fi
+            if [ "${i}" -eq 30 ]; then
+              echo "::error::DAST Postgres did not become ready."
+              docker logs dast-db || true
+              exit 1
+            fi
+            sleep 2
+          done
+
           docker run -d --name dast-app --network dastnet --network-alias dast-app \
             -p 8080:8080 \
-            -e SPRING_DATASOURCE_URL=jdbc:postgresql://sor.example.test:5432/heavy_rental \
-            -e POSTGRES_HOST=sor.example.test \
+            -e SPRING_DATASOURCE_URL=jdbc:postgresql://dast-db:5432/heavy_rental \
+            -e SPRING_DATASOURCE_USERNAME=dast \
+            -e SPRING_DATASOURCE_PASSWORD=dast \
+            -e POSTGRES_HOSTNAME=dast-db \
+            -e POSTGRES_PORT=5432 \
+            -e POSTGRES_DB=heavy_rental \
+            -e POSTGRES_USER=dast \
+            -e POSTGRES_PASSWORD=dast \
             -e HAYSTACK_BASE_URL=http://haystack.example.test:8000 \
-            -e STRIPE_PUBLISHABLE_KEY=pk_test_ci_dummy \
+            -e STRIPE_API_KEY=ci-stripe-api-key \
+            -e STRIPE_PUBLISHABLE_KEY=ci-stripe-publishable-key \
+            -e STRIPE_WEBHOOK_SECRET=ci-stripe-webhook-secret \
             -e APP_JWT_SECRET=ci-dummy-jwt-secret-at-least-32-chars \
+            -e APP_CORS_ALLOWED_ORIGINS=http://127.0.0.1:8080 \
             "${IMAGE_LOCAL}"
           ok=0
-          for _ in $(seq 1 60); do
-            if curl -sS -o /dev/null --max-time 3 "http://127.0.0.1:8080/" \
-              || curl -sS -o /dev/null --max-time 3 "http://127.0.0.1:8080/docs" \
-              || curl -sS -o /dev/null --max-time 3 "http://127.0.0.1:8080/health"; then
+          for _ in $(seq 1 90); do
+            if curl -fsS -o /dev/null --max-time 3 "http://127.0.0.1:8080/actuator/health"; then
               ok=1
               break
             fi
@@ -1138,6 +1217,7 @@ jobs:
           if [ "${ok}" -ne 1 ]; then
             echo "::error::DAST target did not become ready on :8080."
             docker logs dast-app || true
+            docker logs dast-db || true
             exit 1
           fi
           echo "DAST target is up at http://dast-app:8080 (also http://127.0.0.1:8080)"
@@ -1236,7 +1316,7 @@ jobs:
       - name: Stop DAST target
         if: always()
         run: |
-          docker rm -f dast-app >/dev/null 2>&1 || true
+          docker rm -f dast-app dast-db >/dev/null 2>&1 || true
           docker network rm dastnet >/dev/null 2>&1 || true
 
       - name: Upload DAST reports
@@ -1275,11 +1355,26 @@ jobs:
           path: ${{ github.workspace }}/release-dast
 
       - name: Load image
-        env:
-          IMAGE_TAR: ${{ needs.packaging.outputs.image_tar }}
         run: |
           set -euo pipefail
-          gzip -dc "${GITHUB_WORKSPACE}/${IMAGE_TAR}" | docker load
+          META="${GITHUB_WORKSPACE}/${IMAGE_META}"
+          ARCHIVE="${GITHUB_WORKSPACE}/${IMAGE_ARCHIVE}"
+          if [ -f "${META}" ]; then
+            set -a
+            # shellcheck disable=SC1090
+            . "${META}"
+            set +a
+          fi
+          if [ ! -f "${ARCHIVE}" ]; then
+            ARCHIVE="$(find "${GITHUB_WORKSPACE}" -maxdepth 2 -type f -name '*.tar.gz' | head -n 1 || true)"
+          fi
+          if [ -z "${ARCHIVE}" ] || [ ! -f "${ARCHIVE}" ]; then
+            echo "::error::Docker image archive not found after downloading rest-api-release-docker-image."
+            ls -la "${GITHUB_WORKSPACE}" || true
+            exit 1
+          fi
+          echo "Loading ${ARCHIVE} ($(wc -c < "${ARCHIVE}") bytes)"
+          gzip -dc "${ARCHIVE}" | docker load
           docker images
 
       - name: Login to GitHub Container Registry
@@ -1294,11 +1389,20 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPOSITORY_OWNER: ${{ github.repository_owner }}
           IMAGE_NAME: ${{ env.IMAGE_NAME }}
-          IMAGE_TAG: ${{ needs.packaging.outputs.image_tag }}
-          IMAGE_REMOTE: ${{ needs.packaging.outputs.image_remote }}
-          IMAGE_REMOTE_LATEST: ${{ needs.packaging.outputs.image_remote_latest }}
         run: |
           set -euo pipefail
+          META="${GITHUB_WORKSPACE}/${IMAGE_META}"
+          if [ -f "${META}" ]; then
+            set -a
+            # shellcheck disable=SC1090
+            . "${META}"
+            set +a
+          fi
+          if [ -z "${IMAGE_REMOTE:-}" ] || [ -z "${IMAGE_REMOTE_LATEST:-}" ] || [ -z "${IMAGE_TAG:-}" ]; then
+            echo "::error::IMAGE_REMOTE/IMAGE_TAG missing. Expected ${IMAGE_META} in rest-api-release-docker-image."
+            cat "${META}" || true
+            exit 1
+          fi
           IMAGE_REMOTE="${IMAGE_REMOTE,,}"
           IMAGE_REMOTE_LATEST="${IMAGE_REMOTE_LATEST,,}"
           OWNER="${GH_REPOSITORY_OWNER}"
@@ -1341,11 +1445,20 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ needs.integration.outputs.app_repository }}
-          IMAGE_TAG: ${{ needs.packaging.outputs.image_tag }}
-          IMAGE_REMOTE: ${{ needs.packaging.outputs.image_remote }}
-          IMAGE_REMOTE_LATEST: ${{ needs.packaging.outputs.image_remote_latest }}
         run: |
           set -euo pipefail
+          META="${GITHUB_WORKSPACE}/${IMAGE_META}"
+          if [ -f "${META}" ]; then
+            set -a
+            # shellcheck disable=SC1090
+            . "${META}"
+            set +a
+          fi
+          if [ -z "${IMAGE_TAG:-}" ] || [ -z "${IMAGE_REMOTE:-}" ]; then
+            echo "::error::IMAGE_TAG/IMAGE_REMOTE missing. Expected ${IMAGE_META} in rest-api-release-docker-image."
+            cat "${META}" || true
+            exit 1
+          fi
           TAG="v${IMAGE_TAG}"
           NOTES="$(
             printf '%s\n' \
