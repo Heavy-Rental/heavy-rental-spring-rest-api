@@ -81,9 +81,8 @@ jobs:
       aws_environment: AWS_ACTUAL
       image_ref: ${{ inputs.image_ref }}
       image_http_url: ${{ inputs.image_http_url }}
-    # Do not use secrets: inherit (least privilege). AWS_ACTUAL is OIDC-only
-    # (vars.AWS_ROLE_TO_ASSUME). Jobs in rest-api-cd-academy.yml that set
-    # environment: read Environment secrets themselves.
+    # No secrets: AWS_ACTUAL authenticates with GitHub OIDC (vars.AWS_ROLE_TO_ASSUME).
+    # Do not use secrets: inherit (least privilege). Vocareum keys are forbidden here.
     permissions:
       contents: read
       id-token: write
