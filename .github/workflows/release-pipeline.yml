@@ -1107,6 +1107,7 @@ jobs:
           path: ${{ github.workspace }}
 
       - name: Load image and start target
+        id: start-dast
         env:
           IMAGE_LOCAL: ${{ needs.packaging.outputs.image_local }}
           IMAGE_TAR: ${{ needs.packaging.outputs.image_tar }}
@@ -1115,7 +1116,7 @@ jobs:
           IMAGE_LOCAL="${IMAGE_LOCAL,,}"
           TAR="${GITHUB_WORKSPACE}/${IMAGE_TAR}"
           gzip -dc "${TAR}" | docker load
-          docker network create dastnet
+          docker network inspect dastnet >/dev/null 2>&1 || docker network create dastnet
           docker run -d --name dast-app --network dastnet --network-alias dast-app \
             -p 8080:8080 \
             -e SPRING_DATASOURCE_URL=jdbc:postgresql://sor.example.test:5432/heavy_rental \
@@ -1149,7 +1150,7 @@ jobs:
           chmod 777 "${GITHUB_WORKSPACE}/dast-reports"
 
       - name: OWASP ZAP baseline
-        if: always()
+        if: ${{ always() && steps.start-dast.outcome == 'success' }}
         run: |
           set -euo pipefail
           REPORTS="${GITHUB_WORKSPACE}/dast-reports"
@@ -1175,7 +1176,7 @@ jobs:
           fi
 
       - name: Dastardly
-        if: always()
+        if: ${{ always() && steps.start-dast.outcome == 'success' }}
         run: |
           set -euo pipefail
           REPORTS="${GITHUB_WORKSPACE}/dast-reports"
@@ -1200,7 +1201,7 @@ jobs:
           fi
 
       - name: Nuclei (report-only)
-        if: always()
+        if: ${{ always() && steps.start-dast.outcome == 'success' }}
         continue-on-error: true
         run: |
           set -euo pipefail
