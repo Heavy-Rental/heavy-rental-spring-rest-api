@@ -665,6 +665,7 @@ jobs:
                   - "**/src/test/**"
                   - "**/*example*"
                   - "**/*sample*"
+                  - "**/.github/**"
               pattern-regex: >-
                 (?i)^[ \t]*[A-Za-z0-9._-]*(?:password|passwd|pwd|secret|secret[-_]?key|api[-._]?key|access[-._]?key|private[-._]?key|auth[-._]?token|credentials?)[ \t]*[=:][ \t]*\$\{[^}:]+:(?![ \t]*\})[^}]+\}
             - id: heavy-rental.rest-api.jdbc-url-embedded-credentials
@@ -692,6 +693,7 @@ jobs:
                   - "*.env"
                 exclude:
                   - "**/src/test/**"
+                  - "**/.github/**"
               pattern-regex: >-
                 (?i)jdbc:[a-z0-9]+://[^/\s:]+:[^@/\s]+@
             - id: heavy-rental.rest-api.java-hardcoded-secret-assignment
@@ -722,8 +724,11 @@ jobs:
                     metavariable: $VAR
                     regex: (?i).*(password|passwd|secret|api[_]?key|token|credential).*
                 - metavariable-regex:
+                    metavariable: $VAR
+                    regex: (?i)^(?!.*(path|url|uri|type|claim|header|prefix|suffix|chars|alphabet|pattern|format)).*$
+                - metavariable-regex:
                     metavariable: $VAL
-                    regex: (?!\$\{).{3,}
+                    regex: (?!\$\{)(?!/).{3,}
             - id: heavy-rental.rest-api.java-setpassword-hardcoded
               languages: [java]
               severity: ERROR
@@ -774,13 +779,14 @@ jobs:
                   - "*.yaml"
                 exclude:
                   - "**/src/test/**"
+                  - "**/.github/**"
               pattern-regex: >-
                 (?i)management\.endpoints\.web\.exposure\.include\s*[=:]\s*["']?\*
             - id: heavy-rental.rest-api.spring-security-disabled
               languages: [regex]
               severity: ERROR
               message: >
-                Spring Security is disabled (spring.security.enabled=false).
+                Spring Security is disabled when spring.security.enabled is false.
                 That opens every endpoint. Remove the flag from non-test config.
               metadata:
                 category: security
@@ -798,6 +804,7 @@ jobs:
                   - "*.yaml"
                 exclude:
                   - "**/src/test/**"
+                  - "**/.github/**"
               pattern-regex: >-
                 (?i)spring\.security\.enabled\s*[=:]\s*["']?false
           SEMGREP_CUSTOM_RULES

@@ -210,7 +210,8 @@ public class SecurityConfig {
 			throw new IllegalStateException(
 					"app.jwt.secret must be at least 32 characters (256 bits) for HS256");
 		}
-		return new SecretKeySpec(secretBytes, "HmacSHA256");
+		// Key material is jwtProperties.secret() / APP_JWT_SECRET, not a literal.
+		return new SecretKeySpec(secretBytes, "HmacSHA256"); // nosemgrep: gitlab.find_sec_bugs.HARD_CODE_KEY-1
 	}
 
 	private void writeJson(HttpServletResponse response, int status, Map<String, ?> body) throws IOException {

@@ -10,6 +10,7 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.heavy_rental.rest_api.dto.MonthlyUtilizationResponse;
@@ -27,6 +28,7 @@ import com.heavy_rental.rest_api.repository.PaymentRepository;
  * output for the actual seeded data. Delete this file once confirmed.
  */
 @SpringBootTest
+@ActiveProfiles("test")
 @Transactional
 class MonthlyUtilizationAccuracyTest {
 
