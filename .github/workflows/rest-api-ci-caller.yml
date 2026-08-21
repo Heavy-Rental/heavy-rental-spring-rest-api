@@ -51,6 +51,7 @@ permissions:
   pull-requests: read
   security-events: write
   actions: read
+  checks: write
 
 jobs:
   # Reusable-workflow call: only uses / with / secrets (no environment, no runs-on)
