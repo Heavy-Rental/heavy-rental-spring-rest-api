@@ -881,7 +881,7 @@ Primary file: `heavy-rental-spring-rest-api/src/main/resources/application.prope
 | Property | Default / notes |
 |----------|-----------------|
 | `server.port` | `8080` |
-| `spring.datasource.url` | `jdbc:postgresql://${POSTGRES_HOSTNAME:db}:5432/${POSTGRES_DB:postgres}` |
+| `spring.datasource.url` | `jdbc:postgresql://${POSTGRES_HOSTNAME:db}:5432/${POSTGRES_DB:postgres}` (password from `POSTGRES_PASSWORD`, no plaintext default) |
 | `spring.jpa.hibernate.ddl-auto` | `update` (default); `validate` in `prod` |
 | `spring.flyway.enabled` | `false` (default); `true` in `prod` |
 | `spring.flyway.locations` | `classpath:db/migration` (prod) |
@@ -893,7 +893,7 @@ Primary file: `heavy-rental-spring-rest-api/src/main/resources/application.prope
 
 | Property | Env override | Notes |
 |----------|--------------|--------|
-| `app.jwt.secret` | `APP_JWT_SECRET` | ≥ 32 chars for HS256 |
+| `app.jwt.secret` | `APP_JWT_SECRET` | ≥ 32 chars for HS256; no plaintext default |
 | `app.jwt.issuer` | `APP_JWT_ISSUER` | default `heavy-rental-rest-api` |
 | `app.jwt.expirationMinutes` | `APP_JWT_EXPIRATION_MINUTES` | default `60` |
 
@@ -909,9 +909,9 @@ No wildcard origin (incompatible with credentialed Authorization-header APIs).
 
 | Property | Env |
 |----------|-----|
-| `stripe.api.key` | `STRIPE_API_KEY` |
+| `stripe.api.key` | `STRIPE_API_KEY` (no plaintext default) |
 | `stripe.publishable.key` | `STRIPE_PUBLISHABLE_KEY` |
-| `stripe.webhook.secret` | `STRIPE_WEBHOOK_SECRET` |
+| `stripe.webhook.secret` | `STRIPE_WEBHOOK_SECRET` (no plaintext default) |
 
 Currency for PaymentIntents is hardcoded **`sgd`** as-built.
 
@@ -945,6 +945,18 @@ Env prefixes: `HAYSTACK_*` (see properties file for exact names).
 - Optional: **Stripe** keys for real deposit intents and webhooks
 
 ### 8.2 Run the API
+
+Secrets have no plaintext defaults in `application.properties`. Export at least:
+
+```bash
+export APP_JWT_SECRET='<at least 32 characters>'
+export POSTGRES_PASSWORD='<postgres password>'
+# optional, needed for payments / geocoding:
+# export STRIPE_API_KEY=...
+# export STRIPE_WEBHOOK_SECRET=...
+# export ONEMAP_EMAIL=...
+# export ONEMAP_PASSWORD=...
+```
 
 ```bash
 cd heavy-rental-spring-rest-api

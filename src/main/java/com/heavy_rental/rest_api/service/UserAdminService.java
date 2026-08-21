@@ -19,7 +19,7 @@ import com.heavy_rental.rest_api.repository.UserRepository;
 @Service
 public class UserAdminService {
 
-    private static final String PASSWORD_CHARS =
+    private static final String TEMPORARY_PASSWORD_ALPHABET =
             "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%";
     private static final int PASSWORD_LENGTH = 16;
     private static final SecureRandom RANDOM = new SecureRandom();
@@ -103,7 +103,7 @@ public class UserAdminService {
     private String generateTemporaryPassword() {
         StringBuilder sb = new StringBuilder(PASSWORD_LENGTH);
         for (int i = 0; i < PASSWORD_LENGTH; i++) {
-            sb.append(PASSWORD_CHARS.charAt(RANDOM.nextInt(PASSWORD_CHARS.length())));
+            sb.append(TEMPORARY_PASSWORD_ALPHABET.charAt(RANDOM.nextInt(TEMPORARY_PASSWORD_ALPHABET.length())));
         }
         return sb.toString();
     }

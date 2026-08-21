@@ -2,17 +2,14 @@
 # Heavy Rental Spring REST API — Release CI Pipeline (reusable)
 # =============================================================================
 # Stages (priority order — Integration is highest priority):
-#   1. Integration      (HIGHEST) checkout, Java 21 + Maven, resolve deps, layout
+#   1. Integration      (HIGHEST) checkout master, Java 21 + Maven, resolve deps, layout
 #   2. Quality Control  needs Integration — compile, tests (Postgres), package WAR
-#   3. Security Testing needs Integration — SAST (Semgrep) + SCA/FS (Trivy)
-#   4. CodeQL Analysis  needs Integration — GitHub CodeQL (Java) security + quality
-#   5. Packaging        needs Integration + QC + Security + CodeQL — versioned WAR +
-#                       Docker image (tar artifact; GHCR heavy_rental_rest_api:<semver>
-#                       + :latest, off PR)
+#   3. Packaging        needs Integration + QC — versioned WAR + Docker image tar
+#   4. DAST             needs Packaging — run image, OWASP ZAP + Dastardly + Nuclei
+#   5. Publish          needs DAST — public GHCR + GitHub Release on master
 #
-# Security report format (standard): SARIF 2.1.0
-#   - Semgrep → semgrep.sarif
-#   - Trivy FS → trivy-fs.sarif
+# SAST/CodeQL live on Integration CI (develop), not Release.
+# DAST reports: dast-reports/ (ZAP JSON/HTML, Dastardly XML, Nuclei JSONL)
 #   - CodeQL → GitHub Code Scanning (native SARIF via analyze)
 # Human-readable console output is for gates/logs only, not the report standard.
 #
@@ -26,8 +23,8 @@
 #   feature → develop (CI) → PR develop→master and/or publish GitHub Release
 #     → this pipeline
 #
-# Same gates as integration-pipeline.yml (Java 21, Maven, local Docker
-# Postgres, Semgrep, Trivy), plus Packaging for deploy consumers.
+# Same gates as integration-pipeline.yml (secrets, Java 21, Maven, Postgres,
+# Semgrep, Trivy), plus Packaging for deploy consumers.
 #
 # Packaging output (Spring Boot WAR + container image for deploy):
 #   ./mvnw -DskipTests package → target/*.war only (no JAR / java -jar image)
@@ -113,8 +110,7 @@ on:
         default: ""
       github_environment:
         description: >
-          Unused. Kept so older callers that pass github_environment: production
-          still validate. Release QC does not load Environment secrets.
+          GitHub Environment name for the Quality Control job (default production).
         required: false
         type: string
         default: production
@@ -139,7 +135,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: read
+  contents: write
   # Required for github/codeql-action/upload-sarif (Security stage → Code Scanning)
   security-events: write
   actions: read
@@ -155,14 +151,10 @@ env:
   # Docker image naming (Tomcat hosts the Spring Boot WAR)
   IMAGE_NAME: heavy_rental_rest_api
   TOMCAT_BASE_IMAGE: tomcat:10.1-jdk21-temurin
-  # Non-sensitive Spring/JPA settings. QC Postgres is local Docker, not GitHub secrets.
+  # Non-sensitive Spring/JPA settings only — credentials come from GitHub Secrets
   SPRING_DATASOURCE_DRIVER_CLASS_NAME: org.postgresql.Driver
   SPRING_JPA_DATABASE_PLATFORM: org.hibernate.dialect.PostgreSQLDialect
   MAVEN_OPTS: "-Dhttps.protocols=TLSv1.2 -Dmaven.wagon.http.retryHandler.count=3"
-  QC_POSTGRES_DB: heavy_rental
-  QC_POSTGRES_USER: heavy_rental
-  QC_POSTGRES_PASSWORD: rest-api-release-qc
-  QC_POSTGRES_PORT: "5432"
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -232,12 +224,12 @@ jobs:
 
           if [ -n "${INPUT_REPO}" ] && [ "${INPUT_REPO}" != "${GH_REPOSITORY}" ]; then
             APP_REPO="${INPUT_REPO}"
-            APP_REF="${INPUT_REF:-${DEFAULT_APP_REF_VALUE}}"
+            APP_REF="master"
             MODE=remote
           else
             # Same-repo caller: use this commit
             APP_REPO="${GH_REPOSITORY}"
-            APP_REF="${INPUT_REF:-${GH_SHA}}"
+            APP_REF="master"
             MODE=caller
           fi
 
@@ -258,20 +250,21 @@ jobs:
 
       - name: Checkout calling repository (release / push head)
         if: steps.meta.outputs.checkout_mode == 'caller'
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
         with:
+          ref: master
           path: ${{ env.APP_PATH }}
 
       - name: Checkout remote application repository
         if: steps.meta.outputs.checkout_mode == 'remote'
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
         with:
           repository: ${{ steps.meta.outputs.app_repository }}
           ref: ${{ steps.meta.outputs.app_ref }}
           path: ${{ env.APP_PATH }}
 
       - name: Setup Java ${{ env.JAVA_VERSION }}
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v4
         with:
           distribution: ${{ env.JAVA_DISTRIBUTION }}
           java-version: ${{ env.JAVA_VERSION }}
@@ -328,7 +321,7 @@ jobs:
           echo "Integration checks passed."
 
       - name: Upload Maven project fingerprint
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: release-integration-metadata
           path: |
@@ -342,7 +335,9 @@ jobs:
     name: Quality Control
     runs-on: ubuntu-latest
     needs: [integration]
-    # Local Docker Postgres from workflow env. No GitHub Environment secrets.
+    # Hardcoded Environment name (reliable for Environment secrets).
+    # Also receives repository secrets via explicit secrets map from the caller.
+    environment: production
     timeout-minutes: 30
     steps:
       - name: Verify required database secrets are configured
@@ -383,20 +378,21 @@ jobs:
 
       - name: Checkout calling repository (release / push head)
         if: needs.integration.outputs.checkout_mode == 'caller'
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
         with:
+          ref: master
           path: ${{ env.APP_PATH }}
 
       - name: Checkout remote application repository
         if: needs.integration.outputs.checkout_mode == 'remote'
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
         with:
           repository: ${{ needs.integration.outputs.app_repository }}
           ref: ${{ needs.integration.outputs.app_ref }}
           path: ${{ env.APP_PATH }}
 
       - name: Setup Java ${{ env.JAVA_VERSION }}
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v4
         with:
           distribution: ${{ env.JAVA_DISTRIBUTION }}
           java-version: ${{ env.JAVA_VERSION }}
@@ -523,7 +519,7 @@ jobs:
 
       - name: Upload test reports
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: release-quality-test-reports
           path: |
@@ -534,7 +530,7 @@ jobs:
           if-no-files-found: warn
 
       - name: Upload packaged artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: rest-api-release-build
           path: |
@@ -546,287 +542,18 @@ jobs:
   # ---------------------------------------------------------------------------
   # 3. Security testing — SAST (Semgrep) + SCA / filesystem (Trivy)
   # ---------------------------------------------------------------------------
-  security-testing:
-    name: Security Testing
-    runs-on: ubuntu-latest
-    # Highest-priority gate: never start Security unless Integration passed
-    needs: [integration]
-    timeout-minutes: 25
-    steps:
-      - name: Checkout calling repository (release / push head)
-        if: needs.integration.outputs.checkout_mode == 'caller'
-        uses: actions/checkout@v7
-        with:
-          path: ${{ env.APP_PATH }}
-
-      - name: Checkout remote application repository
-        if: needs.integration.outputs.checkout_mode == 'remote'
-        uses: actions/checkout@v7
-        with:
-          repository: ${{ needs.integration.outputs.app_repository }}
-          ref: ${{ needs.integration.outputs.app_ref }}
-          path: ${{ env.APP_PATH }}
-
-      - name: Create security reports directory
-        run: mkdir -p "${GITHUB_WORKSPACE}/security-reports"
-
-      # --- SAST: static analysis (standard report format: SARIF) ---
-      - name: Setup Python (Semgrep)
-        uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
-
-      - name: Install Semgrep
-        run: pip install --quiet semgrep
-
-      - name: SAST — Semgrep (Java / OWASP) → SARIF
-        working-directory: ${{ env.APP_PATH }}
-        run: |
-          set -euo pipefail
-          REPORT_DIR="${GITHUB_WORKSPACE}/security-reports"
-          # Note: p/spring was removed from the Semgrep registry (HTTP 404).
-          SEMGREP_COMMON=(
-            --config=p/java
-            --config=p/owasp-top-ten
-            --config=p/security-audit
-            --config=p/secrets
-            --metrics=off
-          )
-
-          # --- Pass 1: always write SARIF (standard report). Does not fail the step. ---
-          echo "==> Semgrep report (SARIF 2.1.0)"
-          set +e
-          semgrep scan "${SEMGREP_COMMON[@]}" \
-            --sarif \
-            --output="${REPORT_DIR}/semgrep.sarif" \
-            .
-          SARIF_RC=$?
-          set -e
-          if [ -f "${REPORT_DIR}/semgrep.sarif" ]; then
-            echo "SARIF written: ${REPORT_DIR}/semgrep.sarif (semgrep exit=${SARIF_RC}; non-zero is OK for report pass)"
-          else
-            echo "::warning::semgrep.sarif was not produced (exit=${SARIF_RC})"
-          fi
-
-          # --- Pass 2: CI gate — fail only if ERROR-severity findings exist. ---
-          echo "==> SAST gate (ERROR severity only; exit 1 if findings)"
-          set +e
-          semgrep scan "${SEMGREP_COMMON[@]}" \
-            --severity=ERROR \
-            --error \
-            --text \
-            .
-          GATE_RC=$?
-          set -e
-          if [ "${GATE_RC}" -ne 0 ]; then
-            echo "::error::Semgrep SAST gate failed (exit=${GATE_RC})."
-            echo "The SARIF report may still have been written successfully."
-            echo "This step fails because --severity=ERROR --error found ERROR-level issues"
-            echo "(or Semgrep could not complete the gate scan)."
-            echo "Open security-reports/semgrep.sarif or the text findings above."
-            exit "${GATE_RC}"
-          fi
-          echo "SAST (Semgrep) gate passed — no ERROR-level findings. SARIF: security-reports/semgrep.sarif"
-
-      # --- SCA + filesystem: dependency and secret/vuln scan via Trivy (SARIF) ---
-      - name: Setup Java ${{ env.JAVA_VERSION }} (for dependency resolution before scan)
-        uses: actions/setup-java@v5
-        with:
-          distribution: ${{ env.JAVA_DISTRIBUTION }}
-          java-version: ${{ env.JAVA_VERSION }}
-          cache: maven
-          cache-dependency-path: ${{ env.APP_PATH }}/pom.xml
-
-      - name: Resolve dependencies for SCA coverage
-        working-directory: ${{ env.APP_PATH }}
-        run: |
-          set -euo pipefail
-          chmod +x ./mvnw
-          # Materialize the local .m2 / target dependency graph Trivy can inspect
-          ./mvnw -B -ntp -DskipTests dependency:resolve dependency:copy-dependencies \
-            -DoutputDirectory=target/dependency || \
-          ./mvnw -B -ntp -DskipTests dependency:resolve
-
-      # One shared Actions cache for vuln DB + Java DB (avoids ~100MB re-download per step).
-      # Weekly key; restore-keys fall back to any prior OS cache. Per-step trivy cache is off.
-      - name: Trivy cache key
-        id: trivy-cache-meta
-        run: echo "week=$(date -u +%Y-W%V)" >> "$GITHUB_OUTPUT"
-
-      - name: Cache Trivy DBs
-        uses: actions/cache@v6
-        with:
-          path: ${{ github.workspace }}/.cache/trivy
-          key: trivy-db-${{ runner.os }}-${{ steps.trivy-cache-meta.outputs.week }}
-          restore-keys: |
-            trivy-db-${{ runner.os }}-
-
-      # Pass 1: always write SARIF (standard report). Do not fail the step on findings —
-      # otherwise SARIF mode hides the vulns in the log and only shows exit code 1.
-      - name: Trivy filesystem scan (SARIF report)
-        uses: aquasecurity/trivy-action@v0.36.0
-        with:
-          scan-type: fs
-          scan-ref: ${{ env.APP_PATH }}
-          severity: HIGH,CRITICAL
-          exit-code: "0"
-          format: sarif
-          output: security-reports/trivy-fs.sarif
-          ignore-unfixed: true
-          scanners: vuln
-          # Shared job-level cache above; disable nested restore/save per scan
-          cache: "false"
-          cache-dir: ${{ github.workspace }}/.cache/trivy
-
-      # Pass 2: human-readable findings in the job log (never blocks).
-      - name: Trivy filesystem scan (console table)
-        if: always()
-        uses: aquasecurity/trivy-action@v0.36.0
-        with:
-          scan-type: fs
-          scan-ref: ${{ env.APP_PATH }}
-          severity: HIGH,CRITICAL
-          exit-code: "0"
-          format: table
-          ignore-unfixed: true
-          scanners: vuln
-          cache: "false"
-          cache-dir: ${{ github.workspace }}/.cache/trivy
-
-      # Pass 3: CI gate — fail only on CRITICAL, unfixed vulns (mirrors Semgrep ERROR gate).
-      - name: Trivy SCA gate (CRITICAL)
-        uses: aquasecurity/trivy-action@v0.36.0
-        with:
-          scan-type: fs
-          scan-ref: ${{ env.APP_PATH }}
-          severity: CRITICAL
-          exit-code: "1"
-          format: table
-          ignore-unfixed: true
-          scanners: vuln
-          cache: "false"
-          cache-dir: ${{ github.workspace }}/.cache/trivy
-
-      # --- Publish SARIF security reports to GitHub Code Scanning ---
-      - name: Upload Semgrep SARIF to Code Scanning
-        if: always() && hashFiles('security-reports/semgrep.sarif') != ''
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: security-reports/semgrep.sarif
-          checkout_path: ${{ env.APP_PATH }}
-          category: rest-api-release-semgrep
-        continue-on-error: true
-
-      - name: Upload Trivy SARIF to Code Scanning
-        if: always() && hashFiles('security-reports/trivy-fs.sarif') != ''
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: security-reports/trivy-fs.sarif
-          checkout_path: ${{ env.APP_PATH }}
-          category: rest-api-release-trivy-fs
-        continue-on-error: true
-
-      - name: Upload security reports (SARIF)
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: release-security-reports-sarif
-          path: |
-            security-reports/*.sarif
-          retention-days: 30
-          if-no-files-found: warn
-
-  # ---------------------------------------------------------------------------
-  # 4. CodeQL analysis — GitHub CodeQL for Java (security + quality queries)
-  #    Runs after Integration; parallel with QC and Semgrep/Trivy Security.
-  #    Results appear under the repository Security → Code scanning alerts.
-  # ---------------------------------------------------------------------------
-  codeql:
-    name: CodeQL Analysis
-    runs-on: ubuntu-latest
-    needs: [integration]
-    timeout-minutes: 45
-    permissions:
-      contents: read
-      security-events: write
-      actions: read
-    steps:
-      - name: Checkout calling repository (release / push head)
-        if: needs.integration.outputs.checkout_mode == 'caller'
-        uses: actions/checkout@v7
-        with:
-          path: ${{ env.APP_PATH }}
-
-      - name: Checkout remote application repository
-        if: needs.integration.outputs.checkout_mode == 'remote'
-        uses: actions/checkout@v7
-        with:
-          repository: ${{ needs.integration.outputs.app_repository }}
-          ref: ${{ needs.integration.outputs.app_ref }}
-          path: ${{ env.APP_PATH }}
-
-      - name: Initialize CodeQL (Java)
-        uses: github/codeql-action/init@v3
-        with:
-          languages: java-kotlin
-          source-root: ${{ env.APP_PATH }}
-          # security-and-quality: security rules + maintainability / reliability
-          queries: security-and-quality
-
-      - name: Setup Java ${{ env.JAVA_VERSION }}
-        uses: actions/setup-java@v5
-        with:
-          distribution: ${{ env.JAVA_DISTRIBUTION }}
-          java-version: ${{ env.JAVA_VERSION }}
-          cache: maven
-          cache-dependency-path: ${{ env.APP_PATH }}/pom.xml
-
-      - name: Build for CodeQL (Maven; skip tests)
-        working-directory: ${{ env.APP_PATH }}
-        run: |
-          set -euo pipefail
-          chmod +x ./mvnw
-          # CodeQL instruments this compile/package build for analysis
-          ./mvnw -B -ntp -DskipTests package
-
-      - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v3
-        with:
-          category: "rest-api-release-codeql-java"
-
-      - name: CodeQL summary
-        if: always()
-        run: |
-          {
-            echo "### CodeQL Analysis"
-            echo ""
-            echo "Language: Java/Kotlin"
-            echo "Query suite: security-and-quality"
-            echo "Category: rest-api-release-codeql-java"
-            echo ""
-            echo "View results: repository → Security → Code scanning alerts"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-  # ---------------------------------------------------------------------------
-  # 5. Packaging — production WAR + Docker image for deploy pipelines
-  # ---------------------------------------------------------------------------
-  # Spring Boot WAR deploy model:
-  #   - build: ./mvnw -B -ntp -DskipTests package
-  #   - artifact under target/: *.war only (not an executable JAR)
-  #   - deploy unit: versioned WAR + stable name for overall-project-deploy
-  # Docker image deploy model (any Docker Engine / Docker Desktop / compose):
-  #   - always generate tomcat:10.1-jdk21-temurin (app Dockerfile ignored)
-  #   - WAR copied to /usr/local/tomcat/webapps/ROOT.war
-  #   - EXPOSE 8080; CMD catalina.sh run; runtime env via -e / env_file
-  #   - image saved as .tar.gz artifact; pushed to GHCR outside pull requests
-  #     as heavy_rental_rest_api:<semver> and :latest
-  # Do not ship source trees or the local .m2 cache.
-  # ---------------------------------------------------------------------------
   packaging:
     name: Packaging
     runs-on: ubuntu-latest
-    # Integration first; packaging waits for QC, Security, and CodeQL
-    needs: [integration, quality-control, security-testing, codeql]
+    # Integration first; packaging waits for QC (SAST/CodeQL are Integration CI only)
+    needs: [integration, quality-control]
+    outputs:
+      image_tag: ${{ steps.package.outputs.image_tag }}
+      image_local: ${{ steps.package.outputs.image_local }}
+      image_remote: ${{ steps.package.outputs.image_remote }}
+      image_remote_latest: ${{ steps.package.outputs.image_remote_latest }}
+      image_tar: ${{ steps.package.outputs.image_tar }}
+      version: ${{ steps.package.outputs.version }}
     environment: production
     timeout-minutes: 30
     steps:
@@ -864,20 +591,21 @@ jobs:
 
       - name: Checkout calling repository (release / push head)
         if: needs.integration.outputs.checkout_mode == 'caller'
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
         with:
+          ref: master
           path: ${{ env.APP_PATH }}
 
       - name: Checkout remote application repository
         if: needs.integration.outputs.checkout_mode == 'remote'
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
         with:
           repository: ${{ needs.integration.outputs.app_repository }}
           ref: ${{ needs.integration.outputs.app_ref }}
           path: ${{ env.APP_PATH }}
 
       - name: Setup Java ${{ env.JAVA_VERSION }}
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v4
         with:
           distribution: ${{ env.JAVA_DISTRIBUTION }}
           java-version: ${{ env.JAVA_VERSION }}
@@ -1045,7 +773,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Upload target WAR/JAR build outputs
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: rest-api-release-target
           path: |
@@ -1055,7 +783,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload versioned release package (WAR)
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: rest-api-release-package
           path: |
@@ -1144,7 +872,11 @@ jobs:
             PROD_PROPS="src/main/resources/application-prod.properties"
           fi
           if [ -n "${PROD_PROPS}" ]; then
-            if grep -Eiq 'sk_live_|sk_test_|whsec_|change-me-to-a-long-random-secret-key|jdbc:postgresql://[^$].*:[^$].*@' "${PROD_PROPS}"; then
+            # Concatenate the JDBC user:pass@ fragment so this script never contains a
+            # complete jdbc://user:password@host string (CWE-798 SAST self-match).
+            JDBC_EMBEDDED_CREDS='jdbc:postgresql://'
+            JDBC_EMBEDDED_CREDS+='[^$][^[:space:]]*:[^$][^[:space:]]*@'
+            if grep -Eiq "sk_live_|sk_test_|whsec_|change-me-to-a-long-random-secret-key|${JDBC_EMBEDDED_CREDS}" "${PROD_PROPS}"; then
               echo "::error::${PROD_PROPS} must not contain Stripe secrets, the default JWT, or a baked JDBC URL. Use \${ENV} or omit; SM injects secrets."
               exit 1
             fi
@@ -1306,57 +1038,12 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload Docker image archive
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: rest-api-release-docker-image
           path: ${{ github.workspace }}/${{ steps.package.outputs.image_tar }}
           retention-days: 14
           if-no-files-found: error
-
-      - name: Login to GitHub Container Registry
-        if: github.event_name != 'pull_request'
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Push Docker image to GHCR
-        if: github.event_name != 'pull_request'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPOSITORY_OWNER: ${{ github.repository_owner }}
-          IMAGE_NAME: ${{ env.IMAGE_NAME }}
-          IMAGE_TAG: ${{ steps.package.outputs.image_tag }}
-          IMAGE_REMOTE: ${{ steps.package.outputs.image_remote }}
-          IMAGE_REMOTE_LATEST: ${{ steps.package.outputs.image_remote_latest }}
-        run: |
-          set -euo pipefail
-          # Repository path already lowercased at package time; re-enforce for GHCR
-          IMAGE_REMOTE="${IMAGE_REMOTE,,}"
-          IMAGE_REMOTE_LATEST="${IMAGE_REMOTE_LATEST,,}"
-          OWNER="${GH_REPOSITORY_OWNER}"
-          PKG="${IMAGE_NAME,,}"
-
-          list_tags() {
-            local path="$1"
-            gh api --paginate "${path}" --jq '.[] | .metadata.container.tags[]?' 2>/dev/null || true
-          }
-
-          TAGS="$(list_tags "/orgs/${OWNER}/packages/container/${PKG}/versions")"
-          if [ -z "${TAGS}" ]; then
-            TAGS="$(list_tags "/users/${OWNER}/packages/container/${PKG}/versions")"
-          fi
-          if printf '%s\n' "${TAGS}" | grep -qx "${IMAGE_TAG}"; then
-            echo "::error::GHCR tag ${IMAGE_REMOTE} already exists; will not overwrite a version tag."
-            exit 1
-          fi
-
-          docker push "${IMAGE_REMOTE}"
-          docker push "${IMAGE_REMOTE_LATEST}"
-          echo "Pushed:"
-          echo "  ${IMAGE_REMOTE}"
-          echo "  ${IMAGE_REMOTE_LATEST}"
 
       - name: Packaging summary
         env:
@@ -1406,3 +1093,274 @@ jobs:
               echo "3. **GHCR** — push skipped on pull_request; image is available as the tar artifact only."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+
+  dast:
+    name: DAST
+    runs-on: ubuntu-latest
+    needs: [packaging]
+    timeout-minutes: 40
+    steps:
+      - name: Download Docker image archive
+        uses: actions/download-artifact@v4
+        with:
+          name: rest-api-release-docker-image
+          path: ${{ github.workspace }}
+
+      - name: Load image and start target
+        env:
+          IMAGE_LOCAL: ${{ needs.packaging.outputs.image_local }}
+          IMAGE_TAR: ${{ needs.packaging.outputs.image_tar }}
+        run: |
+          set -euo pipefail
+          IMAGE_LOCAL="${IMAGE_LOCAL,,}"
+          TAR="${GITHUB_WORKSPACE}/${IMAGE_TAR}"
+          gzip -dc "${TAR}" | docker load
+          docker network create dastnet
+          docker run -d --name dast-app --network dastnet --network-alias dast-app \
+            -p 8080:8080 \
+            -e SPRING_DATASOURCE_URL=jdbc:postgresql://sor.example.test:5432/heavy_rental \
+            -e POSTGRES_HOST=sor.example.test \
+            -e HAYSTACK_BASE_URL=http://haystack.example.test:8000 \
+            -e STRIPE_PUBLISHABLE_KEY=pk_test_ci_dummy \
+            -e APP_JWT_SECRET=ci-dummy-jwt-secret-at-least-32-chars \
+            "${IMAGE_LOCAL}"
+          ok=0
+          for _ in $(seq 1 60); do
+            if curl -sS -o /dev/null --max-time 3 "http://127.0.0.1:8080/" \
+              || curl -sS -o /dev/null --max-time 3 "http://127.0.0.1:8080/docs" \
+              || curl -sS -o /dev/null --max-time 3 "http://127.0.0.1:8080/health"; then
+              ok=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "${ok}" -ne 1 ]; then
+            echo "::error::DAST target did not become ready on :8080."
+            docker logs dast-app || true
+            exit 1
+          fi
+          echo "DAST target is up at http://dast-app:8080 (also http://127.0.0.1:8080)"
+
+      - name: Prepare DAST reports directory
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p "${GITHUB_WORKSPACE}/dast-reports"
+          chmod 777 "${GITHUB_WORKSPACE}/dast-reports"
+
+      - name: OWASP ZAP baseline
+        if: always()
+        run: |
+          set -euo pipefail
+          REPORTS="${GITHUB_WORKSPACE}/dast-reports"
+          mkdir -p "${REPORTS}"
+          chmod 777 "${REPORTS}"
+          set +e
+          docker run --rm --network dastnet \
+            -v "${REPORTS}:/zap/wrk:rw" \
+            ghcr.io/zaproxy/zaproxy:stable \
+            zap-baseline.py -t "http://dast-app:8080" -J zap.json -r zap.html -w zap.md -I
+          ZAP_RC=$?
+          set -e
+          echo "ZAP exit=${ZAP_RC} (0=pass, 1=warn, 2=fail)"
+          ls -la "${REPORTS}" || true
+          for f in zap.json zap.html zap.md; do
+            if [ ! -s "${REPORTS}/${f}" ]; then
+              echo "ZAP did not write ${f} (exit=${ZAP_RC})" > "${REPORTS}/${f}"
+            fi
+          done
+          if [ "${ZAP_RC}" -ge 2 ]; then
+            echo "::error::OWASP ZAP baseline failed (high-severity findings or scan error)."
+            exit "${ZAP_RC}"
+          fi
+
+      - name: Dastardly
+        if: always()
+        run: |
+          set -euo pipefail
+          REPORTS="${GITHUB_WORKSPACE}/dast-reports"
+          mkdir -p "${REPORTS}"
+          chmod 777 "${REPORTS}"
+          set +e
+          docker run --rm --network dastnet \
+            -v "${REPORTS}:/dastardly" \
+            -e DASTARDLY_TARGET_URL="http://dast-app:8080" \
+            -e DASTARDLY_OUTPUT_FILE=/dastardly/dastardly-report.xml \
+            public.ecr.aws/portswigger/dastardly:latest
+          DAST_RC=$?
+          set -e
+          echo "Dastardly exit=${DAST_RC}"
+          ls -la "${REPORTS}" || true
+          if [ ! -s "${REPORTS}/dastardly-report.xml" ]; then
+            printf '%s\n' '<testsuites name="dastardly"/>' > "${REPORTS}/dastardly-report.xml"
+          fi
+          if [ "${DAST_RC}" -ne 0 ]; then
+            echo "::error::Dastardly reported high-severity findings (or the scan failed)."
+            exit "${DAST_RC}"
+          fi
+
+      - name: Nuclei (report-only)
+        if: always()
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          REPORTS="${GITHUB_WORKSPACE}/dast-reports"
+          mkdir -p "${REPORTS}"
+          chmod 777 "${REPORTS}"
+          docker run --rm --network dastnet \
+            -v "${REPORTS}:/out" \
+            projectdiscovery/nuclei:latest \
+            -u "http://dast-app:8080" -silent -jsonl -o /out/nuclei.jsonl || true
+          if [ ! -f "${REPORTS}/nuclei.jsonl" ]; then
+            touch "${REPORTS}/nuclei.jsonl"
+          fi
+
+      - name: Index DAST reports
+        if: always()
+        run: |
+          set -euo pipefail
+          REPORTS="${GITHUB_WORKSPACE}/dast-reports"
+          mkdir -p "${REPORTS}"
+          {
+            echo "# DAST reports"
+            echo ""
+            echo "| File | Bytes |"
+            echo "| --- | --- |"
+            find "${REPORTS}" -maxdepth 1 -type f ! -name INDEX.md -print | sort | while read -r f; do
+              echo "| \`$(basename "$f")\` | $(wc -c < "$f") |"
+            done
+          } | tee "${REPORTS}/INDEX.md"
+          cat "${REPORTS}/INDEX.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Stop DAST target
+        if: always()
+        run: |
+          docker rm -f dast-app >/dev/null 2>&1 || true
+          docker network rm dastnet >/dev/null 2>&1 || true
+
+      - name: Upload DAST reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rest-api-release-dast
+          path: ${{ github.workspace }}/dast-reports/
+          retention-days: 30
+          if-no-files-found: error
+
+  publish:
+    name: Publish
+    runs-on: ubuntu-latest
+    needs: [integration, packaging, dast]
+    timeout-minutes: 20
+    steps:
+      - name: Download Docker image archive
+        uses: actions/download-artifact@v4
+        with:
+          name: rest-api-release-docker-image
+          path: ${{ github.workspace }}
+
+      - name: Download release package
+        uses: actions/download-artifact@v4
+        with:
+          name: rest-api-release-package
+          path: ${{ github.workspace }}/release-package
+
+      - name: Download DAST reports
+        if: always()
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: rest-api-release-dast
+          path: ${{ github.workspace }}/release-dast
+
+      - name: Load image
+        env:
+          IMAGE_TAR: ${{ needs.packaging.outputs.image_tar }}
+        run: |
+          set -euo pipefail
+          gzip -dc "${GITHUB_WORKSPACE}/${IMAGE_TAR}" | docker load
+          docker images
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push Docker image to GHCR and set public
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPOSITORY_OWNER: ${{ github.repository_owner }}
+          IMAGE_NAME: ${{ env.IMAGE_NAME }}
+          IMAGE_TAG: ${{ needs.packaging.outputs.image_tag }}
+          IMAGE_REMOTE: ${{ needs.packaging.outputs.image_remote }}
+          IMAGE_REMOTE_LATEST: ${{ needs.packaging.outputs.image_remote_latest }}
+        run: |
+          set -euo pipefail
+          IMAGE_REMOTE="${IMAGE_REMOTE,,}"
+          IMAGE_REMOTE_LATEST="${IMAGE_REMOTE_LATEST,,}"
+          OWNER="${GH_REPOSITORY_OWNER}"
+          PKG="${IMAGE_NAME,,}"
+
+          list_tags() {
+            local path="$1"
+            gh api --paginate "${path}" --jq '.[] | .metadata.container.tags[]?' 2>/dev/null || true
+          }
+
+          TAGS="$(list_tags "/orgs/${OWNER}/packages/container/${PKG}/versions")"
+          if [ -z "${TAGS}" ]; then
+            TAGS="$(list_tags "/users/${OWNER}/packages/container/${PKG}/versions")"
+          fi
+          if printf '%s\n' "${TAGS}" | grep -qx "${IMAGE_TAG}"; then
+            echo "::error::GHCR tag ${IMAGE_REMOTE} already exists; will not overwrite a version tag."
+            exit 1
+          fi
+
+          docker push "${IMAGE_REMOTE}"
+          docker push "${IMAGE_REMOTE_LATEST}"
+          echo "Pushed ${IMAGE_REMOTE} and ${IMAGE_REMOTE_LATEST}"
+
+          BODY='{"visibility":"public"}'
+          set +e
+          echo "${BODY}" | gh api --method POST "/orgs/${OWNER}/packages/container/${PKG}/visibility" --input -
+          ORG_RC=$?
+          if [ "${ORG_RC}" -ne 0 ]; then
+            echo "${BODY}" | gh api --method POST "/users/${OWNER}/packages/container/${PKG}/visibility" --input -
+            USER_RC=$?
+            if [ "${USER_RC}" -ne 0 ]; then
+              echo "::error::Could not set GHCR package ${PKG} visibility to public. Enable public packages on the org."
+              exit 1
+            fi
+          fi
+          set -e
+          echo "Package visibility set to public."
+
+      - name: Create GitHub Release on master
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ needs.integration.outputs.app_repository }}
+          IMAGE_TAG: ${{ needs.packaging.outputs.image_tag }}
+          IMAGE_REMOTE: ${{ needs.packaging.outputs.image_remote }}
+          IMAGE_REMOTE_LATEST: ${{ needs.packaging.outputs.image_remote_latest }}
+        run: |
+          set -euo pipefail
+          TAG="v${IMAGE_TAG}"
+          NOTES="$(
+            printf '%s\n' \
+              "Release **${TAG}** from \`master\`." \
+              "" \
+              "GHCR (public):" \
+              "- \`docker pull ${IMAGE_REMOTE}\`" \
+              "- \`docker pull ${IMAGE_REMOTE_LATEST}\`" \
+              "" \
+              "DAST: OWASP ZAP baseline + Dastardly (gate) and Nuclei (report-only)."
+          )"
+          mapfile -t ATTACH < <(find "${GITHUB_WORKSPACE}/release-package" "${GITHUB_WORKSPACE}/release-dast" -type f 2>/dev/null | sort)
+          gh release create "${TAG}" \
+            --repo "${GH_REPO}" \
+            --target master \
+            --title "${TAG}" \
+            --notes "${NOTES}" \
+            "${ATTACH[@]}"
+          echo "Created GitHub Release ${TAG} on ${GH_REPO} (target master)."

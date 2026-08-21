@@ -67,8 +67,24 @@ permissions:
   contents: read
 
 jobs:
+  refuse-non-academy:
+    name: Assert Environment academy
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Refuse non-academy
+        env:
+          ENV_NAME: ${{ inputs.aws_environment }}
+        run: |
+          set -euo pipefail
+          if [ "${ENV_NAME}" != "academy" ]; then
+            echo "::error::This Action is AWS Academy / Vocareum only (got '${ENV_NAME}'). Use REST API CD (paid) with Environment AWS_ACTUAL."
+            exit 1
+          fi
+
   rest-cd:
     name: REST CD pipeline
+    needs: [refuse-non-academy]
     uses: ./.github/workflows/rest-api-cd-academy.yml
     with:
       action: ${{ inputs.action }}
