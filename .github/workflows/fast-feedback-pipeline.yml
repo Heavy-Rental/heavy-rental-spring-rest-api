@@ -8,6 +8,9 @@
 #   1. Integration only — checkout, Java 21 + Maven, resolve deps, layout
 #
 # Use this for early signal on feature-branch pushes (no pull_request trigger).
+# Sole Integration-stage run for a feature-branch SHA. Integration CI must not
+# call this workflow on PR; it reuses a successful run of this pipeline for the
+# PR head SHA and skips repeating Maven/layout in Integration Check.
 # Full gates remain in:
 #   integration-pipeline.yml  (rest-api-ci-caller.yml)
 #   release-pipeline.yml      (rest-api-release-caller.yml)
@@ -21,6 +24,8 @@
 #
 # This file exposes only workflow_call (no push / PR / workflow_dispatch).
 # A gate job rejects any caller other than rest-api-fast-feedback-caller.yml.
+# rest-api-ci-caller.yml must not become a second caller (that would re-run
+# Fast Feedback on every PR).
 #
 # The caller invokes this workflow with:
 #   uses: ./.github/workflows/fast-feedback-pipeline.yml
