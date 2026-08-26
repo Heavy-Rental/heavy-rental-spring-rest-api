@@ -15,6 +15,5 @@ public final class DevSecOpsDemoSecrets {
     private DevSecOpsDemoSecrets() {
     }
 
-    public static final String DEMO_AWS_ACCESS_KEY_ID = "AKIAIOSFODNN7EXAMPLE";
-    public static final String DEMO_AWS_SECRET_ACCESS_KEY = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
+  
 }
