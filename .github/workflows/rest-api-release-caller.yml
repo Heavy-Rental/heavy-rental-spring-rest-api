@@ -7,13 +7,16 @@
 # Do not use on: release — this workflow creates the GitHub Release.
 #
 # Do NOT set `environment:` on this caller job (invalid with uses:).
-# QC inside the reusable workflow uses environment: production.
+# Do NOT use secrets: inherit (Semgrep).
+# Do NOT pass REST_API_DB_* here — a uses: job cannot read Environment
+# secrets, so an explicit map is empty and would shadow QC.
 #
-# Add secrets (Environment "production" and/or Repository secrets):
+# QC inside the reusable workflow uses environment: production and loads:
 #   REST_API_DB_NAME
 #   REST_API_DB_USER
 #   REST_API_DB_PASSWORD
 #   REST_API_DB_PORT
+# from Settings → Environments → production → Environment secrets.
 #
 # REST_API_DB_URL is optional — after Docker Postgres starts, QC builds:
 #   jdbc:postgresql://localhost:<PORT>/<NAME>
@@ -43,8 +46,5 @@ jobs:
     uses: ./.github/workflows/release-pipeline.yml
     with:
       github_environment: production
-    secrets:
-      REST_API_DB_NAME: ${{ secrets.REST_API_DB_NAME }}
-      REST_API_DB_USER: ${{ secrets.REST_API_DB_USER }}
-      REST_API_DB_PASSWORD: ${{ secrets.REST_API_DB_PASSWORD }}
-      REST_API_DB_PORT: ${{ secrets.REST_API_DB_PORT }}
+    # No secrets: map and no secrets: inherit. QC (environment: production)
+    # reads REST_API_DB_* from Environment secrets in this repository.

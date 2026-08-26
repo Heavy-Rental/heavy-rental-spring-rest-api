@@ -17,16 +17,13 @@
 #
 # GitHub Flow (https://docs.github.com/en/get-started/using-github/github-flow)
 # --------------------------------------------------------------------------
-# Invoked via rest-api-release-caller.yml when:
-#   - a GitHub Release is published, or
-#   - a pull request is opened/updated from develop → master
-# Feature-branch PR validation remains rest-api-ci-caller.yml (Integration first).
+# Invoked via rest-api-release-caller.yml on workflow_dispatch only
+# (Actions → Release → Run workflow). This workflow creates the GitHub
+# Release — do not add on: release. Feature-branch / develop validation
+# remains rest-api-ci-caller.yml (Integration first). SAST/CodeQL live on
+# Integration CI, not here.
 #
-#   feature → develop (CI) → PR develop→master and/or publish GitHub Release
-#     → this pipeline
-#
-# Same gates as integration-pipeline.yml (secrets, Java 21, Maven, Postgres,
-# Semgrep, Trivy), plus Packaging for deploy consumers.
+#   feature → develop (CI) → merge to master → workflow_dispatch → this pipeline
 #
 # Packaging output (Spring Boot WAR + container image for deploy):
 #   ./mvnw -DskipTests package → target/*.war only (no JAR / java -jar image)
@@ -38,15 +35,17 @@
 #   HAYSTACK_*, STRIPE_*, APP_JWT_*, or REST_API_* in ENV/ARG/.env.
 #   Packaging refuses baked config, requires WEB-INF in the WAR, and
 #   starts Tomcat briefly to prove :8080 binds (no live database).
-#   Image saved as gzipped tar artifact; also pushed to GHCR outside PRs
-#   as ghcr.io/<owner>/heavy_rental_rest_api:<x.y.z> and :latest.
+#   Image saved as gzipped tar artifact. Publish (not Packaging) pushes
+#   GHCR as ghcr.io/<owner>/heavy_rental_rest_api:<x.y.z> and :latest.
 #   <x.y.z> is the previous GHCR semver patch-bumped (first publish: 1.0.0).
 #   spring-datasource.env is a workflow artifact (localhost JDBC, no
 #   password). Not copied into the image. Guest CD reads heavy-rental/rest.
 #
 # Application:
-#   https://github.com/SA62-team1/heavy-rental-spring-rest-api
+#   https://github.com/Heavy-Rental/heavy-rental-spring-rest-api
 #   Spring Boot 4.x · Java 21 · Maven (mvnw) · PostgreSQL · WAR packaging
+#   DEFAULT_APP_REPOSITORY below is Heavy-Rental (not the SA62-team1 act
+#   fallback used by Fast Feedback / Integration CI). Checkout is always master.
 #
 # How the REST API uses this on release
 # -------------------------------------
@@ -61,19 +60,20 @@
 # The caller invokes this workflow with:
 #   uses: ./.github/workflows/release-pipeline.yml
 #
-# Also mirrored in the pipeline-development repo for discovery/testing:
-#   .github/workflows/rest-api-release.yml
-# Keep this file and that mirror in sync when developing here.
+# Authoring copy lives in this tree. Install into the Spring repo as
+#   .github/workflows/release-pipeline.yml
+# There is no .github/workflows/rest-api-release.yml mirror in this repo.
 #
 # Local validation (pipeline-development repo root, in the devcontainer):
 #   actionlint heavy-rental-rest-api/release-pipeline/release-pipeline.yml
-#   actionlint .github/workflows/rest-api-release.yml
 #
-# Quality Control uses environment: production (hardcoded) and explicit secrets map.
+# Quality Control uses environment: production (hardcoded) and reads
+# REST_API_DB_* from that Environment. The caller must not pass them
+# (a uses: job cannot read Environment secrets; an empty map would shadow QC)
+# and must not use secrets: inherit (Semgrep).
 #
-# Recommended (either works):
-#   A) Settings → Environments → production → Environment secrets
-#   B) Settings → Secrets and variables → Actions → Repository secrets
+# Configure in the APPLICATION repo:
+#   Settings → Environments → production → Environment secrets
 #
 # Names (exact match, same as Integration CI):
 #   REST_API_DB_NAME
@@ -85,7 +85,7 @@
 #   jdbc:postgresql://localhost:<PORT>/<NAME>
 # These start a local Docker Postgres for tests. They are not Academy RDS.
 # Guest CD reads heavy-rental/rest (infra sync-secrets).
-# Caller must use explicit secrets map. Do not set environment: on the caller uses: job.
+# Do not set environment: on the caller uses: job.
 # Never commit real values.
 # =============================================================================
 
@@ -105,33 +105,22 @@ on:
         default: ""
       app_ref:
         description: >
-          Override git ref (branch/tag/SHA). Leave empty to use the calling
-          workflow's commit (github.sha) — correct for release / develop→master PR.
+          Override git ref (unused on Release — checkout is always master).
         required: false
         type: string
         default: ""
       github_environment:
         description: >
-          GitHub Environment name for the Quality Control job (default production).
+          Unused. Quality Control hardcodes environment: production. Callers still
+          pass production so the contract stays visible.
         required: false
         type: string
         default: production
-    secrets:
-      REST_API_DB_NAME:
-        description: PostgreSQL database name (local Docker QC)
-        required: false
-      REST_API_DB_USER:
-        description: PostgreSQL username
-        required: false
-      REST_API_DB_PASSWORD:
-        description: PostgreSQL password
-        required: false
-      REST_API_DB_PORT:
-        description: Host port for CI Postgres container
-        required: false
-      # REST_API_DB_URL is derived after Docker Postgres starts (not a secret)
+    # No workflow_call secrets. QC reads REST_API_DB_* from Environment
+    # "production". Declaring them here would bind empty caller values and
+    # shadow those Environment secrets. REST_API_DB_URL is derived after Postgres starts.
 
-# One run per release tag or develop→master PR; do not cancel in-flight packaging
+# One run per repository ref; do not cancel in-flight packaging
 concurrency:
   group: rest-api-release-${{ github.workflow }}-${{ github.repository }}-${{ github.ref }}
   cancel-in-progress: false
@@ -342,7 +331,6 @@ jobs:
     runs-on: ubuntu-latest
     needs: [integration]
     # Hardcoded Environment name (reliable for Environment secrets).
-    # Also receives repository secrets via explicit secrets map from the caller.
     environment: production
     timeout-minutes: 30
     steps:
@@ -354,7 +342,7 @@ jobs:
           REST_API_DB_PORT: ${{ secrets.REST_API_DB_PORT }}
         run: |
           set -euo pipefail
-          echo "Quality Control secrets source: GitHub Environment 'production' and/or repository secrets (via explicit secrets map)."
+          echo "Quality Control secrets source: GitHub Environment 'production'."
           missing=()
           [ -n "${REST_API_DB_NAME}" ] || missing+=(REST_API_DB_NAME)
           [ -n "${REST_API_DB_USER}" ] || missing+=(REST_API_DB_USER)
@@ -364,15 +352,13 @@ jobs:
             echo "::error::Missing required secrets: ${missing[*]}"
             echo ""
             echo "Configure in the APPLICATION repository (where this workflow runs):"
-            echo "  1) Settings → Environments → production → Environment secrets"
-            echo "     OR"
-            echo "  2) Settings → Secrets and variables → Actions → Repository secrets"
+            echo "  Settings → Environments → production → Environment secrets"
             echo ""
             echo "Required names (exact, case-sensitive):"
             echo "  REST_API_DB_NAME, REST_API_DB_USER, REST_API_DB_PASSWORD, REST_API_DB_PORT"
             echo "  (REST_API_DB_URL is optional — built after Docker Postgres starts)"
             echo ""
-            echo "Caller must include: explicit secrets map"
+            echo "Do not put these on the caller uses: job (empty map would shadow this Environment)."
             echo "This job uses: environment: production"
             exit 1
           fi
@@ -1074,7 +1060,6 @@ jobs:
 
       - name: Packaging summary
         env:
-          EVENT_NAME: ${{ github.event_name }}
           APP_REPOSITORY: ${{ needs.integration.outputs.app_repository }}
           APP_REF: ${{ needs.integration.outputs.app_ref }}
           ARTIFACT_ID: ${{ steps.package.outputs.artifact_id }}
@@ -1114,11 +1099,7 @@ jobs:
             echo ""
             echo "1. **WAR** — download \`rest-api-release-package\` and deploy the \`.war\` as Tomcat \`ROOT.war\`."
             echo "2. **Image archive** — \`gzip -dc ${IMAGE_ARCHIVE} | docker load\` then \`docker run -p 8080:8080 -e … ${IMAGE_LOCAL}\` (Docker Desktop or any Engine)."
-            if [ "${EVENT_NAME}" != "pull_request" ]; then
-              echo "3. **GHCR** — \`docker pull ${IMAGE_REMOTE}\` or \`docker pull ${IMAGE_REMOTE_LATEST}\`."
-            else
-              echo "3. **GHCR** — push skipped on pull_request; image is available as the tar artifact only."
-            fi
+            echo "3. **GHCR** — Publish (next jobs) pushes \`${IMAGE_REMOTE}\` and \`${IMAGE_REMOTE_LATEST}\` after DAST. This job only uploads the tar."
           } >> "$GITHUB_STEP_SUMMARY"
 
   dast:

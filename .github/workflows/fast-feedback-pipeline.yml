@@ -7,7 +7,8 @@
 # Stages:
 #   1. Integration only — checkout, Java 21 + Maven, resolve deps, layout
 #
-# Use this for early signal on PRs / pushes. Full gates remain in:
+# Use this for early signal on feature-branch pushes (no pull_request trigger).
+# Full gates remain in:
 #   integration-pipeline.yml  (rest-api-ci-caller.yml)
 #   release-pipeline.yml      (rest-api-release-caller.yml)
 #
@@ -24,8 +25,8 @@
 # The caller invokes this workflow with:
 #   uses: ./.github/workflows/fast-feedback-pipeline.yml
 #
-# Also mirrored in the pipeline-development repo for discovery/testing:
-#   .github/workflows/rest-api-fast-feedback.yml
+# Authoring copy lives in this tree. There is no
+# .github/workflows/rest-api-fast-feedback.yml mirror in this repo.
 #
 # No database secrets required (Integration stage does not start Postgres).
 # =============================================================================
