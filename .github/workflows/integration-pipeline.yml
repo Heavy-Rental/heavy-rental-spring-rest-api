@@ -3,6 +3,10 @@
 # =============================================================================
 # Stages (priority order — Integration Check is highest priority):
 #   1. Integration Check (HIGHEST) checkout, Java 21 + Maven, resolve deps, layout
+#      On pull_request: reuse a successful Fast Feedback CI run for the PR head
+#      SHA instead of repeating those steps. Fast Feedback owns the Integration
+#      stage on feature-branch pushes; this job must not invoke that workflow.
+#      Push to develop / workflow_dispatch / missing Fast Feedback → run fully.
 #   2. Quality Control  needs Integration Check — compile, tests (Postgres), package WAR
 #   3. Security Testing needs Integration Check — SAST (Semgrep) + SCA/FS (Trivy)
 #   4. CodeQL Analysis  needs Integration Check — GitHub CodeQL (Java) security + quality
@@ -23,15 +27,18 @@
 # publish images, push to GHCR, write cloud JDBC deploy config, or deploy.
 #
 #   1. Branch from develop
-#   2. Open PR → develop (or push to develop) → rest-api-ci-caller → this workflow
-#   3. Branch protection on develop should require:
+#   2. Push feature branch → rest-api-fast-feedback-caller (Integration stage once)
+#   3. Open PR → develop (or push to develop) → rest-api-ci-caller → this workflow
+#      PR Integration Check reuses Fast Feedback for the head SHA; do not call
+#      fast-feedback-pipeline.yml from rest-api-ci-caller.yml (that would run it twice).
+#   4. Branch protection on develop should require:
 #        - "Integration Check"        ← highest priority / must pass first
 #        - "Quality Control"
 #        - "Security Testing"
 #        - "CodeQL Analysis"
 #        - "GitHub Flow CI Gate"       ← optional single aggregate check
-#   4. Merge when green → develop is integration-tested, not production-deployed
-#   5. Deploy packaging / GHCR lives only in release-pipeline.yml
+#   5. Merge when green → develop is integration-tested, not production-deployed
+#   6. Deploy packaging / GHCR lives only in release-pipeline.yml
 #      (workflow_dispatch via rest-api-release-caller.yml; creates the GitHub Release)
 #
 # QC "Package WAR" + artifact upload = build verification only (not a deploy).
@@ -191,6 +198,10 @@ jobs:
   # 1. Integration Check — HIGHEST PRIORITY (GitHub Flow PR gate starts here)
   #    All other jobs declare needs: integration-check so they never run if this fails.
   #    Job id is integration-check so it is not confused with environment: integration.
+  #    Always run this job (never if: skip it) so QC / Security / CodeQL keep
+  #    their needs: and branch protection still sees the check.
+  #    On pull_request, skip Maven/layout when Fast Feedback already passed for
+  #    the PR head SHA. Do not uses: fast-feedback-pipeline.yml from the CI caller.
   # ---------------------------------------------------------------------------
   integration-check:
     name: Integration Check
@@ -246,14 +257,128 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           echo "Integrating application: $APP_REPO @ $APP_REF (mode=$MODE)"
 
+      - name: Reuse Fast Feedback Integration when it already passed
+        id: reuse
+        env:
+          # Bind contexts here — never interpolate github/inputs directly in run: scripts
+          # (avoids Semgrep run-shell-injection).
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GH_REPOSITORY: ${{ github.repository }}
+          FF_WORKFLOW_FILE: rest-api-fast-feedback-caller.yml
+        run: |
+          set -euo pipefail
+          REUSE=false
+
+          finish() {
+            echo "reuse=${REUSE}" >> "$GITHUB_OUTPUT"
+            {
+              echo "### Fast Feedback reuse"
+              echo ""
+              echo "$1"
+            } >> "$GITHUB_STEP_SUMMARY"
+          }
+
+          if [ "${EVENT_NAME}" != "pull_request" ]; then
+            echo "Event is ${EVENT_NAME} (not pull_request) — run Integration Check."
+            finish "Event \`${EVENT_NAME}\` — ran Integration Check locally (Fast Feedback is feature-branch push only)."
+            exit 0
+          fi
+
+          COMMIT="${HEAD_SHA}"
+          if [ -z "${COMMIT}" ]; then
+            echo "PR head SHA is empty — run Integration Check."
+            finish "PR head SHA empty — ran Integration Check locally."
+            exit 0
+          fi
+
+          echo "Looking up Fast Feedback (${FF_WORKFLOW_FILE}) for commit ${COMMIT}"
+
+          list_runs() {
+            gh run list \
+              --repo "${GH_REPOSITORY}" \
+              --workflow "${FF_WORKFLOW_FILE}" \
+              --commit "${COMMIT}" \
+              --json databaseId,status,conclusion,url \
+              --limit 20 \
+              2>/dev/null || echo "[]"
+          }
+
+          run_count() {
+            echo "${1}" | jq 'length' 2>/dev/null || echo 0
+          }
+
+          jq_field() {
+            echo "${1}" | jq -r "${2}" 2>/dev/null || true
+          }
+
+          # PR opened in the same moment as the push: the Fast Feedback run may
+          # not exist yet. Retry briefly before falling back to local checks.
+          ATTEMPT=1
+          MAX_APPEAR=12
+          RUNS="[]"
+          while [ "${ATTEMPT}" -le "${MAX_APPEAR}" ]; do
+            RUNS="$(list_runs)"
+            [ -n "${RUNS}" ] || RUNS="[]"
+            if [ "$(run_count "${RUNS}")" -gt 0 ]; then
+              break
+            fi
+            echo "No Fast Feedback run for ${COMMIT} yet (attempt ${ATTEMPT}/${MAX_APPEAR})"
+            sleep 5
+            ATTEMPT=$((ATTEMPT + 1))
+          done
+
+          [ -n "${RUNS}" ] || RUNS="[]"
+          if [ "$(run_count "${RUNS}")" -eq 0 ]; then
+            echo "No Fast Feedback run for ${COMMIT} — run Integration Check."
+            finish "No Fast Feedback run for \`${COMMIT}\` — ran Integration Check locally."
+            exit 0
+          fi
+
+          jq_field "${RUNS}" '.[] | "id=\(.databaseId) status=\(.status) conclusion=\(.conclusion // "null") url=\(.url)"'
+
+          SUCCESS_ID="$(jq_field "${RUNS}" '[.[] | select(.conclusion == "success")] | .[0].databaseId // empty')"
+          SUCCESS_URL="$(jq_field "${RUNS}" '[.[] | select(.conclusion == "success")] | .[0].url // empty')"
+          if [ -n "${SUCCESS_ID}" ]; then
+            REUSE=true
+            echo "Reusing successful Fast Feedback run ${SUCCESS_ID}: ${SUCCESS_URL}"
+            finish "Reused Fast Feedback run [${SUCCESS_ID}](${SUCCESS_URL}) for \`${COMMIT}\`. Maven/layout steps skipped."
+            exit 0
+          fi
+
+          PENDING_FILTER='[.[] | select(.status == "queued" or .status == "in_progress" or .status == "waiting" or .status == "pending" or .status == "requested")]'
+          PENDING_ID="$(jq_field "${RUNS}" "${PENDING_FILTER} | .[0].databaseId // empty")"
+          PENDING_URL="$(jq_field "${RUNS}" "${PENDING_FILTER} | .[0].url // empty")"
+          if [ -z "${PENDING_ID}" ]; then
+            echo "Fast Feedback finished without success for ${COMMIT} — run Integration Check."
+            finish "Fast Feedback did not succeed for \`${COMMIT}\` — ran Integration Check locally."
+            exit 0
+          fi
+
+          echo "Waiting for in-flight Fast Feedback run ${PENDING_ID}: ${PENDING_URL}"
+          set +e
+          timeout 600 gh run watch "${PENDING_ID}" --repo "${GH_REPOSITORY}" --exit-status --interval 10
+          WATCH_RC=$?
+          set -e
+          if [ "${WATCH_RC}" -eq 0 ]; then
+            REUSE=true
+            echo "Fast Feedback run ${PENDING_ID} succeeded — skip Maven/layout."
+            finish "Waited for Fast Feedback run [${PENDING_ID}](${PENDING_URL}) (success). Maven/layout steps skipped."
+            exit 0
+          fi
+
+          echo "Fast Feedback run ${PENDING_ID} did not succeed (watch exit=${WATCH_RC}) — run Integration Check."
+          finish "Fast Feedback run [${PENDING_ID}](${PENDING_URL}) did not succeed (watch exit=${WATCH_RC}) — ran Integration Check locally."
+
       - name: Checkout calling repository (PR / push head)
-        if: steps.meta.outputs.checkout_mode == 'caller'
+        if: steps.reuse.outputs.reuse != 'true' && steps.meta.outputs.checkout_mode == 'caller'
         uses: actions/checkout@v4
         with:
           path: ${{ env.APP_PATH }}
 
       - name: Checkout remote application repository
-        if: steps.meta.outputs.checkout_mode == 'remote'
+        if: steps.reuse.outputs.reuse != 'true' && steps.meta.outputs.checkout_mode == 'remote'
         uses: actions/checkout@v4
         with:
           repository: ${{ steps.meta.outputs.app_repository }}
@@ -261,6 +386,7 @@ jobs:
           path: ${{ env.APP_PATH }}
 
       - name: Setup Java ${{ env.JAVA_VERSION }}
+        if: steps.reuse.outputs.reuse != 'true'
         uses: actions/setup-java@v4
         with:
           distribution: ${{ env.JAVA_DISTRIBUTION }}
@@ -269,6 +395,7 @@ jobs:
           cache-dependency-path: ${{ env.APP_PATH }}/pom.xml
 
       - name: Ensure Maven Wrapper is executable
+        if: steps.reuse.outputs.reuse != 'true'
         working-directory: ${{ env.APP_PATH }}
         run: |
           set -euo pipefail
@@ -281,12 +408,14 @@ jobs:
           fi
 
       - name: Resolve Maven dependencies
+        if: steps.reuse.outputs.reuse != 'true'
         working-directory: ${{ env.APP_PATH }}
         run: |
           set -euo pipefail
           ./mvnw -B -ntp dependency:resolve dependency:resolve-plugins
 
       - name: Verify project layout and toolchain
+        if: steps.reuse.outputs.reuse != 'true'
         working-directory: ${{ env.APP_PATH }}
         run: |
           set -euo pipefail
@@ -318,6 +447,7 @@ jobs:
           echo "Integration checks passed."
 
       - name: Upload Maven project fingerprint
+        if: steps.reuse.outputs.reuse != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: integration-metadata
@@ -639,8 +769,12 @@ jobs:
                   - "**/*example*"
                   - "**/*sample*"
                   - "**/.github/**"
-              pattern-regex: >-
-                (?i)^[ \t-]*["']?(?:[A-Za-z0-9._-]*[\._-])?(password|passwd|pwd|secret|secret[-_]?key|api[-._]?key|access[-._]?key|private[-._]?key|auth[-._]?token|credentials?)["']?[ \t]*:[ \t]*(?!\$\{)(?!~)(?!null\b)(?!ENC\()(?!\{cipher\})(?!["']?[ \t]*(?:#|$))["']?[^\s#"']+
+              # persist-credentials is filtered with pattern-not-regex; a key
+              # lookahead still matches because credentials? is a suffix.
+              patterns:
+                - pattern-regex: |-
+                    (?i)^[ \t-]*["']?(?:[A-Za-z0-9._-]*[\._-])?(password|passwd|pwd|secret|secret[-_]?key|api[-._]?key|access[-._]?key|private[-._]?key|auth[-._]?token|credentials?)["']?[ \t]*:[ \t]*(?!\$\{)(?!~)(?!null\b)(?!ENC\()(?!\{cipher\})(?!["']?[ \t]*(?:#|$))["']?[^\s#"']+
+                - pattern-not-regex: '(?i)persist[-_]credentials\s*:'
             - id: heavy-rental.rest-api.env-placeholder-plaintext-default
               languages: [regex]
               severity: ERROR
@@ -813,6 +947,8 @@ jobs:
             #   secrets: inherit                         → ERROR (over-privilege)
             #   KEY: GitHub secrets context (explicit)   → allowed (least-privilege map)
             #   KEY: literal-password                    → ERROR (CWE-798)
+            #   persist-credentials: true|false          → allowed (checkout boolean;
+            #     excluded with pattern-not-regex, not a key lookahead)
             # p/secrets and p/gitleaks are not applied to .github (they treat
             # a secrets-context password mapping as a leaked credential).
             - id: heavy-rental.gha.secrets-inherit-forbidden
@@ -865,8 +1001,10 @@ jobs:
                 include:
                   - "**/.github/workflows/**"
                   - "**/.github/actions/**"
-              pattern-regex: >-
-                (?i)^[ \t-]*["']?(?:[A-Za-z0-9._-]*[\._-])?(password|passwd|pwd|secret|secret[-_]?key|api[-._]?key|access[-._]?key|private[-._]?key|auth[-._]?token|credentials?)["']?[ \t]*:[ \t]*(?!\$\{\{)(?!~)(?!null\b)(?!inherit\b)(?!["']?[ \t]*(?:#|$))["']?[^\s#"']+
+              patterns:
+                - pattern-regex: |-
+                    (?i)^[ \t-]*["']?(?:[A-Za-z0-9._-]*[\._-])?(password|passwd|pwd|secret|secret[-_]?key|api[-._]?key|access[-._]?key|private[-._]?key|auth[-._]?token|credentials?)["']?[ \t]*:[ \t]*(?!\$\{\{)(?!~)(?!null\b)(?!inherit\b)(?!["']?[ \t]*(?:#|$))["']?[^\s#"']+
+                - pattern-not-regex: '(?i)persist[-_]credentials\s*:'
           SEMGREP_CUSTOM_RULES
           # run: | already strips this step's indent from the heredoc. A second
           # de-indent (sed) would pull nested list items to column 1 and break YAML.

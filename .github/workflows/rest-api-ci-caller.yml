@@ -13,6 +13,14 @@
 # Triggers: PR → develop, push → develop, workflow_dispatch.
 # Release / deploy packaging: rest-api-release-caller.yml only.
 #
+# Fast Feedback (do NOT call it from this file)
+# ---------------------------------------------
+# rest-api-fast-feedback-caller.yml owns the Integration stage on feature-branch
+# pushes. Do not `uses:` fast-feedback-pipeline.yml here — that would run Fast
+# Feedback a second time when a PR is opened.
+# On pull_request, integration-pipeline.yml Integration Check reuses a successful
+# Fast Feedback run for the PR head SHA instead of repeating Maven/layout.
+#
 # Secrets (in heavy-rental-spring-rest-api)
 # ----------------------------------------
 # Do NOT set `environment:` on this caller job (invalid with uses:).

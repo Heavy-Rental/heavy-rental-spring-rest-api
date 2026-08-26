@@ -20,6 +20,11 @@
 #     - push to develop
 #     - pull_request events (full CI: rest-api-ci-caller.yml owns PR → develop)
 #
+# This is the only Integration-stage execution for a feature-branch SHA
+# (checkout, Java 21, Maven deps, layout). When a PR → develop is opened or
+# synchronized, rest-api-ci-caller.yml must NOT invoke this workflow again.
+# Integration Check reuses this run for the same head SHA instead.
+#
 # Reusable workflow (same repository):
 #   ./.github/workflows/fast-feedback-pipeline.yml
 #
