@@ -1,12 +1,12 @@
 # =============================================================================
 # Heavy Rental Spring REST API — Integration CI Pipeline (reusable)
 # =============================================================================
-# Stages (priority order — Integration is highest priority):
-#   1. Integration      (HIGHEST) checkout, Java 21 + Maven, resolve deps, layout
-#   2. Quality Control  needs Integration — compile, tests (Postgres), package WAR
-#   3. Security Testing needs Integration — SAST (Semgrep) + SCA/FS (Trivy)
-#   4. CodeQL Analysis  needs Integration — GitHub CodeQL (Java) security + quality
-#   5. GitHub Flow CI Gate — aggregate: Integration first, then QC + Security + CodeQL
+# Stages (priority order — Integration Check is highest priority):
+#   1. Integration Check (HIGHEST) checkout, Java 21 + Maven, resolve deps, layout
+#   2. Quality Control  needs Integration Check — compile, tests (Postgres), package WAR
+#   3. Security Testing needs Integration Check — SAST (Semgrep) + SCA/FS (Trivy)
+#   4. CodeQL Analysis  needs Integration Check — GitHub CodeQL (Java) security + quality
+#   5. GitHub Flow CI Gate — aggregate: Integration Check first, then QC + Security + CodeQL
 #
 # Security report format (standard): SARIF 2.1.0
 #   - Semgrep → semgrep.sarif
@@ -25,7 +25,7 @@
 #   1. Branch from develop
 #   2. Open PR → develop (or push to develop) → rest-api-ci-caller → this workflow
 #   3. Branch protection on develop should require:
-#        - "Integration"              ← highest priority / must pass first
+#        - "Integration Check"        ← highest priority / must pass first
 #        - "Quality Control"
 #        - "Security Testing"
 #        - "CodeQL Analysis"
@@ -61,13 +61,12 @@
 # -------------------------------------------------------------
 # Secrets (configure in the APPLICATION repo: heavy-rental-spring-rest-api)
 # -----------------------------------------------------------------------
-# Quality Control uses environment: integration (hardcoded) and reads
-# REST_API_DB_* from that Environment. The caller must not pass them
-# (a uses: job cannot read Environment secrets; an empty map would shadow QC)
-# and must not use secrets: inherit (Semgrep).
-#
-# Configure in the APPLICATION repo:
-#   Settings → Environments → integration → Environment secrets
+# Quality Control uses environment: integration (hardcoded). The caller
+# forwards REST_API_DB_* via an explicit secrets map (not secrets: inherit).
+# A uses: job cannot read Environment secrets, so configure them as
+# Repository secrets in the APPLICATION repo (and optionally also on
+# Environment "integration" for isolation / protection rules):
+#   Settings → Secrets and variables → Actions → Repository secrets
 #
 # Names (exact match, case-sensitive):
 #   REST_API_DB_NAME
@@ -111,9 +110,20 @@ on:
         required: false
         type: string
         default: integration
-    # No workflow_call secrets. QC reads REST_API_DB_* from Environment
-    # "integration". Declaring them here would bind empty caller values and
-    # shadow those Environment secrets. REST_API_DB_URL is derived after Postgres starts.
+    secrets:
+      REST_API_DB_NAME:
+        description: PostgreSQL database name
+        required: false
+      REST_API_DB_USER:
+        description: PostgreSQL username
+        required: false
+      REST_API_DB_PASSWORD:
+        description: PostgreSQL password
+        required: false
+      REST_API_DB_PORT:
+        description: Host port for CI Postgres container
+        required: false
+      # REST_API_DB_URL is derived after Docker Postgres starts (not a secret)
 
 # GitHub Flow: one concurrent run per PR (or branch); newer pushes cancel stale runs
 concurrency:
@@ -178,11 +188,12 @@ jobs:
           esac
 
   # ---------------------------------------------------------------------------
-  # 1. Integration — HIGHEST PRIORITY (GitHub Flow PR gate starts here)
-  #    All other jobs declare needs: integration so they never run if this fails.
+  # 1. Integration Check — HIGHEST PRIORITY (GitHub Flow PR gate starts here)
+  #    All other jobs declare needs: integration-check so they never run if this fails.
+  #    Job id is integration-check so it is not confused with environment: integration.
   # ---------------------------------------------------------------------------
-  integration:
-    name: Integration
+  integration-check:
+    name: Integration Check
     runs-on: ubuntu-latest
     needs: [assert-caller]
     timeout-minutes: 20
@@ -315,13 +326,17 @@ jobs:
           retention-days: 7
 
   # ---------------------------------------------------------------------------
-  # 2. Quality control — runs only after Integration succeeds (priority 2)
+  # 2. Quality control — runs only after Integration Check succeeds (priority 2)
   # ---------------------------------------------------------------------------
   quality-control:
     name: Quality Control
     runs-on: ubuntu-latest
-    needs: [integration]
+    needs: [integration-check]
     # Hardcoded Environment name (more reliable than dynamic expressions for secrets).
+    # Loads Environment secrets + any secrets passed via explicit secrets map.
+    environment: 
+      name: integration
+      deployment: false
     timeout-minutes: 30
     steps:
       - name: Verify required database secrets are configured
@@ -332,7 +347,7 @@ jobs:
           REST_API_DB_PORT: ${{ secrets.REST_API_DB_PORT }}
         run: |
           set -euo pipefail
-          echo "Quality Control secrets source: GitHub Environment 'integration'."
+          echo "Quality Control secrets source: caller explicit secrets map and/or GitHub Environment 'integration'."
           missing=()
           [ -n "${REST_API_DB_NAME}" ] || missing+=(REST_API_DB_NAME)
           [ -n "${REST_API_DB_USER}" ] || missing+=(REST_API_DB_USER)
@@ -342,13 +357,16 @@ jobs:
             echo "::error::Missing required secrets: ${missing[*]}"
             echo ""
             echo "Configure in the APPLICATION repository (where this workflow runs), not pipeline-development:"
-            echo "  Settings → Environments → integration → Environment secrets"
+            echo "  1) Settings → Secrets and variables → Actions → Repository secrets"
+            echo "     (required for the caller explicit secrets map)"
+            echo "  2) Settings → Environments → integration → Environment secrets"
+            echo "     (optional; this job also uses environment: integration)"
             echo ""
             echo "Required names (exact, case-sensitive):"
             echo "  REST_API_DB_NAME, REST_API_DB_USER, REST_API_DB_PASSWORD, REST_API_DB_PORT"
             echo "  (REST_API_DB_URL is optional — built after Docker Postgres starts)"
             echo ""
-            echo "Do not put these on the caller uses: job (empty map would shadow this Environment)."
+            echo "Caller must include: explicit secrets map"
             echo "This job uses: environment: integration"
             exit 1
           fi
@@ -359,17 +377,17 @@ jobs:
           echo "All required database secrets are present (values not logged)."
 
       - name: Checkout calling repository (PR / push head)
-        if: needs.integration.outputs.checkout_mode == 'caller'
+        if: needs.integration-check.outputs.checkout_mode == 'caller'
         uses: actions/checkout@v4
         with:
           path: ${{ env.APP_PATH }}
 
       - name: Checkout remote application repository
-        if: needs.integration.outputs.checkout_mode == 'remote'
+        if: needs.integration-check.outputs.checkout_mode == 'remote'
         uses: actions/checkout@v4
         with:
-          repository: ${{ needs.integration.outputs.app_repository }}
-          ref: ${{ needs.integration.outputs.app_ref }}
+          repository: ${{ needs.integration-check.outputs.app_repository }}
+          ref: ${{ needs.integration-check.outputs.app_ref }}
           path: ${{ env.APP_PATH }}
 
       - name: Setup Java ${{ env.JAVA_VERSION }}
@@ -522,28 +540,28 @@ jobs:
           if-no-files-found: warn
 
   # ---------------------------------------------------------------------------
-  # 3. Security testing — runs only after Integration succeeds (priority 2,
-  #    parallel with Quality Control so Integration remains the critical path)
+  # 3. Security testing — runs only after Integration Check succeeds (priority 2,
+  #    parallel with Quality Control so Integration Check remains the critical path)
   # ---------------------------------------------------------------------------
   security-testing:
     name: Security Testing
     runs-on: ubuntu-latest
-    # Highest-priority gate: never start Security unless Integration passed
-    needs: [integration]
+    # Highest-priority gate: never start Security unless Integration Check passed
+    needs: [integration-check]
     timeout-minutes: 40
     steps:
       - name: Checkout calling repository (PR / push head)
-        if: needs.integration.outputs.checkout_mode == 'caller'
+        if: needs.integration-check.outputs.checkout_mode == 'caller'
         uses: actions/checkout@v4
         with:
           path: ${{ env.APP_PATH }}
 
       - name: Checkout remote application repository
-        if: needs.integration.outputs.checkout_mode == 'remote'
+        if: needs.integration-check.outputs.checkout_mode == 'remote'
         uses: actions/checkout@v4
         with:
-          repository: ${{ needs.integration.outputs.app_repository }}
-          ref: ${{ needs.integration.outputs.app_ref }}
+          repository: ${{ needs.integration-check.outputs.app_repository }}
+          ref: ${{ needs.integration-check.outputs.app_ref }}
           path: ${{ env.APP_PATH }}
 
       - name: Create security reports directory
@@ -791,12 +809,72 @@ jobs:
                   - "**/.github/**"
               pattern-regex: >-
                 (?i)spring\.security\.enabled\s*[=:]\s*["']?false
+            # Reusable-workflow / composite-action secret wiring:
+            #   secrets: inherit                         → ERROR (over-privilege)
+            #   KEY: GitHub secrets context (explicit)   → allowed (least-privilege map)
+            #   KEY: literal-password                    → ERROR (CWE-798)
+            # p/secrets and p/gitleaks are not applied to .github (they treat
+            # a secrets-context password mapping as a leaked credential).
+            - id: heavy-rental.gha.secrets-inherit-forbidden
+              languages: [yaml]
+              severity: ERROR
+              message: >
+                secrets: inherit passes every secret the caller can read to the
+                reusable workflow (CWE-200). That is over-privilege, not required
+                wiring. Pass only the secrets the callee declares via an explicit
+                secrets: map (REST_API_DB_PASSWORD from the secrets context).
+                An explicit secrets-context map is least privilege and is not a
+                leaked credential.
+              metadata:
+                category: security
+                cwe: ["CWE-200: Exposure of Sensitive Information to an Unauthorized Actor"]
+                owasp: ["A05:2021 - Security Misconfiguration"]
+                technology: [github-actions, secrets]
+                confidence: HIGH
+                subcategory: [vuln]
+                likelihood: HIGH
+                impact: HIGH
+              paths:
+                include:
+                  - "**/.github/workflows/**"
+                  - "**/.github/actions/**"
+                exclude:
+                  - "**/rest-api-cd-paid-caller.yml"
+              patterns:
+                - pattern: |
+                    secrets: inherit
+            - id: heavy-rental.gha.hardcoded-workflow-secret
+              languages: [regex]
+              severity: ERROR
+              message: >
+                Hard-coded credential in a GitHub Actions workflow or composite
+                action (CWE-798). Use an explicit secrets: map with the GitHub
+                secrets context when calling a reusable workflow. Passing
+                secrets-context (or inputs-context into a composite action) is
+                required wiring, not a vulnerability. A literal password in YAML is.
+              metadata:
+                category: security
+                cwe: ["CWE-798: Use of Hard-coded Credentials"]
+                owasp: ["A07:2021 - Identification and Authentication Failures"]
+                technology: [github-actions, secrets]
+                confidence: HIGH
+                subcategory: [vuln]
+                likelihood: HIGH
+                impact: HIGH
+              paths:
+                include:
+                  - "**/.github/workflows/**"
+                  - "**/.github/actions/**"
+              pattern-regex: >-
+                (?i)^[ \t-]*["']?(?:[A-Za-z0-9._-]*[\._-])?(password|passwd|pwd|secret|secret[-_]?key|api[-._]?key|access[-._]?key|private[-._]?key|auth[-._]?token|credentials?)["']?[ \t]*:[ \t]*(?!\$\{\{)(?!~)(?!null\b)(?!inherit\b)(?!["']?[ \t]*(?:#|$))["']?[^\s#"']+
           SEMGREP_CUSTOM_RULES
           # run: | already strips this step's indent from the heredoc. A second
           # de-indent (sed) would pull nested list items to column 1 and break YAML.
           echo "==> Validating custom Semgrep rules"
           semgrep --validate --config="${RULES_FILE}" --metrics=off
-          SEMGREP_COMMON=(
+          # App SAST: Java/OWASP/secrets packs. Skip .github so p/secrets and
+          # p/gitleaks do not flag reusable-workflow secrets: maps.
+          SEMGREP_APP=(
             --config=p/java
             --config=p/owasp-top-ten
             --config=p/security-audit
@@ -808,45 +886,81 @@ jobs:
             --config=p/jwt
             --config=p/insecure-transport
             --config="${RULES_FILE}"
+            --exclude='.github/**'
+            --metrics=off
+          )
+          # Workflow SAST: GitHub Actions pack + custom GHA rules.
+          # Explicit secrets-context maps are not findings. secrets: inherit is.
+          # Drop the community inherit rule so the custom one (with paid-CD
+          # path exclude) is the only inherit check.
+          SEMGREP_GHA=(
+            --config=p/github-actions
+            --config="${RULES_FILE}"
+            --exclude-rule=yaml.github-actions.security.secrets-inherit.secrets-inherit
+            --include='.github/**'
             --metrics=off
           )
 
           # --- Pass 1: always write SARIF (standard report). Does not fail the step. ---
-          echo "==> Semgrep report (SARIF 2.1.0)"
+          echo "==> Semgrep report (SARIF 2.1.0) — application"
           set +e
-          semgrep scan "${SEMGREP_COMMON[@]}" \
+          semgrep scan "${SEMGREP_APP[@]}" \
             --sarif \
             --output="${REPORT_DIR}/semgrep.sarif" \
             .
           SARIF_RC=$?
+          echo "==> Semgrep report (SARIF 2.1.0) — GitHub Actions"
+          semgrep scan "${SEMGREP_GHA[@]}" \
+            --sarif \
+            --output="${REPORT_DIR}/semgrep-gha.sarif" \
+            .
+          GHA_SARIF_RC=$?
           set -e
           if [ -f "${REPORT_DIR}/semgrep.sarif" ]; then
             echo "SARIF written: ${REPORT_DIR}/semgrep.sarif (semgrep exit=${SARIF_RC}; non-zero is OK for report pass)"
           else
             echo "::warning::semgrep.sarif was not produced (exit=${SARIF_RC})"
           fi
+          if [ -f "${REPORT_DIR}/semgrep-gha.sarif" ]; then
+            echo "SARIF written: ${REPORT_DIR}/semgrep-gha.sarif (semgrep exit=${GHA_SARIF_RC}; non-zero is OK for report pass)"
+          else
+            echo "::warning::semgrep-gha.sarif was not produced (exit=${GHA_SARIF_RC})"
+          fi
 
           # --- Pass 2: CI gate — fail only if ERROR-severity findings exist. ---
           # --error makes Semgrep exit 1 when any matching finding is present.
           # A "successful" SARIF write can still leave this gate red if ERROR issues exist.
-          echo "==> SAST gate (ERROR severity only; exit 1 if findings)"
+          echo "==> SAST gate — application (ERROR severity only)"
           set +e
-          semgrep scan "${SEMGREP_COMMON[@]}" \
+          semgrep scan "${SEMGREP_APP[@]}" \
             --severity=ERROR \
             --error \
             --text \
             .
-          GATE_RC=$?
+          APP_GATE_RC=$?
+          echo "==> SAST gate — GitHub Actions (ERROR severity only)"
+          semgrep scan "${SEMGREP_GHA[@]}" \
+            --severity=ERROR \
+            --error \
+            --text \
+            .
+          GHA_GATE_RC=$?
           set -e
-          if [ "${GATE_RC}" -ne 0 ]; then
-            echo "::error::Semgrep SAST gate failed (exit=${GATE_RC})."
+          if [ "${APP_GATE_RC}" -ne 0 ] || [ "${GHA_GATE_RC}" -ne 0 ]; then
+            echo "::error::Semgrep SAST gate failed (app exit=${APP_GATE_RC}, gha exit=${GHA_GATE_RC})."
             echo "The SARIF report may still have been written successfully."
             echo "This step fails because --severity=ERROR --error found ERROR-level issues"
             echo "(or Semgrep could not complete the gate scan)."
-            echo "Open security-reports/semgrep.sarif or the text findings above."
-            exit "${GATE_RC}"
+            echo "Application: security-reports/semgrep.sarif"
+            echo "GitHub Actions: security-reports/semgrep-gha.sarif"
+            echo "Explicit reusable-workflow secrets-context maps are allowed."
+            echo "secrets: inherit is an ERROR (least privilege) except rest-api-cd-paid-caller.yml."
+            if [ "${APP_GATE_RC}" -ne 0 ]; then
+              exit "${APP_GATE_RC}"
+            fi
+            exit "${GHA_GATE_RC}"
           fi
-          echo "SAST (Semgrep) gate passed — no ERROR-level findings. SARIF: security-reports/semgrep.sarif"
+          echo "SAST (Semgrep) gate passed — no ERROR-level findings. SARIF: security-reports/semgrep.sarif + semgrep-gha.sarif"
 
       # --- SCA + filesystem: dependency and secret/vuln scan via Trivy (SARIF) ---
       - name: Setup Java ${{ env.JAVA_VERSION }} (for dependency resolution before scan)
@@ -935,6 +1049,15 @@ jobs:
           sarif_file: security-reports/semgrep.sarif
           checkout_path: ${{ env.APP_PATH }}
           category: rest-api-semgrep
+        continue-on-error: true
+
+      - name: Upload Semgrep GitHub Actions SARIF to Code Scanning
+        if: always() && hashFiles('security-reports/semgrep-gha.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: security-reports/semgrep-gha.sarif
+          checkout_path: ${{ env.APP_PATH }}
+          category: rest-api-semgrep-gha
         continue-on-error: true
 
       - name: Upload Trivy SARIF to Code Scanning
@@ -1433,13 +1556,13 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # 4. CodeQL analysis — GitHub CodeQL for Java (security + quality queries)
-  #    Runs after Integration; parallel with QC and Semgrep/Trivy Security.
+  #    Runs after Integration Check; parallel with QC and Semgrep/Trivy Security.
   #    Results appear under the repository Security → Code scanning alerts.
   # ---------------------------------------------------------------------------
   codeql:
     name: CodeQL Analysis
     runs-on: ubuntu-latest
-    needs: [integration]
+    needs: [integration-check]
     timeout-minutes: 45
     permissions:
       contents: read
@@ -1447,17 +1570,17 @@ jobs:
       actions: read
     steps:
       - name: Checkout calling repository (PR / push head)
-        if: needs.integration.outputs.checkout_mode == 'caller'
+        if: needs.integration-check.outputs.checkout_mode == 'caller'
         uses: actions/checkout@v4
         with:
           path: ${{ env.APP_PATH }}
 
       - name: Checkout remote application repository
-        if: needs.integration.outputs.checkout_mode == 'remote'
+        if: needs.integration-check.outputs.checkout_mode == 'remote'
         uses: actions/checkout@v4
         with:
-          repository: ${{ needs.integration.outputs.app_repository }}
-          ref: ${{ needs.integration.outputs.app_ref }}
+          repository: ${{ needs.integration-check.outputs.app_repository }}
+          ref: ${{ needs.integration-check.outputs.app_ref }}
           path: ${{ env.APP_PATH }}
 
       - name: Initialize CodeQL (Java)
@@ -1507,20 +1630,20 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # 5. GitHub Flow CI gate — aggregate status for branch protection
-  #    Integration is evaluated first (highest priority); then QC, Security, CodeQL.
+  #    Integration Check is evaluated first (highest priority); then QC, Security, CodeQL.
   # ---------------------------------------------------------------------------
   github-flow-gate:
     name: GitHub Flow CI Gate
     runs-on: ubuntu-latest
-    # Always run so a failed Integration still produces a red gate check
+    # Always run so a failed Integration Check still produces a red gate check
     if: always()
-    needs: [integration, quality-control, security-testing, codeql]
+    needs: [integration-check, quality-control, security-testing, codeql]
     timeout-minutes: 5
     steps:
-      - name: Enforce Integration priority and full CI green
+      - name: Enforce Integration Check priority and full CI green
         run: |
           set -euo pipefail
-          INTEGRATION="${{ needs.integration.result }}"
+          INTEGRATION="${{ needs.integration-check.result }}"
           QUALITY="${{ needs.quality-control.result }}"
           SECURITY="${{ needs.security-testing.result }}"
           CODEQL="${{ needs.codeql.result }}"
@@ -1530,20 +1653,20 @@ jobs:
             echo ""
             echo "| Job | Result | Priority |"
             echo "| --- | --- | --- |"
-            echo "| Integration | \`${INTEGRATION}\` | **1 (highest)** |"
+            echo "| Integration Check | \`${INTEGRATION}\` | **1 (highest)** |"
             echo "| Quality Control | \`${QUALITY}\` | 2 |"
             echo "| Security Testing | \`${SECURITY}\` | 2 |"
             echo "| CodeQL Analysis | \`${CODEQL}\` | 2 |"
           } >> "$GITHUB_STEP_SUMMARY"
 
-          echo "Integration (priority 1): ${INTEGRATION}"
+          echo "Integration Check (priority 1): ${INTEGRATION}"
           echo "Quality Control (priority 2): ${QUALITY}"
           echo "Security Testing (priority 2): ${SECURITY}"
           echo "CodeQL Analysis (priority 2): ${CODEQL}"
 
           if [ "${INTEGRATION}" != "success" ]; then
-            echo "::error::Integration is the highest-priority gate and did not succeed (result=${INTEGRATION})."
-            echo "Fix Integration before Quality Control / Security Testing / CodeQL can proceed."
+            echo "::error::Integration Check is the highest-priority gate and did not succeed (result=${INTEGRATION})."
+            echo "Fix Integration Check before Quality Control / Security Testing / CodeQL can proceed."
             exit 1
           fi
           if [ "${QUALITY}" != "success" ]; then
@@ -1559,4 +1682,4 @@ jobs:
             exit 1
           fi
 
-          echo "GitHub Flow CI gate passed: Integration first, then Quality Control + Security Testing + CodeQL."
+          echo "GitHub Flow CI gate passed: Integration Check first, then Quality Control + Security Testing + CodeQL."

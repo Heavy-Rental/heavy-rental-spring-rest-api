@@ -81,7 +81,8 @@ jobs:
       aws_environment: AWS_ACTUAL
       image_ref: ${{ inputs.image_ref }}
       image_http_url: ${{ inputs.image_http_url }}
-    secrets: inherit
+    # Paid CD has no REST_API_DB_* to map; OIDC uses id-token, not inherited keys.
+    secrets: inherit # nosemgrep: yaml.github-actions.security.secrets-inherit.secrets-inherit
     permissions:
       contents: read
       id-token: write
