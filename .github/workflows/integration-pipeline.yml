@@ -640,7 +640,7 @@ jobs:
                   - "**/*sample*"
                   - "**/.github/**"
               pattern-regex: >-
-                (?i)^[ \t-]*["']?(?:[A-Za-z0-9._-]*[\._-])?(password|passwd|pwd|secret|secret[-_]?key|api[-._]?key|access[-._]?key|private[-._]?key|auth[-._]?token|credentials?)["']?[ \t]*:[ \t]*(?!\$\{)(?!~)(?!null\b)(?!ENC\()(?!\{cipher\})(?!["']?[ \t]*(?:#|$))["']?[^\s#"']+
+                (?i)^[ \t-]*["']?(?!persist[-_]credentials\b)(?:[A-Za-z0-9._-]*[\._-])?(password|passwd|pwd|secret|secret[-_]?key|api[-._]?key|access[-._]?key|private[-._]?key|auth[-._]?token|credentials?)["']?[ \t]*:[ \t]*(?!\$\{)(?!~)(?!null\b)(?!ENC\()(?!\{cipher\})(?!["']?[ \t]*(?:#|$))["']?(?!true\b)(?!false\b)[^\s#"']+
             - id: heavy-rental.rest-api.env-placeholder-plaintext-default
               languages: [regex]
               severity: ERROR
@@ -813,6 +813,7 @@ jobs:
             #   secrets: inherit                         → ERROR (over-privilege)
             #   KEY: GitHub secrets context (explicit)   → allowed (least-privilege map)
             #   KEY: literal-password                    → ERROR (CWE-798)
+            #   persist-credentials: true|false          → allowed (checkout boolean)
             # p/secrets and p/gitleaks are not applied to .github (they treat
             # a secrets-context password mapping as a leaked credential).
             - id: heavy-rental.gha.secrets-inherit-forbidden
@@ -866,7 +867,7 @@ jobs:
                   - "**/.github/workflows/**"
                   - "**/.github/actions/**"
               pattern-regex: >-
-                (?i)^[ \t-]*["']?(?:[A-Za-z0-9._-]*[\._-])?(password|passwd|pwd|secret|secret[-_]?key|api[-._]?key|access[-._]?key|private[-._]?key|auth[-._]?token|credentials?)["']?[ \t]*:[ \t]*(?!\$\{\{)(?!~)(?!null\b)(?!inherit\b)(?!["']?[ \t]*(?:#|$))["']?[^\s#"']+
+                (?i)^[ \t-]*["']?(?!persist[-_]credentials\b)(?:[A-Za-z0-9._-]*[\._-])?(password|passwd|pwd|secret|secret[-_]?key|api[-._]?key|access[-._]?key|private[-._]?key|auth[-._]?token|credentials?)["']?[ \t]*:[ \t]*(?!\$\{\{)(?!~)(?!null\b)(?!inherit\b)(?!["']?[ \t]*(?:#|$))["']?(?!true\b)(?!false\b)[^\s#"']+
           SEMGREP_CUSTOM_RULES
           # run: | already strips this step's indent from the heredoc. A second
           # de-indent (sed) would pull nested list items to column 1 and break YAML.
