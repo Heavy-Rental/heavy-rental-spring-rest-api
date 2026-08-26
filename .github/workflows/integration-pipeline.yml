@@ -32,7 +32,7 @@
 #        - "GitHub Flow CI Gate"       ← optional single aggregate check
 #   4. Merge when green → develop is integration-tested, not production-deployed
 #   5. Deploy packaging / GHCR lives only in release-pipeline.yml
-#      (GitHub Release publish, or PR develop → master via rest-api-release-caller)
+#      (workflow_dispatch via rest-api-release-caller.yml; creates the GitHub Release)
 #
 # QC "Package WAR" + artifact upload = build verification only (not a deploy).
 # environment: integration on QC = secrets isolation for local Docker Postgres tests.
@@ -50,25 +50,24 @@
 # The caller invokes this workflow with:
 #   uses: ./.github/workflows/integration-pipeline.yml
 #
-# Also mirrored in the pipeline-development repo for discovery/testing:
-#   .github/workflows/rest-api-ci.yml
-# Keep this file and that mirror in sync when developing here.
+# Authoring copy lives in this tree. Install into the Spring repo as
+#   .github/workflows/integration-pipeline.yml
+# There is no .github/workflows/rest-api-ci.yml mirror in this repo.
 #
 # Local validation (pipeline-development repo root, in the devcontainer):
 #   actionlint heavy-rental-rest-api/integration-pipeline/integration-pipeline.yml
-#   actionlint .github/workflows/rest-api-ci.yml
 #
 # Required GitHub Actions secrets (no credentials in this YAML)
 # -------------------------------------------------------------
 # Secrets (configure in the APPLICATION repo: heavy-rental-spring-rest-api)
 # -----------------------------------------------------------------------
-# Quality Control uses environment: integration (hardcoded) and also accepts
-# secrets passed from the caller via explicit secrets map.
+# Quality Control uses environment: integration (hardcoded) and reads
+# REST_API_DB_* from that Environment. The caller must not pass them
+# (a uses: job cannot read Environment secrets; an empty map would shadow QC)
+# and must not use secrets: inherit (Semgrep).
 #
-# Recommended (either works; Environment is preferred for isolation):
-#
-#   A) Settings → Environments → integration → Environment secrets
-#   B) Settings → Secrets and variables → Actions → Repository secrets
+# Configure in the APPLICATION repo:
+#   Settings → Environments → integration → Environment secrets
 #
 # Names (exact match, case-sensitive):
 #   REST_API_DB_NAME
@@ -80,7 +79,6 @@
 #   jdbc:postgresql://localhost:<PORT>/<NAME>
 # and exports it as REST_API_DB_URL for Spring tests (GITHUB_ENV).
 #
-# Caller must use: explicit secrets map
 # Do not set environment: on the caller job that uses: this workflow.
 # Never commit real values.
 # =============================================================================
@@ -108,27 +106,14 @@ on:
         default: ""
       github_environment:
         description: >
-          GitHub Environment name for the Quality Control job (default integration).
-          Used for protection rules and Environment secrets.
+          Unused. Quality Control hardcodes environment: integration. Callers still
+          pass integration so the contract stays visible.
         required: false
         type: string
         default: integration
-    secrets:
-      # Optional at call-time: pass via explicit secrets map from repo secrets, and/or
-      # load from Environment secrets on the QC job (environment: integration).
-      REST_API_DB_NAME:
-        description: PostgreSQL database name
-        required: false
-      REST_API_DB_USER:
-        description: PostgreSQL username
-        required: false
-      REST_API_DB_PASSWORD:
-        description: PostgreSQL password
-        required: false
-      REST_API_DB_PORT:
-        description: Host port for CI Postgres container
-        required: false
-      # REST_API_DB_URL is optional/unused for CI — built after Docker Postgres starts
+    # No workflow_call secrets. QC reads REST_API_DB_* from Environment
+    # "integration". Declaring them here would bind empty caller values and
+    # shadow those Environment secrets. REST_API_DB_URL is derived after Postgres starts.
 
 # GitHub Flow: one concurrent run per PR (or branch); newer pushes cancel stale runs
 concurrency:
@@ -337,21 +322,18 @@ jobs:
     runs-on: ubuntu-latest
     needs: [integration]
     # Hardcoded Environment name (more reliable than dynamic expressions for secrets).
-    # Loads Environment secrets + any secrets passed via explicit secrets map.
     environment: integration
     timeout-minutes: 30
     steps:
       - name: Verify required database secrets are configured
         env:
-          # Prefer Environment secrets (job environment: integration) and/or
-          # repository secrets passed with explicit secrets map from the caller.
           REST_API_DB_NAME: ${{ secrets.REST_API_DB_NAME }}
           REST_API_DB_USER: ${{ secrets.REST_API_DB_USER }}
           REST_API_DB_PASSWORD: ${{ secrets.REST_API_DB_PASSWORD }}
           REST_API_DB_PORT: ${{ secrets.REST_API_DB_PORT }}
         run: |
           set -euo pipefail
-          echo "Quality Control secrets source: GitHub Environment 'integration' and/or repository secrets (via explicit secrets map)."
+          echo "Quality Control secrets source: GitHub Environment 'integration'."
           missing=()
           [ -n "${REST_API_DB_NAME}" ] || missing+=(REST_API_DB_NAME)
           [ -n "${REST_API_DB_USER}" ] || missing+=(REST_API_DB_USER)
@@ -361,15 +343,13 @@ jobs:
             echo "::error::Missing required secrets: ${missing[*]}"
             echo ""
             echo "Configure in the APPLICATION repository (where this workflow runs), not pipeline-development:"
-            echo "  1) Settings → Environments → integration → Environment secrets"
-            echo "     OR"
-            echo "  2) Settings → Secrets and variables → Actions → Repository secrets"
+            echo "  Settings → Environments → integration → Environment secrets"
             echo ""
             echo "Required names (exact, case-sensitive):"
             echo "  REST_API_DB_NAME, REST_API_DB_USER, REST_API_DB_PASSWORD, REST_API_DB_PORT"
             echo "  (REST_API_DB_URL is optional — built after Docker Postgres starts)"
             echo ""
-            echo "Caller must include: explicit secrets map"
+            echo "Do not put these on the caller uses: job (empty map would shadow this Environment)."
             echo "This job uses: environment: integration"
             exit 1
           fi

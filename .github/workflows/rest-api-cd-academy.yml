@@ -1,5 +1,5 @@
 # =============================================================================
-# Install into: heavy-rental-rest-api
+# Install into: heavy-rental-spring-rest-api
 # Path:         .github/workflows/rest-api-cd-academy.yml
 # =============================================================================
 # Reusable. Callers: rest-api-cd-academy-caller.yml and rest-api-cd-paid-caller.yml

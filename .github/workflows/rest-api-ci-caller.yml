@@ -16,20 +16,19 @@
 # Secrets (in heavy-rental-spring-rest-api)
 # ----------------------------------------
 # Do NOT set `environment:` on this caller job (invalid with uses:).
-# QC inside the reusable workflow uses environment: integration
-# (for test DB secrets only — not a production deploy target).
+# Do NOT use secrets: inherit (Semgrep).
+# Do NOT pass REST_API_DB_* here — a uses: job cannot read Environment
+# secrets, so an explicit map is empty and would shadow QC.
 #
-# Add secrets (Environment "integration" and/or Repository secrets):
+# QC inside the reusable workflow uses environment: integration and loads:
 #   REST_API_DB_NAME
 #   REST_API_DB_USER
 #   REST_API_DB_PASSWORD
 #   REST_API_DB_PORT
+# from Settings → Environments → integration → Environment secrets.
 #
 # REST_API_DB_URL is optional — after Docker Postgres starts, QC builds:
 #   jdbc:postgresql://localhost:<PORT>/<NAME>
-#
-# explicit secrets: map forwards repository secrets into the reusable workflow;
-# Environment secrets are available on the QC job via environment: integration.
 # =============================================================================
 
 name: CI
@@ -54,15 +53,11 @@ permissions:
   checks: write
 
 jobs:
-  # Reusable-workflow call: only uses / with / secrets (no environment, no runs-on)
+  # Reusable-workflow call: only uses / with (no environment, no secrets, no runs-on)
   integration-pipeline:
     name: Integration pipeline
     uses: ./.github/workflows/integration-pipeline.yml
     with:
       github_environment: integration
-    # Explicit secrets only (Semgrep: avoid secrets: inherit)
-    secrets:
-      REST_API_DB_NAME: ${{ secrets.REST_API_DB_NAME }}
-      REST_API_DB_USER: ${{ secrets.REST_API_DB_USER }}
-      REST_API_DB_PASSWORD: ${{ secrets.REST_API_DB_PASSWORD }}
-      REST_API_DB_PORT: ${{ secrets.REST_API_DB_PORT }}
+    # No secrets: map and no secrets: inherit. QC (environment: integration)
+    # reads REST_API_DB_* from Environment secrets in this repository.
