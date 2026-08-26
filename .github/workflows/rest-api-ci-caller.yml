@@ -56,7 +56,7 @@ jobs:
   # Reusable-workflow call: only uses / with (no environment, no secrets, no runs-on)
   integration-pipeline:
     name: Integration pipeline
-    uses: Heavy-Rental/heavy-rental-spring-rest-api/.github/workflows/integration-pipeline.yml@ref{develop}
+    uses: Heavy-Rental/heavy-rental-spring-rest-api/.github/workflows/integration-pipeline.yml@develop
     
     # No secrets: map and no secrets: inherit. QC (environment: integration)
     # reads REST_API_DB_* from Environment secrets in this repository.
