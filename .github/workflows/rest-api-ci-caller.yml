@@ -57,7 +57,6 @@ jobs:
   integration-pipeline:
     name: Integration pipeline
     uses: ./.github/workflows/integration-pipeline.yml
-    with:
-      github_environment: integration
+
     # No secrets: map and no secrets: inherit. QC (environment: integration)
     # reads REST_API_DB_* from Environment secrets in this repository.
