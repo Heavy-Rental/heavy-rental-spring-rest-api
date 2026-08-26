@@ -639,8 +639,12 @@ jobs:
                   - "**/*example*"
                   - "**/*sample*"
                   - "**/.github/**"
-              pattern-regex: >-
-                (?i)^[ \t-]*["']?(?!persist[-_]credentials\b)(?:[A-Za-z0-9._-]*[\._-])?(password|passwd|pwd|secret|secret[-_]?key|api[-._]?key|access[-._]?key|private[-._]?key|auth[-._]?token|credentials?)["']?[ \t]*:[ \t]*(?!\$\{)(?!~)(?!null\b)(?!ENC\()(?!\{cipher\})(?!["']?[ \t]*(?:#|$))["']?(?!true\b)(?!false\b)[^\s#"']+
+              # persist-credentials is filtered with pattern-not-regex; a key
+              # lookahead still matches because credentials? is a suffix.
+              patterns:
+                - pattern-regex: |-
+                    (?i)^[ \t-]*["']?(?:[A-Za-z0-9._-]*[\._-])?(password|passwd|pwd|secret|secret[-_]?key|api[-._]?key|access[-._]?key|private[-._]?key|auth[-._]?token|credentials?)["']?[ \t]*:[ \t]*(?!\$\{)(?!~)(?!null\b)(?!ENC\()(?!\{cipher\})(?!["']?[ \t]*(?:#|$))["']?[^\s#"']+
+                - pattern-not-regex: '(?i)persist[-_]credentials\s*:'
             - id: heavy-rental.rest-api.env-placeholder-plaintext-default
               languages: [regex]
               severity: ERROR
@@ -813,7 +817,8 @@ jobs:
             #   secrets: inherit                         → ERROR (over-privilege)
             #   KEY: GitHub secrets context (explicit)   → allowed (least-privilege map)
             #   KEY: literal-password                    → ERROR (CWE-798)
-            #   persist-credentials: true|false          → allowed (checkout boolean)
+            #   persist-credentials: true|false          → allowed (checkout boolean;
+            #     excluded with pattern-not-regex, not a key lookahead)
             # p/secrets and p/gitleaks are not applied to .github (they treat
             # a secrets-context password mapping as a leaked credential).
             - id: heavy-rental.gha.secrets-inherit-forbidden
@@ -866,8 +871,10 @@ jobs:
                 include:
                   - "**/.github/workflows/**"
                   - "**/.github/actions/**"
-              pattern-regex: >-
-                (?i)^[ \t-]*["']?(?!persist[-_]credentials\b)(?:[A-Za-z0-9._-]*[\._-])?(password|passwd|pwd|secret|secret[-_]?key|api[-._]?key|access[-._]?key|private[-._]?key|auth[-._]?token|credentials?)["']?[ \t]*:[ \t]*(?!\$\{\{)(?!~)(?!null\b)(?!inherit\b)(?!["']?[ \t]*(?:#|$))["']?(?!true\b)(?!false\b)[^\s#"']+
+              patterns:
+                - pattern-regex: |-
+                    (?i)^[ \t-]*["']?(?:[A-Za-z0-9._-]*[\._-])?(password|passwd|pwd|secret|secret[-_]?key|api[-._]?key|access[-._]?key|private[-._]?key|auth[-._]?token|credentials?)["']?[ \t]*:[ \t]*(?!\$\{\{)(?!~)(?!null\b)(?!inherit\b)(?!["']?[ \t]*(?:#|$))["']?[^\s#"']+
+                - pattern-not-regex: '(?i)persist[-_]credentials\s*:'
           SEMGREP_CUSTOM_RULES
           # run: | already strips this step's indent from the heredoc. A second
           # de-indent (sed) would pull nested list items to column 1 and break YAML.
