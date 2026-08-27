@@ -13,14 +13,15 @@
 | Area | Capability |
 |------|------------|
 | Auth | `auth-interim-token` → `auth-login-logout` |
-| Equipment | `equipment-browse` |
-| Admin asset records | `admin-portal` |
+| Equipment / assets | `equipment-browse` (`/api/assets`) |
 | Bookings / mobile | `booking-delivery-return` |
 | Payments | `payments-stripe` |
-| Rental plans | `rental-plan-quote` + `spring-proxy-endpoints` |
+| Rental plans | `rental-plan-quote` + `spring-proxy-endpoints` + as-built [`changes/dynamic-plan-quote-pricing/`](./changes/dynamic-plan-quote-pricing/) (OpenSPDD + ADR) |
+| Postal / distance | `postal-code-validation` + rental-plan FR-RP-012 + as-built [`changes/pricing-postal-distance/`](./changes/pricing-postal-distance/) (OpenSPDD + ADR) |
 | Admin users | `admin-users` |
+| Admin asset records | `admin-portal` + `equipment-browse` |
 | Admin overview | `monthly-utilization` |
-| Recommender | `haystack-recommender` + portal contract + `../Feasibility_Study_Spring/` + FR-S2B-011 quantity change [`changes/2026-08-20-call2-quote-quantity-passthrough/`](./changes/2026-08-20-call2-quote-quantity-passthrough/) |
+| Recommender | `haystack-recommender` + portal contract + `../Feasibility_Study_Spring/` + FR-S2B-011 [`changes/2026-08-20-call2-quote-quantity-passthrough/`](./changes/2026-08-20-call2-quote-quantity-passthrough/) |
 | Data / seed / tests | `entity-repository`, `seed-data`, `testing` |
 | Estimate (not built) | `changes/pricing-estimate/` |
 | Plan checkout | `rental-plan-quote` + `booking-delivery-return` (as-built); archive `changes/archive/2026-08-13-rental-plan-checkout-conversion/` |
@@ -29,9 +30,9 @@
 
 https://github.com/Heavy-Rental/haystack-fast-api — Call 1/2/3 contracts under that repo’s `openspec/specs/`.
 
-## OpenSPDD
+## OpenSPDD and ADR
 
-[`../spdd/README.md`](../spdd/README.md)
+[`../spdd/README.md`](../spdd/README.md) — REASONS canvases. Per-change `design.md` is the OpenSPDD canvas; `adr.md` is the locked decision record. Gold-standard pack: [`changes/2026-08-20-call2-quote-quantity-passthrough/`](./changes/2026-08-20-call2-quote-quantity-passthrough/).
 
 ## Archives
 

@@ -31,12 +31,16 @@
 |--------|--------|--------|
 | [`prompt/S2b-resilient-haystack-recommender-client.md`](./prompt/S2b-resilient-haystack-recommender-client.md) | S2b haystack recommender client | **As-built** (incl. FR-S2B-011 quantity pass-through) |
 | [`../openspec/changes/2026-08-20-call2-quote-quantity-passthrough/design.md`](../openspec/changes/2026-08-20-call2-quote-quantity-passthrough/design.md) | Call 2 collapsed quantity pass-through | **As-built** REASONS + ADR |
+| [`../openspec/changes/dynamic-plan-quote-pricing/design.md`](../openspec/changes/dynamic-plan-quote-pricing/design.md) | Flag-gated haystack quote pricing | **As-built** REASONS + ADR |
+| [`../openspec/changes/pricing-postal-distance/design.md`](../openspec/changes/pricing-postal-distance/design.md) | OneMap distance + postal validation | **As-built** REASONS + ADR |
 
 ## Related
 
-- OpenSpec SoT: [`../openspec/specs/haystack-recommender/spec.md`](../openspec/specs/haystack-recommender/spec.md)  
-- Portal contract: [`../openspec/specs/haystack-recommender/contracts/portal-api.md`](../openspec/specs/haystack-recommender/contracts/portal-api.md)  
-- Archived change: [`../openspec/changes/archive/2026-08-12-s2b-resilient-haystack-client/`](../openspec/changes/archive/2026-08-12-s2b-resilient-haystack-client/)  
+- OpenSpec SoT: [`../openspec/specs/`](../openspec/specs/) (index [`../openspec/project.md`](../openspec/project.md))  
+- Recommender: [`../openspec/specs/haystack-recommender/spec.md`](../openspec/specs/haystack-recommender/spec.md) · [`contracts/portal-api.md`](../openspec/specs/haystack-recommender/contracts/portal-api.md)  
+- Quote pricing: [`../openspec/specs/rental-plan-quote/spec.md`](../openspec/specs/rental-plan-quote/spec.md) · [`../openspec/specs/spring-proxy-endpoints/spec.md`](../openspec/specs/spring-proxy-endpoints/spec.md)  
+- Postal validation: [`../openspec/specs/postal-code-validation/spec.md`](../openspec/specs/postal-code-validation/spec.md)  
+- Archived S2b change: [`../openspec/changes/archive/2026-08-12-s2b-resilient-haystack-client/`](../openspec/changes/archive/2026-08-12-s2b-resilient-haystack-client/)  
 
 ## New work
 

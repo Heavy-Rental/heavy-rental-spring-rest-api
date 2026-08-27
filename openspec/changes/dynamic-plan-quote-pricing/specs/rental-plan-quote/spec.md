@@ -43,7 +43,7 @@ When `pricing.dynamic-enabled=true`, line subtotals MUST be refreshed from `Dyna
 
 ### Requirement: FR-RP-006 Quote pricing source
 
-`POST .../quote` MUST use `DynamicPricingService` when `pricing.dynamic-enabled=true`, backed by a FastAPI `PricingClient` calling `haystack-fast-api`'s `POST /internal/v1/pricing/quote`. When the flag is `false` (default), quote pricing remains Spring-only `DefaultPricingClient` arithmetic from snapshotted line subtotals, with no HTTP call to haystack — unchanged from prior behavior.
+`POST .../quote` MUST use `DynamicPricingService` when `pricing.dynamic-enabled=true`, backed by a FastAPI `PricingClient` calling `haystack-fast-api`'s `POST /internal/v1/pricing/quote`. When the flag is `false`, quote pricing remains Spring-only `DefaultPricingClient` arithmetic from snapshotted line subtotals, with no HTTP call to haystack. As-built module default in `application.properties` is **`true`** (`DYNAMIC_PRICING_ENABLED:true`).
 
 #### Scenario: Flag off preserves current behavior
 - GIVEN `pricing.dynamic-enabled=false`

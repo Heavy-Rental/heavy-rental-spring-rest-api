@@ -56,9 +56,12 @@ Content-Type: application/json
 
 Public path (no JWT). Events: `payment_intent.succeeded`, `payment_intent.payment_failed`.
 
-## Scheduler
+## Schedulers
 
-`BalanceChargeSchedulerService` — cron `0 0 2 * * *` zone `Asia/Singapore` (as-built design).
+| Job | When | Role |
+|-----|------|------|
+| `BalanceChargeSchedulerService` | cron `0 0 2 * * *` `Asia/Singapore` | Off-session 70% balance for `PENDING_CONFIRMED` bookings starting tomorrow |
+| `PaymentReconciliationSchedulerService` | every 15 minutes | Re-check `PENDING` payments older than 10 minutes against Stripe (missed-webhook backstop) |
 
 ## Related
 

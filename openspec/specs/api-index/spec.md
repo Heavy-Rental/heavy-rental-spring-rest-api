@@ -26,10 +26,10 @@ Owning contracts MUST link to `openspec/specs/<capability>/` (or an active chang
 
 Routes that are commonly mistaken for haystack proxies (e.g. rental plan quote) MUST be described accurately in the index and spring-proxy-endpoints capability.
 
-#### Scenario: Quote is Spring-only
+#### Scenario: Quote hop is documented as flagged, not unconditional
 - GIVEN `POST /api/rentalPlans/{id}/quote`
 - WHEN documented in the index
-- THEN it is not claimed to call haystack as-built
+- THEN it is described as flag-gated haystack pricing (`pricing.dynamic-enabled`) with Spring fallback, not as an unconditional proxy or as Spring-only
 
 ## Related
 

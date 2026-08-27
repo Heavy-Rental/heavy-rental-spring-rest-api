@@ -6,7 +6,8 @@
 | **Base package** | `com.heavy_rental.rest_api` |
 | **Stack** | Java 21 · Spring Boot 4.1 · PostgreSQL · OAuth2 Resource Server JWT |
 | **Process** | **OpenSpec primary** — migration complete for living contracts |
-| **OpenSPDD** | [`spdd/`](../spdd/) — REASONS canvases only |
+| **OpenSPDD** | [`spdd/`](../spdd/) — REASONS canvases; change-pack `design.md` is the per-change canvas |
+| **ADR** | `openspec/changes/<id>/adr.md` — Accepted/Rejected decisions for a change |
 | **Haystack notes** | [`Feasibility_Study_Spring/`](../Feasibility_Study_Spring/) |
 | **Upstream (read-only)** | [Heavy-Rental/haystack-fast-api](https://github.com/Heavy-Rental/haystack-fast-api) |
 | **Contracts** | `openspec/specs/` only — former `specification/` tree removed after migration |
@@ -14,8 +15,9 @@
 ## Purpose
 
 Behavior SoT: `specs/<capability>/spec.md`.  
-Proposed work: `changes/<id>/` with ADDED/MODIFIED/REMOVED deltas.  
-HTTP tables: `specs/<capability>/contracts/`.
+Proposed work: `changes/<id>/` with ADDED/MODIFIED/REMOVED deltas, OpenSPDD REASONS `design.md`, and ADR `adr.md`.  
+HTTP tables: `specs/<capability>/contracts/`.  
+Integrator overview (non-normative): [`../DOCUMENTATION.md`](../DOCUMENTATION.md).
 
 ## Constitution
 
@@ -28,7 +30,7 @@ HTTP tables: `specs/<capability>/contracts/`.
 | Layering | Thin controllers; no external HTTP from controllers |
 | Schema | default: Hibernate `ddl-auto=update`; prod: Flyway + `validate` |
 | Seed | `data.sql` after Hibernate DDL (dev only) |
-| Process | New work → OpenSpec only |
+| Process | New work → OpenSpec change pack (`proposal` + REASONS `design.md` + `adr.md` + spec deltas) |
 
 ## Living domains
 
@@ -46,15 +48,19 @@ HTTP tables: `specs/<capability>/contracts/`.
 | [`payments-stripe`](./specs/payments-stripe/spec.md) | Stripe payments |
 | [`rental-plan-quote`](./specs/rental-plan-quote/spec.md) | Rental plans + checkout |
 | [`admin-users`](./specs/admin-users/spec.md) | Admin users |
+| [`admin-portal`](./specs/admin-portal/spec.md) | Admin asset-records gating |
 | [`monthly-utilization`](./specs/monthly-utilization/spec.md) | Admin utilization |
 | [`haystack-recommender`](./specs/haystack-recommender/spec.md) | S2b recommender |
 | [`spring-proxy-endpoints`](./specs/spring-proxy-endpoints/spec.md) | Haystack hop map |
+| [`postal-code-validation`](./specs/postal-code-validation/spec.md) | OneMap postal lookup |
 
-## Active changes
+## Active / as-built change packs
 
 | Change | Status |
 |--------|--------|
 | [`changes/pricing-estimate/`](./changes/pricing-estimate/) | **Design only** — open availability decision; not implemented |
+| [`changes/dynamic-plan-quote-pricing/`](./changes/dynamic-plan-quote-pricing/) | **As-built** — flag-gated haystack quote pricing (OpenSpec + OpenSPDD + ADR) |
+| [`changes/pricing-postal-distance/`](./changes/pricing-postal-distance/) | **As-built** — OneMap distance + postal validation + optional site address (OpenSpec + OpenSPDD + ADR). Manual live-OneMap e2e remains an ops checklist |
 | [`changes/2026-08-20-call2-quote-quantity-passthrough/`](./changes/2026-08-20-call2-quote-quantity-passthrough/) | **As-built** — FR-S2B-011 Call 2 quantity pass-through (Haystack FR-P-013) |
 
 ## Archives
@@ -71,8 +77,9 @@ HTTP tables: `specs/<capability>/contracts/`.
 2. GIVEN / WHEN / THEN  
 3. Observable behavior over class names  
 4. Keep auth interim vs login/logout split  
-5. OpenSPDD for generation only (`spdd/`)  
-6. Never invent equipment/rates on recommender failure  
+5. OpenSPDD REASONS canvas (`design.md` and/or `spdd/prompt/`) for generation and realignment  
+6. ADR (`adr.md`) for locked trade-offs; do not relitigate without a new proposal  
+7. Never invent equipment/rates on recommender failure; never fail a quote solely because haystack pricing or OneMap is down  
 
 ## Reading order
 

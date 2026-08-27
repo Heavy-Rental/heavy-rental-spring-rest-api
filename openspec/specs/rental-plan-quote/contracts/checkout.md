@@ -16,7 +16,7 @@
 
 ## `RentalPlanResponse`
 
-Returned by create, list, get, add item, remove item, and quote.
+Returned by create, list, get, add item, remove item, quote, cancel, and PATCH site address.
 
 ```json
 {
@@ -48,9 +48,15 @@ Returned by create, list, get, add item, remove item, and quote.
 
 Succeeds: mutation applied, `status` → `"DRAFT"`, `totalAmount` → `null`, `updatedAt` → now.
 
+## `PATCH /api/rentalPlans/{id}`
+
+Sets `siteAddress` (and derived `sitePostalCode`). Body `{ "siteAddress": "…" }` — same optional/when-provided 6-digit postal rule as create. On `QUOTED`, reverts to `DRAFT` and clears `totalAmount`. `CONVERTED` → `409 already_converted`; `CANCELLED` → `409 already_cancelled`.
+
 ## `POST /api/rentalPlans/{id}/quote`
 
 Returns `RentalPlanResponse`. Success refreshes `updatedAt`. Re-quote of `QUOTED` is allowed (stale-quote recovery). `CONVERTED` → `409`.
+
+When `pricing.dynamic-enabled=true` (module default), line rates are refreshed from haystack `/internal/v1/pricing/quote` with per-item Spring fallback; optional `X-Correlation-Id` is forwarded.
 
 ## `POST /api/rentalPlans/{id}/cancel`
 
@@ -81,8 +87,8 @@ Returns `RentalPlanResponse`. Sets `status` → `"CANCELLED"`, `totalAmount` →
 | `409` | `quote_not_ready` | status ≠ `QUOTED` |
 | `409` | `quote_expired` | `QUOTED` but `now - updatedAt > 24h` — re-quote then retry |
 | `409` | `conflict` | Optimistic-lock double-submit, or overlapping booking |
-| `409` | `already_converted` | Cancel attempted on a `CONVERTED` plan |
-| `409` | `already_cancelled` | Cancel attempted on an already-`CANCELLED` plan |
+| `409` | `already_converted` | Cancel or PATCH attempted on a `CONVERTED` plan |
+| `409` | `already_cancelled` | Cancel or PATCH attempted on an already-`CANCELLED` plan |
 | `400` | `bad_request` | No `rentalPlanId` and no items/dates |
 | `400` | `validation_failed` | `siteAddress` blank or missing 6-digit postal code |
 

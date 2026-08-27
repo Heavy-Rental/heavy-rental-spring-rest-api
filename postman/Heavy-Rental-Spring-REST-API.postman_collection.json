@@ -630,6 +630,23 @@
           "response": []
         },
         {
+          "name": "Create full-payment intent",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"bookingId\": {{bookingId}}\n}"
+            },
+            "url": "{{baseUrl}}/api/payments/full-payment-intent",
+            "description": "One-shot GST-inclusive PaymentIntent (`totalAmount × 1.09`). Skips deposit/balance split. Needs real `STRIPE_API_KEY`."
+          },
+          "response": []
+        },
+        {
           "name": "Stripe webhook (stub)",
           "request": {
             "auth": { "type": "noauth" },

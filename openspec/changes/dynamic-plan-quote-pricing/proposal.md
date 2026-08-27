@@ -3,7 +3,7 @@
 | Field | Value |
 |-------|--------|
 | **Change id** | `dynamic-plan-quote-pricing` |
-| **Status** | **Proposed — implementation in progress** |
+| **Status** | **As-built** (living specs synced 2026-08-27) |
 | **Date** | 2026-08-15 |
 | **Route** | `POST /api/rentalPlans/{id}/quote` |
 
@@ -19,7 +19,7 @@ This is deliberately **not** routed through the recommender saga (`HaystackRecom
 
 - **ADDED** `HaystackPricingClient`: a new outbound client (mirrors `HaystackRecommenderClient`'s RestClient/circuit-breaker/bulkhead/retry pattern) calling `POST /internal/v1/pricing/quote`.
 - **ADDED** `DynamicPricingService`: builds the batch request from a plan's line items, calls `HaystackPricingClient`, and falls back to today's `DefaultPricingClient` arithmetic per-item on any failure (unavailable circuit, timeout, or a per-item error from FastAPI) — checkout must never be blocked because the ML service is down.
-- **MODIFIED** `RentalPlanService.requestQuote()`: behind a new flag `pricing.dynamic-enabled` (default `false`), re-prices every line item via `DynamicPricingService` before summing `totalAmount`, instead of trusting the subtotals snapshotted at add-item time.
+- **MODIFIED** `RentalPlanService.requestQuote()`: behind flag `pricing.dynamic-enabled` (as-built module default **on** via `DYNAMIC_PRICING_ENABLED:true`), re-prices every line item via `DynamicPricingService` before summing `totalAmount`, instead of trusting the subtotals snapshotted at add-item time.
 - **UNCHANGED** `POST /rentalPlans/{id}/items` (cart building): still `Asset.baseDailyRate` per FR-RP-002 — only the quote step gains the ML source.
 - **UNCHANGED** `RentalPlanResponse` shape and the React booking-summary screen — it already renders `totalAmount` as-is.
 

@@ -60,7 +60,7 @@ The default profile MUST disable Flyway (`spring.flyway.enabled=false`) and use 
 
 ### Requirement: FR-ENV-006 OpenSpec-primary process
 
-New feature contracts MUST be added under `openspec/specs/` or `openspec/changes/` only. OpenSPDD canvases remain under `spdd/prompt/` for generation only. Living contracts MUST NOT be authored under `specification/`.
+New feature contracts MUST be added under `openspec/specs/` or `openspec/changes/` only. OpenSPDD REASONS canvases remain under `spdd/prompt/` (living generation prompts) and/or `openspec/changes/<id>/design.md`. Significant trade-offs MUST be recorded as an ADR (`openspec/changes/<id>/adr.md`). Living contracts MUST NOT be authored under `specification/`.
 
 #### Scenario: New capability
 - GIVEN a new product capability
@@ -80,7 +80,8 @@ Write DTOs that carry format rules (for example `siteAddress` postal code) MUST 
 | Packaging | WAR |
 | Security | Spring Security + OAuth2 Resource Server JWT |
 | Persistence | Spring Data JPA + PostgreSQL + Flyway |
-| HTTP client (S2b) | RestClient + Resilience4j |
+| HTTP client (S2b + pricing) | RestClient + Resilience4j (`client.haystack`) |
+| HTTP client (geocoding) | RestClient + Resilience4j (`client.onemap`) — independent CB from Haystack |
 | Port | 8080 |
 
 ## Related

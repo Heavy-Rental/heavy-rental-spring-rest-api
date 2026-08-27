@@ -2,8 +2,8 @@
 
 | Field | Value |
 |-------|--------|
-| **Change** | [`pricing-postal-distance`](../proposal.md) — implementation in progress |
-| **Status** | Both **implemented and tested** (tasks 11–14 done; 130+ automated tests, including a real HTTP + `@Valid` integration test, not just service-level). Not yet consumed by the frontend, not yet archived into `openspec/specs/rental-plan-quote/`. The behavior below matches the as-built code exactly — the "written ahead of code" caveat from the previous revision of this doc no longer applies. |
+| **Change** | [`pricing-postal-distance`](../proposal.md) |
+| **Status** | **As-built** — living SoT [`../../../specs/rental-plan-quote/spec.md`](../../../specs/rental-plan-quote/spec.md) FR-RP-008 / FR-RP-011. Portal consumption is a frontend follow-up. |
 | **Behavior** | [`../proposal.md`](../proposal.md) ("Follow-on" section) · [`../design.md`](../design.md) |
 
 ## `POST /api/rentalPlans` — `siteAddress` becomes optional
