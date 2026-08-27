@@ -37,10 +37,10 @@ Routes other than interim token, login, health, and Stripe webhook need an **acc
 | `alex.tan@example.sg` | `customer123` | USER (default in env; has one active QUOTED plan, plus CONVERTED/CANCELLED history) |
 | `mei.lin@example.sg` | `customer456` | USER (no plans — cart → quote → checkout) |
 | `admin@localhost` | `admin1234` | ADMIN |
+| `ah.tan@example.sg` | `driver123` | DRIVER (deliveries/returns + all bookings) |
 
-No seed `DRIVER` account exists — a `ROLE_DRIVER` token can only be obtained via **Auth → 2b.
-Login with Google** (first-time sign-in auto-provisions one) or by promoting a seeded user's role
-directly in the DB.
+A `ROLE_DRIVER` token can also be obtained via **Auth → 2b. Login with Google** (first-time
+sign-in auto-provisions a driver if the Google email is new).
 
 ## Folders
 
@@ -49,10 +49,10 @@ directly in the DB.
 | **0. Health** | `GET /actuator/health` (public) |
 | **1. Auth** | Interim → login/google → logout |
 | **2. Recommendations (S2b)** | Submit quote · knowledge-query · get session |
-| **3. Equipment** | Browse / CRUD |
+| **3. Equipment** | Browse / CRUD (`/api/assets`; folder name is historical) |
 | **4. Bookings** | Direct create / **checkout from plan** / list / get / update — list/get/update are ownership-scoped (USER sees only their own; ADMIN/DRIVER see all) |
 | **5. Deliveries & Returns** | List + status patch (`CONFIRMED→MOBILISED`, `MOBILISED→COMPLETED`) — **ADMIN/DRIVER only**, USER gets 403 |
-| **6. Payments** | Deposit intent (needs Stripe key); webhook (signature) |
+| **6. Payments** | Deposit intent + full-payment intent (needs Stripe key); webhook (signature) |
 | **7. Rental Plans** | Create / list / get / add item / remove item / **update site address** / quote / cancel (`/api/rentalPlans`) |
 | **8. Stubs** | Depots empty list only |
 | **9. Postal Codes** | Real-time validation (`/api/postalCodes/{postalCode}`) — 200 VALID/INVALID, 503 UNAVAILABLE |
@@ -109,7 +109,7 @@ Submit test script asserts the portal body is **quote-shaped** and stores `recom
 - Admin users: [`../openspec/specs/admin-users/`](../openspec/specs/admin-users/)
 - Monthly utilization: [`../openspec/specs/monthly-utilization/`](../openspec/specs/monthly-utilization/)
 - Pricing estimate (design): [`../openspec/changes/pricing-estimate/`](../openspec/changes/pricing-estimate/)
-- Postal code validation: [`../openspec/changes/pricing-postal-distance/contracts/postal-code-validation.md`](../openspec/changes/pricing-postal-distance/contracts/postal-code-validation.md)
-- Rental plan site address (optional at creation + PATCH): [`../openspec/changes/pricing-postal-distance/contracts/rental-plan-site-address.md`](../openspec/changes/pricing-postal-distance/contracts/rental-plan-site-address.md)
+- Postal code validation: [`../openspec/specs/postal-code-validation/`](../openspec/specs/postal-code-validation/)
+- Rental plan site address (optional at creation + PATCH): [`../openspec/specs/rental-plan-quote/spec.md`](../openspec/specs/rental-plan-quote/spec.md) FR-RP-008 / FR-RP-011
 - Recommender: [`../openspec/specs/haystack-recommender/`](../openspec/specs/haystack-recommender/) · [`contracts/portal-api.md`](../openspec/specs/haystack-recommender/contracts/portal-api.md)
 - OpenSpec guide: [`../openspec/AGENTS.md`](../openspec/AGENTS.md)

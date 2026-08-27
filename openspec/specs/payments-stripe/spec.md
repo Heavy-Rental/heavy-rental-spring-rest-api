@@ -62,12 +62,21 @@
 
 ### Requirement: FR-PAY-003 Balance auto-charge scheduler
 
-A daily scheduled job (Asia/Singapore) MUST find bookings starting tomorrow that still need balance payment, create at most one balance attempt, charge off-session using the saved deposit payment method, and on decline mark manual follow-up without automatic retry.
+A daily scheduled job (Asia/Singapore, cron `0 0 2 * * *`) MUST find bookings starting tomorrow that still need balance payment (`PENDING_CONFIRMED`), create at most one balance attempt, charge off-session using the saved deposit payment method, and on decline mark manual follow-up without automatic retry. Each booking MUST be processed in its own transaction so one failure does not abort the batch.
 
 #### Scenario: One attempt only
 - GIVEN a prior FAIL balance payment for the booking
 - WHEN the scheduler runs
 - THEN it does not create another automatic charge attempt
+
+### Requirement: FR-PAY-006 Pending-payment reconciliation
+
+A periodic backstop (`PaymentReconciliationSchedulerService`, every 15 minutes) MUST re-check payments still `PENDING` more than 10 minutes after creation directly against Stripe, so a missed webhook cannot strand a booking at `PENDING_DEPOSIT` indefinitely.
+
+#### Scenario: Stale pending payment is reconciled
+- GIVEN a PENDING payment whose `createdAt` is older than 10 minutes
+- WHEN the reconciliation job runs
+- THEN Stripe is queried and the matching webhook success/failure path is applied if the intent has a terminal state
 
 ### Requirement: FR-PAY-004 Currency and deposit rate ownership
 
@@ -75,8 +84,7 @@ Currency is SGD as-built. Deposit rate MUST live at booking-creation time (`Book
 
 ## Known gaps
 
-- `Booking.paidStatus` may have been folded/removed on some branches — confirm against entity before assuming transitions  
-- Sandbox verification may still be pending  
+- No `Booking.paidStatus` column as-built — payment state lives on `Payment` rows and booking `status`  
 - No email/Slack on balance failure (in-app flag only)
 
 ## Out of scope

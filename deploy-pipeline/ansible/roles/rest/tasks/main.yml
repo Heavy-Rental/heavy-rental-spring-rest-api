@@ -73,26 +73,13 @@
       - --remove-orphans
     chdir: "{{ compose_dir }}"
 
-- name: REST health
-  ansible.builtin.uri:
-    url: "{{ item }}"
-    status_code: [200, 301, 302, 401, 403]
-  loop:
-    - http://127.0.0.1:8080/actuator/health
-    - http://127.0.0.1:8080/
-  register: rest_health
-  retries: 15
-  delay: 5
-  until: rest_health is succeeded
-  failed_when: false
-
-# Prefer actuator (200 when UP). Spring Security often returns 401 on /.
-# curl -f on / fails the play even though Tomcat is up (CD verify accepts 401/403).
-- name: REST must answer on 8080
+# ALB tg-rest waits for GET <instance>:8080/actuator/health matcher 200-299.
+# Spring Security 401s GET / — that 4xx must not count as healthy.
+- name: REST must answer 2xx on :8080/actuator/health
   ansible.builtin.uri:
     url: http://127.0.0.1:8080/actuator/health
-    status_code: [200, 401, 403]
+    status_code: "{{ range(200, 300) | list }}"
   register: rest_live
-  retries: 15
+  retries: 30
   delay: 5
   until: rest_live is succeeded

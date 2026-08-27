@@ -10,12 +10,13 @@
 - [x] 6. Wire into `RentalPlanService.requestQuote()` behind `pricing.dynamic-enabled`
 - [x] 7. `HaystackPricingClientTest` (WireMock: happy path, per-item error, circuit open, 4xx)
 - [x] 8. `DynamicPricingServiceTest` + `RentalPlanServiceTest`: flag off unchanged; flag on + success; whole-batch and per-item fallback
-- [ ] 9. Archive this change into `openspec/specs/rental-plan-quote/` + `spring-proxy-endpoints/` when as-built and flag defaults to `true` in an environment
-- [ ] 10. Update `spring-proxy-endpoints` route summary table row for `POST /api/rentalPlans/{id}/quote` from "design-only" to "as-built (flagged)"
+- [x] 9. Archive this change into `openspec/specs/rental-plan-quote/` + `spring-proxy-endpoints/` when as-built and flag defaults to `true` in an environment
+- [x] 10. Update `spring-proxy-endpoints` route summary table row for `POST /api/rentalPlans/{id}/quote` from "design-only" to "as-built (flagged)"
 
 Full suite green: 96/96 (`./mvnw test`), including `RestApiApplicationTests` (full context load with the new beans).
 
 ## Docs
 
 - [x] proposal + design + delta requirements
-- [ ] Living SoT update after implement + flag rollout decision
+- [x] Living SoT update after implement + flag rollout decision (2026-08-27: FR-RP-004/006 + FR-PROXY-001/005; ADR + REASONS canvas)
+- [x] `adr.md` (Accepted) + OpenSPDD REASONS `design.md`

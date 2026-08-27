@@ -151,7 +151,7 @@ env:
   JAVA_VERSION: "21"
   JAVA_DISTRIBUTION: temurin
   APP_PATH: app
-  DEFAULT_APP_REPOSITORY: SA62-team1/heavy-rental-spring-rest-api
+  DEFAULT_APP_REPOSITORY: Heavy-Rental/heavy-rental-spring-rest-api
   # Integration CI is develop-only (rest-api-ci-caller.yml push/PR → develop)
   DEFAULT_APP_REF: develop
   # Non-sensitive Spring/JPA settings only — credentials come from GitHub Secrets
@@ -505,13 +505,13 @@ jobs:
           echo "All required database secrets are present (values not logged)."
 
       - name: Checkout calling repository (PR / push head)
-        if: needs.integration.outputs.checkout_mode == 'caller'
+        if: needs.integration-check.outputs.checkout_mode == 'caller'
         uses: actions/checkout@v7
         with:
           path: ${{ env.APP_PATH }}
 
       - name: Checkout remote application repository
-        if: needs.integration.outputs.checkout_mode == 'remote'
+        if: needs.integration-check.outputs.checkout_mode == 'remote'
         uses: actions/checkout@v7
         with:
           repository: ${{ needs.integration-check.outputs.app_repository }}
@@ -679,13 +679,13 @@ jobs:
     timeout-minutes: 40
     steps:
       - name: Checkout calling repository (PR / push head)
-        if: needs.integration.outputs.checkout_mode == 'caller'
+        if: needs.integration-check.outputs.checkout_mode == 'caller'
         uses: actions/checkout@v7
         with:
           path: ${{ env.APP_PATH }}
 
       - name: Checkout remote application repository
-        if: needs.integration.outputs.checkout_mode == 'remote'
+        if: needs.integration-check.outputs.checkout_mode == 'remote'
         uses: actions/checkout@v7
         with:
           repository: ${{ needs.integration-check.outputs.app_repository }}
@@ -1706,13 +1706,13 @@ jobs:
       actions: read
     steps:
       - name: Checkout calling repository (PR / push head)
-        if: needs.integration.outputs.checkout_mode == 'caller'
+        if: needs.integration-check.outputs.checkout_mode == 'caller'
         uses: actions/checkout@v7
         with:
           path: ${{ env.APP_PATH }}
 
       - name: Checkout remote application repository
-        if: needs.integration.outputs.checkout_mode == 'remote'
+        if: needs.integration-check.outputs.checkout_mode == 'remote'
         uses: actions/checkout@v7
         with:
           repository: ${{ needs.integration-check.outputs.app_repository }}

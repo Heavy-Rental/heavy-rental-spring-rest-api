@@ -20,12 +20,17 @@ Document as-built automated test inventory, DB targets, and isolation rules so C
 
 ### Requirement: FR-TEST-002 S2b tests do not require live FastAPI
 
-Haystack client, resilience, and saga tests MUST use WireMock and/or Mockito so default CI does not need a live haystack process.
+Haystack client, resilience, saga, and pricing tests MUST use WireMock and/or Mockito so default CI does not need a live haystack process. OneMap client, circuit-breaker, and postal-code tests MUST likewise use WireMock/Mockito so default CI does not need live onemap.gov.sg.
 
 #### Scenario: WireMock dual-hop
 - GIVEN WireMock stubs for Call 1 and Call 2
 - WHEN saga/controller tests run
 - THEN no real FastAPI connection is required
+
+#### Scenario: Postal validation uses WireMock OneMap
+- GIVEN WireMock stubs for OneMap token and search
+- WHEN `PostalCodeControllerIntegrationTest` runs
+- THEN no real onemap.gov.sg connection is required
 
 ### Requirement: FR-TEST-003 Transactional isolation for auth IT
 
@@ -47,7 +52,7 @@ Auth integration tests MUST cover interim mint claims, login success/failure, ro
 
 ### Requirement: FR-TEST-005 S2b coverage set
 
-The suite MUST include client mapping, retry idempotency, timeout retry, circuit breaker, bulkhead, saga unit, saga WireMock dual-hop, recommendation controller MockMvc+JWT+WireMock tests, and FR-S2B-011 collapsed `quantity` mapping (see inventory).
+The suite MUST include client mapping, retry idempotency, timeout retry, circuit breaker, bulkhead, saga unit, saga WireMock dual-hop, recommendation controller MockMvc+JWT+WireMock tests, FR-S2B-011 collapsed `quantity` mapping, Haystack pricing + dynamic-pricing fallback tests, and OneMap/postal-code WireMock tests (see inventory).
 
 #### Scenario: Full mvn test green without haystack
 - GIVEN Postgres available and no FastAPI

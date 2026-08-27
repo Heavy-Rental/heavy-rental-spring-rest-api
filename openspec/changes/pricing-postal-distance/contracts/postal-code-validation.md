@@ -2,8 +2,8 @@
 
 | Field | Value |
 |-------|--------|
-| **Change** | [`pricing-postal-distance`](../proposal.md) — implementation in progress |
-| **Status** | As-built in Spring; **not yet consumed by the frontend** — this doc is the handoff |
+| **Change** | [`pricing-postal-distance`](../proposal.md) |
+| **Status** | **As-built** — living SoT [`../../../specs/postal-code-validation/`](../../../specs/postal-code-validation/). Portal consumption is a frontend follow-up; this file remains the change-pack handoff. |
 | **Behavior** | [`../proposal.md`](../proposal.md) · [`../design.md`](../design.md) |
 
 ## `GET /api/postalCodes/{postalCode}`

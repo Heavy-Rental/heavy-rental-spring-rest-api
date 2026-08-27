@@ -8,8 +8,9 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * (see {@code openspec/changes/dynamic-plan-quote-pricing/}).
  * <p>
  * {@code dynamicEnabled} gates {@code RentalPlanService.requestQuote()}'s use of
- * {@code DynamicPricingService}; when {@code false} (default), quote pricing is unchanged
- * Spring-only {@code DefaultPricingClient} arithmetic.
+ * {@code DynamicPricingService}; when {@code false}, quote pricing is Spring-only
+ * {@code DefaultPricingClient} arithmetic. As-built {@code application.properties} default
+ * is {@code true} ({@code DYNAMIC_PRICING_ENABLED:true}).
  * <p>
  * {@code originPostalCode}/{@code distanceLookupEnabled} back {@code DistanceService} (see
  * {@code openspec/changes/pricing-postal-distance/}): {@code distance_km} sent to haystack is
@@ -21,7 +22,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  */
 @ConfigurationProperties(prefix = "pricing")
 public record PricingProperties(
-		@DefaultValue("false") boolean dynamicEnabled,
+		@DefaultValue("true") boolean dynamicEnabled,
 		@DefaultValue("20.0") double defaultDistanceKm,
 		@DefaultValue("629462") String originPostalCode,
 		@DefaultValue("true") boolean distanceLookupEnabled) {

@@ -12,13 +12,13 @@ Full historical field tables: git history (former `specification/SPEC-entity-rep
 |--------|-------|--------|
 | `User` | `users` | Auth principal; `name` UNIQUE; `email` login; roles USER/ADMIN/DRIVER |
 | `AssetCategory` | `asset_categories` | 4 categories in seed |
-| `Asset` | `assets` | Fleet item; rates; capacity/height; condition |
+| `Asset` | `assets` | Fleet item; rates; capacity/height; condition; `serialno`; `lastConditionUpdatedAt` (server-stamped on real condition change); seed `location` normalized to `Tuas` |
 | `AssetImage` | `asset_images` | base64 `image` TEXT; FK asset; also source for haystack-recommender portal `items[].equipment.img` |
-| `RentalPlan` | `rental_plan` | customer FK; status DRAFT/SAVED/QUOTED/CONVERTED/CANCELLED; `createdAt` set on create; `updatedAt` is last-quoted-at (also refreshed on quoted item mutation); DTO postal-code rule on create |
-| `RentalPlanRecord` | `rental_plan_records` | plan line items |
-| `Booking` | `bookings` | customer, dates, status, totals; `sitePostalCode` `@Formula` from trailing 6 chars of `siteAddress` |
+| `RentalPlan` | `rental_plan` | customer FK; status DRAFT/SAVED/QUOTED/CONVERTED/CANCELLED; `createdAt` set on create; `updatedAt` is last-quoted-at (also refreshed on quoted item mutation); `siteAddress` optional at create; `sitePostalCode` extracted from trailing 6 digits when address present |
+| `RentalPlanRecord` | `rental_plan_records` | plan line items; `dailyRate`/`subtotal` snapshotted at add-item, refreshed at quote when dynamic pricing is on |
+| `Booking` | `bookings` | customer, dates, status, totals; `sitePostalCode` `@Formula` from trailing 6 chars of `siteAddress`; optional `rental_plan_id` |
 | `BookingItem` | `booking_items` | asset lines; conditions; hours |
-| `Payment` | `payments` | deposit/balance; Stripe fields |
+| `Payment` | `payments` | DEPOSIT / BALANCE / FULL_PAYMENT; Stripe fields |
 | `DeliveryRecord` | `delivery_records` | booking + driver |
 | `ReturnRecord` | `return_records` | booking + driver |
 | `AIRecommendation` | `ai_recommendations` | S2b session + haystack handles |

@@ -64,7 +64,7 @@ jobs:
   # Reusable-workflow call: only uses / with / secrets (no environment, no runs-on)
   integration-pipeline:
     name: Integration pipeline
-    uses: Heavy-Rental/heavy-rental-spring-rest-api/.github/workflows/integration-pipeline.yml@develop
+    uses: ./.github/workflows/integration-pipeline.yml
     with:
       github_environment: integration
     # Explicit secrets only (Semgrep: avoid secrets: inherit)

@@ -2,11 +2,13 @@
 
 ## Purpose
 
-Customer rental plan lifecycle: create (one active plan), add/remove line items (rate snapshot), quote (freeze totals), ownership-scoped access, and convert a fresh quote into a booking.
+Customer rental plan lifecycle: create (one active plan), add/remove line items (rate snapshot), quote (freeze totals), ownership-scoped access, convert a fresh quote into a booking, cancel, and set/correct `siteAddress`.
 
-**Status:** **As-built** (including plan → booking checkout)  
+**Status:** **As-built** (including plan → booking checkout, flag-gated FastAPI dynamic quote pricing, OneMap distance, optional site address)  
 **HTTP shapes:** [`contracts/api.md`](./contracts/api.md) · checkout: [`contracts/checkout.md`](./contracts/checkout.md)  
-**Auth:** access JWT; plan operations ownership-scoped (`404` not `403` for non-owners)
+**Auth:** access JWT; plan operations ownership-scoped (`404` not `403` for non-owners)  
+**Related changes (as-built):** [`../../changes/dynamic-plan-quote-pricing/`](../../changes/dynamic-plan-quote-pricing/) · [`../../changes/pricing-postal-distance/`](../../changes/pricing-postal-distance/)  
+**Postal validation (portal):** [`../postal-code-validation/`](../postal-code-validation/)
 
 ## Requirements
 
@@ -50,6 +52,8 @@ On `DRAFT`/`SAVED` **or `QUOTED`** plans, `POST .../items` with `assetId` MUST c
 
 `POST .../quote` on a non-empty `DRAFT`/`SAVED` **or `QUOTED`** plan MUST set `totalAmount` to the sum of line subtotals, set status `QUOTED`, and set `updatedAt` to now (last-quoted-at). Empty plan → `400`. `CONVERTED` plan → `409`. Concurrent double-submit MUST be guarded (`@Version` → `409` `conflict`). Re-quoting a stale `QUOTED` plan is the recovery path for `quote_expired`.
 
+When `pricing.dynamic-enabled=true`, line subtotals MUST be refreshed from `DynamicPricingService` (FastAPI-backed) immediately before summing, instead of trusting the subtotal snapshotted at add-item time. When the flag is `false`, or any item's dynamic price is unavailable, that item's subtotal MUST fall back to `DefaultPricingClient` (`Asset.baseDailyRate`) arithmetic — a quote MUST NOT fail solely because the pricing service is unavailable.
+
 #### Scenario: Empty plan cannot quote
 - GIVEN a plan with zero items
 - WHEN quote is requested
@@ -65,18 +69,45 @@ On `DRAFT`/`SAVED` **or `QUOTED`** plans, `POST .../items` with `assetId` MUST c
 - WHEN quote is requested
 - THEN `409`
 
+#### Scenario: Dynamic pricing applied when enabled
+- GIVEN `pricing.dynamic-enabled=true` and a plan with items
+- WHEN quote is requested and `haystack-fast-api`'s `/internal/v1/pricing/quote` succeeds
+- THEN each line's `dailyRate`/`subtotal` reflect the FastAPI-returned price
+- AND `totalAmount` is the sum of those refreshed subtotals
+
+#### Scenario: Pricing service unavailable does not block quote
+- GIVEN `pricing.dynamic-enabled=true` and `haystack-fast-api`'s pricing circuit is open
+- WHEN quote is requested
+- THEN the quote still succeeds (`200`)
+- AND the affected item(s) use `DefaultPricingClient` (`Asset.baseDailyRate`) arithmetic instead
+
+#### Scenario: Degraded dynamic price is used, not treated as a failure
+- GIVEN `pricing.dynamic-enabled=true` and an item's result comes back with `degraded=true` but a non-null `daily_rate`/`total_price`
+- WHEN quote is requested
+- THEN that item's subtotal uses the returned dynamic price as-is — it does NOT fall back to `DefaultPricingClient`
+- AND a `WARN` log is emitted with the plan id, item id, and `model_version`
+
 ### Requirement: FR-RP-005 Ownership-scoped list and get
 
 `GET /api/rentalPlans` MUST return only the caller's plans. Operations on another customer's plan MUST return `404` (not `403`). Responses MUST include `createdAt` and `updatedAt` as ISO-8601 local date-times (no offset). `create()` MUST stamp `createdAt`.
 
-### Requirement: FR-RP-006 Quote is Spring-only pricing today
+### Requirement: FR-RP-006 Quote pricing source is flagged
 
-`POST .../quote` MUST NOT call haystack as-built. Pricing uses `PricingClient` / `DefaultPricingClient` arithmetic from snapshotted line subtotals. A FastAPI-backed `PricingClient` is design-only (see spring-proxy-endpoints).
+`POST .../quote` MUST use `DynamicPricingService` when `pricing.dynamic-enabled=true`, backed by `HaystackPricingClient` calling haystack `POST /internal/v1/pricing/quote`. As-built, `application.properties` sets `pricing.dynamic-enabled=${DYNAMIC_PRICING_ENABLED:true}` — the module default is **on**. When the flag is `false`, quote pricing MUST remain Spring-only `DefaultPricingClient` arithmetic from snapshotted line subtotals, with no HTTP call to haystack.
 
-#### Scenario: No haystack hop on quote
-- GIVEN DefaultPricingClient is the only implementation
+Cart add-item (`POST .../items`) MUST remain `Asset.baseDailyRate` snapshot pricing (FR-RP-002) regardless of the flag.
+
+#### Scenario: Flag off preserves Spring-only behavior
+- GIVEN `pricing.dynamic-enabled=false`
 - WHEN quote runs
-- THEN no HTTP call to haystack is required
+- THEN no HTTP call to haystack is made
+- AND `totalAmount` equals the sum of already-snapshotted line subtotals
+
+#### Scenario: Flag on calls haystack pricing, not the recommender saga
+- GIVEN `pricing.dynamic-enabled=true`
+- WHEN quote runs
+- THEN Spring calls `POST /internal/v1/pricing/quote` only
+- AND MUST NOT trigger Call 1 ingest or Call 2 recommend
 
 ### Requirement: FR-RP-007 No availability hold from plans
 
@@ -149,8 +180,29 @@ When `POST /api/bookings` includes `rentalPlanId`, the system MUST apply FR-BDR-
 - WHEN `PATCH .../{id}`
 - THEN `409` `already_converted`
 
+### Requirement: FR-RP-012 Distance for dynamic quote
+
+When `pricing.dynamic-enabled=true`, `distance_km` sent to haystack MUST be the straight-line (haversine) distance between the configured origin postal code (`pricing.origin-postal-code`, default `629462`) and the plan's `sitePostalCode`, both geocoded via OneMap. On any lookup failure (flag `pricing.distance-lookup-enabled=false`, missing/malformed postal code, OneMap no-match, timeout, circuit open) the system MUST fall back to `pricing.default-distance-km` (default `20.0`) and MUST NOT fail the quote. Origin MUST be the single fixed depot postal code — not per-asset `Asset.location`.
+
+`RentalPlanService.create()` and `updateSiteAddress()` MUST populate `RentalPlan.sitePostalCode` from the trailing six digits of `siteAddress` (or `null` when omitted).
+
+#### Scenario: Missing delivery postal uses default distance
+- GIVEN a DRAFT plan with `siteAddress` omitted (`sitePostalCode` null)
+- WHEN quote runs with dynamic pricing enabled
+- THEN haystack still receives a `distance_km` equal to `pricing.default-distance-km`
+- AND the quote succeeds
+
+#### Scenario: OneMap down does not block quote
+- GIVEN `pricing.distance-lookup-enabled=true` and OneMap's circuit is open
+- WHEN quote runs
+- THEN Spring uses `pricing.default-distance-km`
+- AND the quote still succeeds (`200`)
+
 ## Out of scope
 
 - Discounts / agreement e-sign  
 - Line-item quantity column redesign  
-- Haystack-backed quoting
+- Dynamic pricing on add-item (cart remains `baseDailyRate`)  
+- Driving/road distance (OneMap Routing API)  
+- Per-asset or per-depot origin geocoding  
+- `POST /api/pricing/estimate` (see [`../../changes/pricing-estimate/`](../../changes/pricing-estimate/))

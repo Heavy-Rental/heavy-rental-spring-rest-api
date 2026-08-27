@@ -1,15 +1,50 @@
-# Design: dynamic plan quote pricing (draft)
+# REASONS Canvas: Dynamic (ML) pricing on rental-plan quote
 
-## Wire contract (upstream, `haystack-fast-api`)
+| Field | Value |
+|-------|--------|
+| **Document type** | OpenSPDD REASONS canvas |
+| **Change** | `dynamic-plan-quote-pricing` |
+| **Status** | **As-built** |
+| **Date** | 2026-08-15 (living specs synced 2026-08-27) |
+| **Discipline** | Behavior diverges → update this canvas first, then code. |
 
-`POST /internal/v1/pricing/quote`. Verified against the real Pydantic models in
-`haystack-fast-api` `app/schemas/pricing.py` (`QuoteItemRequest`, `PricingQuoteRequest`,
-`QuoteItemResult`, `PricingQuoteResponse`) — **not** just the design-doc prose example, which
-showed illustrative string asset ids and cost us a real type mismatch during implementation
-(see "Gotcha" below).
+**Linked:** OpenSpec FR-RP-004 / FR-RP-006 / FR-PROXY-001 / FR-PROXY-005 · ADR [`adr.md`](./adr.md) · living [`../../specs/rental-plan-quote/`](../../specs/rental-plan-quote/) · [`../../specs/spring-proxy-endpoints/`](../../specs/spring-proxy-endpoints/) · upstream haystack `POST /internal/v1/pricing/quote`
+
+---
+
+## R — Requirements
+
+See delta [`specs/rental-plan-quote/spec.md`](./specs/rental-plan-quote/spec.md) and living FR-RP-004 / FR-RP-006. Quote MUST freeze `totalAmount` from line subtotals. When `pricing.dynamic-enabled=true`, those subtotals MUST be refreshed from haystack `/internal/v1/pricing/quote` immediately before summing. When the flag is off, or an item has no usable dynamic price, MUST fall back to `DefaultPricingClient`. A quote MUST NOT fail solely because the pricing service is unavailable. `degraded=true` with a usable price is used as-is (`WARN` log), not treated as failure.
+
+As-built module default: `application.properties` `pricing.dynamic-enabled=${DYNAMIC_PRICING_ENABLED:true}` (**on**).
+
+### Definition of Done
+
+- Flag off: no haystack hop; totals equal snapshotted add-item subtotals.
+- Flag on + healthy haystack: line `dailyRate`/`subtotal` match FastAPI; `totalAmount` is their sum.
+- Circuit open / per-item `error`: affected items use `baseDailyRate × inclusive days`; HTTP `200`.
+- `HaystackPricingClient` is independent of Call 1/2/3.
+- Tests: `HaystackPricingClientTest`, `DynamicPricingServiceTest`, `RentalPlanServiceTest`.
+
+### Scope out
+
+Add-item pricing; frontend field changes; recommender saga; real `distance_km` (follow-up `pricing-postal-distance`); applying haystack `deposit_rate` to bookings.
+
+---
+
+## E — Entities
+
+| Concept | Representation |
+|---------|----------------|
+| Plan / lines | `RentalPlan`, `RentalPlanRecord.dailyRate` / `subtotal` / `totalAmount` |
+| Haystack request | `PricingQuoteRequest` / `PricingQuoteRequestItem` — `rental_plan_id` and `item_id` are **strings** (`String.valueOf` of Long PKs); `asset_id` is numeric |
+| Haystack response | `PricingQuoteResponse` / `PricingQuoteResponseItem` — `daily_rate`, `total_price`, `error`, `degraded`, `model_version` |
+| Spring price | `PricingClient.ItemPrice(dailyRate, subtotal)` |
+| Flag | `PricingProperties.dynamicEnabled` |
+
+Wire (verified against haystack Pydantic, not the prose example):
 
 ```json
-// Request
 {
   "rental_plan_id": "55",
   "start_date": "2026-09-01",
@@ -17,70 +52,70 @@ showed illustrative string asset ids and cost us a real type mismatch during imp
   "distance_km": 20.0,
   "items": [{ "item_id": "101", "asset_id": 4 }]
 }
-
-// Response
-{
-  "rental_plan_id": "55",
-  "currency": "SGD",
-  "deposit_rate": 0.30,
-  "degraded": false,
-  "results": [
-    {
-      "item_id": "101",
-      "asset_id": 4,
-      "daily_rate": 182.40,
-      "total_price": 2189.60,
-      "was_clamped": true,
-      "min_daily_rate": 120.00,
-      "max_daily_rate": 260.00,
-      "model_version": "prod-2026-08-01",
-      "degraded": false
-    }
-  ],
-  "warnings": []
-}
 ```
 
-**Gotcha (fixed):** `item_id` and `rental_plan_id` are `str` in haystack's schema (`min_length=1`),
-even though Spring's own `RentalPlanRecord.id`/`RentalPlan.id` are numeric `Long` PKs. `asset_id`
-is the real numeric `int` PK. Spring sends `String.valueOf(id)` for the former and the raw `Long`
-for the latter; `DynamicPricingService` looks up `results[]` by the string item id.
+Per-item failures arrive as `results[].error` with pricing fields `null`, not a batch-level error.
 
-Per-item resolution failures come back as a per-item `error: str | None` field on the matching
-`results[]` entry (`QuoteItemResult.error`; confirmed via `tests/test_internal_pricing_api.py` —
-e.g. `results[1]['error'] == 'asset_not_found'` with all pricing fields `None`), not a batch-level
-error.
+---
 
-## Approach
+## A — Approach
 
-1. `HaystackPricingClient` (new, `client/haystack/`) — same shape as `HaystackRecommenderClient`: own `RestClient` (own read timeout), own `CircuitBreaker`/`Bulkhead`/`Retry` beans registered in `HaystackClientConfig`, `X-Correlation-Id` header, reuses `HaystackException`/`mapException`. One method: `quote(PricingQuoteRequest, correlationId)`.
-2. `DynamicPricingService` (new, `service/`):
-   - `priceItems(RentalPlan plan, List<RentalPlanRecord> items)` → `List<PricingClient.ItemPrice>` (one per item, same order).
-   - Builds `PricingQuoteRequest` from `plan.getId()`, `plan.getStartDate()`/`getEndDate()`, `pricing.default-distance-km`, and `{itemId, assetId}` pairs.
-   - On `HaystackException` (circuit open / timeout / upstream / transport) for the whole call, or a non-null `error`/missing result for a specific item, falls back to `DefaultPricingClient.priceItem(asset, start, end)` for that item only — never throws out of this method.
-3. `RentalPlanService.requestQuote()`: when `pricing.dynamic-enabled=true`, calls `DynamicPricingService.priceItems(...)`, writes the returned `dailyRate`/`subtotal` back onto each `RentalPlanRecord` (`rentalPlanRecordRepository.save(...)`), then sums into `totalAmount` exactly as today. When the flag is `false`, `requestQuote()` is byte-for-byte unchanged.
-4. No change to `addItem()` / `DefaultPricingClient` — cart-building stays `baseDailyRate` per FR-RP-002.
+1. `HaystackPricingClient` — same RestClient + CB/bulkhead/retry shape as `HaystackRecommenderClient`; own read timeout (`haystack.timeouts.pricing-read`, 20s); retry max 1; `X-Correlation-Id`.
+2. `DynamicPricingService.priceItems` — batch call, map results by string item id, per-item fallback to `DefaultPricingClient`. Never throws for pricing-service failures.
+3. `RentalPlanService.requestQuote` — if flag on, price outside the DB transaction (HR-153: do not hold `@Version` across the HTTP call), then reload-and-write keyed by item id.
+4. `distance_km` in this change is `pricing.default-distance-km` (20.0). Postal geocoding is the follow-up change.
 
-## Fallback semantics (must decide, locked here)
+Rejected alternatives: [`adr.md`](./adr.md).
 
-Never let checkout fail because the ML service is unavailable. If `HaystackPricingClient.quote(...)` throws, or a specific item comes back with `error` set (or a missing/null price), that item's price falls back to `DefaultPricingClient` arithmetic silently to the customer — logged at `WARN` with the plan id and item id for ops visibility. This mirrors the precedent already set for the recommender client (`spring-proxy-endpoints` FR-S2B-008 "fail fast... does not invent equipment or prices" — for pricing specifically, "fail fast" would block checkout entirely, which is worse than falling back to the existing, already-trusted base-rate math).
+---
 
-**`degraded` is not a failure signal and does NOT trigger fallback.** Per `haystack-fast-api`'s `dynamic-pricing` spec, `degraded=true` means the pricing service's primary real-time data snapshot was unavailable and it fell back to reading from a secondary/public source — the returned `daily_rate`/`total_price` are still real, model-computed values (lower confidence, not invalid), distinct from `error` (unresolvable item, no price at all) and `was_clamped` (a normal min/max guardrail, unrelated to data freshness). `DynamicPricingService` uses a degraded item's price as-is and logs it at `WARN` (plan id, item id, `model_version`) purely for ops visibility into upstream data-source health.
+## S — Structure
 
-## distance_km
+```text
+com.heavy_rental.rest_api
+  client.haystack.HaystackPricingClient
+  client.haystack.dto.PricingQuoteRequest(Item)
+  client.haystack.dto.PricingQuoteResponse(Item)
+  config.PricingProperties            // dynamicEnabled
+  service.DynamicPricingService
+  service.DefaultPricingClient        // fallback + flag-off path
+  service.RentalPlanService#requestQuote
+  controller.RentalPlanController     // optional X-Correlation-Id
+```
 
-See proposal.md "Open decision." `pricing.default-distance-km` (default `20.0`) until a real postal-code/geocoding heuristic exists.
+No new HTTP route. Portal `RentalPlanResponse` shape unchanged.
 
-## Correlation id
+---
 
-`RentalPlanController.requestQuote` reads the optional inbound `X-Correlation-Id` header
-(`@RequestHeader(required = false)`) and threads it through
-`RentalPlanService.requestQuote(planId, customerEmail, correlationId)` →
-`DynamicPricingService.priceItems(plan, items, correlationId)` → `HaystackPricingClient.quote(...)`,
-matching the exact convention already used by `RecommendationController` /
-`RecommenderSagaService`: propagate the caller's id when present and non-blank, otherwise
-generate a fresh `UUID` so the outbound call is still traceable end to end.
+## O — Operations
 
-## Rollout
+```bash
+cd heavy-rental-spring-rest-api
+./mvnw -Dtest=HaystackPricingClientTest,DynamicPricingServiceTest,RentalPlanServiceTest test
+```
 
-`pricing.dynamic-enabled` (env `DYNAMIC_PRICING_ENABLED`, default `false`) gates the new code path in `requestQuote()`. Same pattern as the existing `haystack.retry.ingest-enabled` flag used to gate a risky call path before production confidence is established.
+1. Config + DTOs matching upstream wire types (`item_id`/`rental_plan_id` as strings).
+2. Client + resilience beans.
+3. `DynamicPricingService` + wire into `requestQuote` behind the flag.
+4. Tests for flag off / success / fallback / degraded.
+5. Fold deltas into living `rental-plan-quote` + `spring-proxy-endpoints`.
+
+---
+
+## N — Norms
+
+- RFC 2119 MUST/SHALL in FR-RP-004 / FR-RP-006 / FR-PROXY-*.
+- Controllers stay thin; no RestClient from `RentalPlanController`.
+- Inclusive day count `ChronoUnit.DAYS.between + 1` on the fallback path.
+- Update OpenSpec in the same change as the tests.
+
+---
+
+## S — Safeguards
+
+- MUST NOT fail a quote solely because haystack pricing is unavailable.
+- MUST NOT treat `degraded=true` as a reason to discard a usable price.
+- MUST NOT call Call 1 ingest or Call 2 recommend from quote.
+- MUST NOT apply haystack `deposit_rate` to `Booking.depositAmount`.
+- MUST NOT hold the rental-plan `@Version` row lock across the haystack HTTP call.
+- MUST NOT change add-item snapshot pricing.

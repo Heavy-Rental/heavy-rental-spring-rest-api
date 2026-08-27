@@ -3,7 +3,7 @@
 | Field | Value |
 |-------|--------|
 | **Change id** | `pricing-postal-distance` |
-| **Status** | **Proposed — implementation in progress** |
+| **Status** | **As-built** (living specs synced 2026-08-27; manual OneMap e2e remains an ops checklist) |
 | **Date** | 2026-08-16 |
 | **Routes** | `POST /api/rentalPlans/{id}/quote` (modified), `GET /api/postalCodes/{postalCode}` (added) |
 

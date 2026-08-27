@@ -29,6 +29,7 @@ Legend: **Shared** = web + mobile; **Web** / **Mobile** / **Admin** = primary cl
 | `GET` | `/api/returns` | Mobile | `ROLE_ADMIN`/`ROLE_DRIVER` only | same |
 | `PATCH` | `/api/returns/{id}/status` | Mobile | `ROLE_ADMIN`/`ROLE_DRIVER` only | same |
 | `POST` | `/api/payments/deposit-intent` | Shared | USER/ADMIN (owner/admin) | [payments-stripe](../../payments-stripe/) |
+| `POST` | `/api/payments/full-payment-intent` | Shared | USER/ADMIN (owner/admin) | [payments-stripe](../../payments-stripe/) — GST-inclusive one-shot; skips balance scheduler |
 | `POST` | `/api/payments/webhook` | Stripe | Public + signature | [payments-stripe](../../payments-stripe/) |
 
 ## Equipment / depots / rental plans
@@ -45,8 +46,10 @@ Legend: **Shared** = web + mobile; **Web** / **Mobile** / **Admin** = primary cl
 | `GET` | `/api/rentalPlans/{id}` | Web | owner | same |
 | `POST` | `/api/rentalPlans/{id}/items` | Web | owner | same |
 | `DELETE` | `/api/rentalPlans/{id}/items/{itemId}` | Web | owner | same |
-| `POST` | `/api/rentalPlans/{id}/quote` | Web | owner | same — **Spring-only**, not haystack |
+| `PATCH` | `/api/rentalPlans/{id}` | Web | owner | same — set/correct `siteAddress` (FR-RP-011) |
+| `POST` | `/api/rentalPlans/{id}/quote` | Web | owner | same — **flag-gated** haystack `POST /internal/v1/pricing/quote` (`pricing.dynamic-enabled`; module default **on**); Spring fallback per item |
 | `POST` | `/api/rentalPlans/{id}/cancel` | Web | owner | same |
+| `GET` | `/api/postalCodes/{postalCode}` | Web | USER/ADMIN | [postal-code-validation](../../postal-code-validation/) — OneMap, not Haystack |
 
 ## Recommender (S2b)
 
@@ -68,9 +71,7 @@ Legend: **Shared** = web + mobile; **Web** / **Mobile** / **Admin** = primary cl
 
 | Method | Path | Notes |
 |--------|------|--------|
-| `POST` | `/api/pricing/estimate` | Design only — active change [`../../../changes/pricing-estimate/`](../../../changes/pricing-estimate/) |
-| `GET` | `/api/postalCodes/{postalCode}` | Implemented (USER/ADMIN), not yet archived here or consumed by the frontend — active change [`../../../changes/pricing-postal-distance/`](../../../changes/pricing-postal-distance/), contract [`contracts/postal-code-validation.md`](../../../changes/pricing-postal-distance/contracts/postal-code-validation.md) |
-| `PATCH` | `/api/rentalPlans/{id}` | Implemented (owner), not yet archived here or consumed by the frontend — active change [`../../../changes/pricing-postal-distance/`](../../../changes/pricing-postal-distance/), contract [`contracts/rental-plan-site-address.md`](../../../changes/pricing-postal-distance/contracts/rental-plan-site-address.md) |
+| `POST` | `/api/pricing/estimate` | Design only — open availability decision; [`../../../changes/pricing-estimate/`](../../../changes/pricing-estimate/) |
 
 ## Haystack proxy map
 
