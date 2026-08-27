@@ -151,7 +151,7 @@ env:
   JAVA_VERSION: "21"
   JAVA_DISTRIBUTION: temurin
   APP_PATH: app
-  DEFAULT_APP_REPOSITORY: SA62-team1/heavy-rental-spring-rest-api
+  DEFAULT_APP_REPOSITORY: Heavy-Rental/heavy-rental-spring-rest-api
   # Integration CI is develop-only (rest-api-ci-caller.yml push/PR → develop)
   DEFAULT_APP_REF: develop
   # Non-sensitive Spring/JPA settings only — credentials come from GitHub Secrets
