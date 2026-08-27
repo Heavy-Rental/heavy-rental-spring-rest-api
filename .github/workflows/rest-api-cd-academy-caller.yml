@@ -5,10 +5,11 @@
 # Also copy:
 #   deploy-pipeline/rest-api-cd-academy.yml
 #     → .github/workflows/rest-api-cd-academy.yml
-#   deploy-pipeline/resolve-vocareum-aws/action.yml
-#     → .github/actions/resolve-vocareum-aws/action.yml
+#   deploy-pipeline/resolve-aws-profile/action.yml
+#     → .github/actions/resolve-aws-profile/action.yml
 #   deploy-pipeline/ansible/
 #     → deploy-pipeline/ansible/   (keep this path)
+# Do not copy resolve-vocareum-aws/ — REST CD uses resolve-aws-profile.
 #
 # REST app CD (Academy) — branch 2 compose.
 # Not CI. Not terraform. Re-runs guest_base + rest on existing asg-rest.
