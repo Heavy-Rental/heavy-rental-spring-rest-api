@@ -3,21 +3,22 @@
 # Path:         .github/workflows/rest-api-release-caller.yml
 # =============================================================================
 # Release caller — manual dispatch only (Actions → Release → Run workflow).
+# Optional "Workflow run name" input sets the Actions-list title (run-name).
 # Checks out master, runs QC, builds the image, DAST, then public GHCR + GitHub Release.
 # Do not use on: release — this workflow creates the GitHub Release.
 #
 # Do NOT set `environment:` on this caller job (invalid with uses:).
 # Do NOT use secrets: inherit (Semgrep).
-# Do NOT pass REST_API_DB_* here — a uses: job cannot read Environment
-# secrets, so an explicit map is empty and would shadow QC.
 #
-# QC inside the reusable workflow uses environment: production and loads:
+# Explicit secrets map forwards repository secrets into the reusable workflow.
+# A uses: job cannot read Environment secrets, so these must be Repository
+# secrets (Settings → Secrets and variables → Actions):
 #   REST_API_DB_NAME
 #   REST_API_DB_USER
 #   REST_API_DB_PASSWORD
 #   REST_API_DB_PORT
-# from Settings → Environments → production → Environment secrets.
 #
+# QC inside the reusable workflow uses environment: production.
 # REST_API_DB_URL is optional — after Docker Postgres starts, QC builds:
 #   jdbc:postgresql://localhost:<PORT>/<NAME>
 #
@@ -26,9 +27,16 @@
 # =============================================================================
 
 name: Release
+run-name: ${{ inputs.run_name || format('Release by @{0}', github.actor) }}
 
 on:
   workflow_dispatch:
+    inputs:
+      run_name:
+        description: Workflow run name shown in the Actions list
+        required: false
+        type: string
+        default: ""
 
 concurrency:
   group: rest-api-release-${{ github.workflow }}-${{ github.repository }}
@@ -46,5 +54,9 @@ jobs:
     uses: ./.github/workflows/release-pipeline.yml
     with:
       github_environment: production
-    # No secrets: map and no secrets: inherit. QC (environment: production)
-    # reads REST_API_DB_* from Environment secrets in this repository.
+    # Explicit secrets only (Semgrep: avoid secrets: inherit)
+    secrets:
+      REST_API_DB_NAME: ${{ secrets.REST_API_DB_NAME }}
+      REST_API_DB_USER: ${{ secrets.REST_API_DB_USER }}
+      REST_API_DB_PASSWORD: ${{ secrets.REST_API_DB_PASSWORD }}
+      REST_API_DB_PORT: ${{ secrets.REST_API_DB_PORT }}
