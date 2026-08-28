@@ -67,13 +67,12 @@
 # Local validation (pipeline-development repo root, in the devcontainer):
 #   actionlint heavy-rental-rest-api/release-pipeline/release-pipeline.yml
 #
-# Quality Control uses environment: production (hardcoded) and reads
-# REST_API_DB_* from that Environment. The caller must not pass them
-# (a uses: job cannot read Environment secrets; an empty map would shadow QC)
-# and must not use secrets: inherit (Semgrep).
-#
-# Configure in the APPLICATION repo:
-#   Settings → Environments → production → Environment secrets
+# Quality Control uses environment: production (hardcoded). The caller
+# forwards REST_API_DB_* via an explicit secrets map (not secrets: inherit).
+# A uses: job cannot read Environment secrets, so configure them as
+# Repository secrets in the APPLICATION repo (and optionally also on
+# Environment "production" for isolation / protection rules):
+#   Settings → Secrets and variables → Actions → Repository secrets
 #
 # Names (exact match, same as Integration CI):
 #   REST_API_DB_NAME
@@ -116,9 +115,20 @@ on:
         required: false
         type: string
         default: production
-    # No workflow_call secrets. QC reads REST_API_DB_* from Environment
-    # "production". Declaring them here would bind empty caller values and
-    # shadow those Environment secrets. REST_API_DB_URL is derived after Postgres starts.
+    secrets:
+      REST_API_DB_NAME:
+        description: PostgreSQL database name
+        required: false
+      REST_API_DB_USER:
+        description: PostgreSQL username
+        required: false
+      REST_API_DB_PASSWORD:
+        description: PostgreSQL password
+        required: false
+      REST_API_DB_PORT:
+        description: Host port for CI Postgres container
+        required: false
+      # REST_API_DB_URL is derived after Docker Postgres starts (not a secret)
 
 # One run per repository ref; do not cancel in-flight packaging
 concurrency:
@@ -330,8 +340,11 @@ jobs:
     name: Quality Control
     runs-on: ubuntu-latest
     needs: [integration]
-    # Hardcoded Environment name (reliable for Environment secrets).
-    environment: production
+    # Hardcoded Environment name (more reliable than dynamic expressions for secrets).
+    # Loads Environment secrets + any secrets passed via explicit secrets map.
+    environment:
+      name: production
+      deployment: false
     timeout-minutes: 30
     steps:
       - name: Verify required database secrets are configured
@@ -342,7 +355,7 @@ jobs:
           REST_API_DB_PORT: ${{ secrets.REST_API_DB_PORT }}
         run: |
           set -euo pipefail
-          echo "Quality Control secrets source: GitHub Environment 'production'."
+          echo "Quality Control secrets source: caller explicit secrets map and/or GitHub Environment 'production'."
           missing=()
           [ -n "${REST_API_DB_NAME}" ] || missing+=(REST_API_DB_NAME)
           [ -n "${REST_API_DB_USER}" ] || missing+=(REST_API_DB_USER)
@@ -351,14 +364,17 @@ jobs:
           if [ "${#missing[@]}" -gt 0 ]; then
             echo "::error::Missing required secrets: ${missing[*]}"
             echo ""
-            echo "Configure in the APPLICATION repository (where this workflow runs):"
-            echo "  Settings → Environments → production → Environment secrets"
+            echo "Configure in the APPLICATION repository (where this workflow runs), not pipeline-development:"
+            echo "  1) Settings → Secrets and variables → Actions → Repository secrets"
+            echo "     (required for the caller explicit secrets map)"
+            echo "  2) Settings → Environments → production → Environment secrets"
+            echo "     (optional; this job also uses environment: production)"
             echo ""
             echo "Required names (exact, case-sensitive):"
             echo "  REST_API_DB_NAME, REST_API_DB_USER, REST_API_DB_PASSWORD, REST_API_DB_PORT"
             echo "  (REST_API_DB_URL is optional — built after Docker Postgres starts)"
             echo ""
-            echo "Do not put these on the caller uses: job (empty map would shadow this Environment)."
+            echo "Caller must include: explicit secrets map"
             echo "This job uses: environment: production"
             exit 1
           fi
