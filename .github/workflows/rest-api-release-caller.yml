@@ -33,10 +33,10 @@ on:
   workflow_dispatch:
     inputs:
       run_name:
-        description: Workflow run name shown in the Actions list
-        required: false
+        description: Name shown for this run in the Actions list (e.g. "Release v1.1.0").
+        required: true
         type: string
-        default: ""
+
 
 concurrency:
   group: rest-api-release-${{ github.workflow }}-${{ github.repository }}
