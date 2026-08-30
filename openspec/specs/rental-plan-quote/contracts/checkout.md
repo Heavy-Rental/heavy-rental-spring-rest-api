@@ -29,7 +29,7 @@ Returned by create, list, get, add item, remove item, quote, cancel, and PATCH s
   "items": [
     {
       "id": 101,
-      "assetId": 4,
+      "assetId": 1,
       "assetName": "CAT 320 Excavator",
       "dailyRate": 450.00,
       "subtotal": 2250.00
@@ -90,7 +90,7 @@ Returns `RentalPlanResponse`. Sets `status` → `"CANCELLED"`, `totalAmount` →
 | `409` | `already_converted` | Cancel or PATCH attempted on a `CONVERTED` plan |
 | `409` | `already_cancelled` | Cancel or PATCH attempted on an already-`CANCELLED` plan |
 | `400` | `bad_request` | No `rentalPlanId` and no items/dates |
-| `400` | `validation_failed` | `siteAddress` blank or missing 6-digit postal code |
+| `400` | `bad_request` | `siteAddress` blank or missing 6-digit postal code (Bean Validation) |
 
 ## `GET /api/rentalPlans`
 

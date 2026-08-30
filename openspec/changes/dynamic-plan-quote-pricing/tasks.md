@@ -13,7 +13,7 @@
 - [x] 9. Archive this change into `openspec/specs/rental-plan-quote/` + `spring-proxy-endpoints/` when as-built and flag defaults to `true` in an environment
 - [x] 10. Update `spring-proxy-endpoints` route summary table row for `POST /api/rentalPlans/{id}/quote` from "design-only" to "as-built (flagged)"
 
-Full suite green: 96/96 (`./mvnw test`), including `RestApiApplicationTests` (full context load with the new beans).
+Full suite green at ship time (`./mvnw test`), including `RestApiApplicationTests` (full context load with the new beans). Test count is a historical snapshot — see [`../../specs/testing/contracts/test-inventory.md`](../../specs/testing/contracts/test-inventory.md) for the living inventory.
 
 ## Docs
 

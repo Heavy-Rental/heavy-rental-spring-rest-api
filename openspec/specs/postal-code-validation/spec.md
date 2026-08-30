@@ -61,7 +61,7 @@ The controller MUST stay thin. Geocoding MUST go `PostalCodeService` → `OneMap
 #### Scenario: Plan create still validates locally
 - GIVEN a present-but-malformed `siteAddress` on `POST /api/rentalPlans`
 - WHEN submitted without calling this endpoint
-- THEN `400` `validation_failed` from Bean Validation, unchanged
+- THEN `400` `bad_request` from Bean Validation, unchanged
 
 ## Out of scope
 

@@ -15,6 +15,12 @@
 | `PATCH` | `/api/users/{id}` | partial `{ name?, email?, role? }` | `UserResponse` |
 | `DELETE` | `/api/users/{id}` | — | `204` |
 
-`UserResponse`: `{ id, name, email, role }` where `role` is frontend string.
+`UserResponse`: `{ id, name, email, role }` where `role` is the frontend string:
+
+| Backend `UserRole` | Wire `role` |
+|--------------------|-------------|
+| `USER` | `"customer"` |
+| `DRIVER` | `"employee"` |
+| `ADMIN` | `"admin"` |
 
 Auth: `ROLE_ADMIN` Bearer only.

@@ -28,7 +28,7 @@ the route is unchanged.
 ```
 → `400`:
 ```json
-{ "error": "validation_failed", "message": "siteAddress: Site address must end with a 6-digit postal code, e.g. \"20 Jurong Port Road, 619094\"" }
+{ "error": "bad_request", "message": "siteAddress: Site address must end with a 6-digit postal code, e.g. \"20 Jurong Port Road, 619094\"" }
 ```
 
 **Response shape is unchanged** (`RentalPlanResponse`) — `siteAddress` was already a nullable
@@ -88,7 +88,7 @@ quoted plan) — prompt the user to request a fresh quote before proceeding, don
 **Validation** — identical rule to `POST`: when `siteAddress` is present in the body, it must
 still end in a 6-digit postal code, or:
 ```json
-{ "error": "validation_failed", "message": "siteAddress: Site address must end with a 6-digit postal code, e.g. \"20 Jurong Port Road, 619094\"" }
+{ "error": "bad_request", "message": "siteAddress: Site address must end with a 6-digit postal code, e.g. \"20 Jurong Port Road, 619094\"" }
 ```
 (`400`.)
 
@@ -97,7 +97,7 @@ still end in a 6-digit postal code, or:
 | HTTP | `error` | When |
 |------|---------|------|
 | `404` | `not_found` | Plan missing or not owned by the caller |
-| `400` | `validation_failed` | `siteAddress` present but malformed |
+| `400` | `bad_request` | `siteAddress` present but malformed |
 | `409` | `already_converted` | Plan is already `CONVERTED` |
 | `409` | `already_cancelled` | Plan is already `CANCELLED` |
 

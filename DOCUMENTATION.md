@@ -170,7 +170,7 @@ On successful login the interim token’s `jti` is denylisted. On logout the acc
 | `/api/deliveries/**`, `/api/returns/**` | `ROLE_ADMIN` or `ROLE_DRIVER` |
 | All other `/api/**` | `ROLE_USER` or `ROLE_ADMIN` |
 
-CORS is restricted to configured origins (`app.cors.allowed-origins`; defaults `http://localhost:5173` and `http://localhost:4173`). Allowed methods: GET, POST, PUT, PATCH, DELETE, OPTIONS. Allowed headers: `Authorization`, `Content-Type`.
+CORS is restricted to configured origins (`app.cors.allowed-origins`; defaults `http://localhost:5173` and `http://localhost:4173`). Allowed methods: GET, POST, PUT, PATCH, DELETE, OPTIONS. Allowed headers: **`Authorization`, `Content-Type` only**. Optional `X-Correlation-Id` is accepted by recommendation/quote controllers when present, but it is **not** a CORS-allowed header — a cross-origin browser cannot send it; Postman and a same-origin Vite proxy can.
 
 ### 3.4 Error body convention
 
@@ -178,9 +178,9 @@ CORS is restricted to configured origins (`app.cors.allowed-origins`; defaults `
 { "error": "unauthorized", "message": "Authentication required. …" }
 ```
 
-Common `error` codes: `unauthorized`, `forbidden`, `invalid_credentials`, `bad_request`, `validation_failed`, `not_found`, `conflict`, `recommender_unavailable`, `recommender_timeout`, `recommender_upstream_error`, `payload_too_large`.
+Common `error` codes: `unauthorized`, `forbidden`, `invalid_credentials`, `bad_request`, `not_found`, `conflict`, `recommender_unavailable`, `recommender_timeout`, `recommender_upstream_error`, `payload_too_large`.
 
-Validation failures (`@Valid` on request bodies) return HTTP `400` with `error` = `validation_failed`.
+Validation failures (`@Valid` on request bodies) return HTTP `400` with `error` = `bad_request` (field errors joined in `message`). There is no `validation_failed` code as-built.
 
 ---
 
@@ -239,7 +239,7 @@ Loaded from `src/main/resources/data.sql` after Hibernate DDL (`ddl-auto=update`
 | `farid.rahman@example.sg` | `customer345` | USER |
 | `mei.lin@example.sg` | `customer456` | USER |
 
-Approximate seed scale: ~27 assets across 4 categories, ~90 bookings spanning statuses, mock JPEG images under `src/main/resources/mock-images/` stored as base64 in `asset_images`.
+Approximate seed scale: **27** assets across 4 categories, **91** bookings spanning statuses, mock JPEG images under `src/main/resources/mock-images/` stored as base64 in `asset_images`.
 
 ---
 
@@ -308,7 +308,7 @@ subtotal = baseDailyRate × days
 
 A customer may have only one plan in DRAFT/SAVED/QUOTED at a time (`409 conflict` otherwise). `CONVERTED` and `CANCELLED` do not count as active.
 
-`siteAddress` on create is **optional** ("Skip for now"). WHEN PROVIDED it must end with a 6-digit postal code (`400 validation_failed`). `PATCH` sets it later; changing address on a `QUOTED` plan reverts to `DRAFT` and clears `totalAmount`.
+`siteAddress` on create is **optional** ("Skip for now"). WHEN PROVIDED it must end with a 6-digit postal code (`400 bad_request`). `PATCH` sets it later; changing address on a `QUOTED` plan reverts to `DRAFT` and clears `totalAmount`.
 
 ### 5.4 Booking create and payments
 
@@ -492,7 +492,7 @@ Content-Type: application/json
 | `POST` | `/api/rentalPlans/{id}/quote` | Owner | Rental plans |
 | `POST` | `/api/rentalPlans/{id}/cancel` | Owner | Rental plans |
 | `GET` | `/api/postalCodes/{postalCode}` | USER/ADMIN | Postal codes |
-| `POST` | `/api/bookings` | USER/ADMIN | Bookings |
+| `POST` | `/api/bookings` | USER/ADMIN/DRIVER (JWT subject = customer) | Bookings |
 | `GET` | `/api/bookings` | USER (own) / ADMIN / DRIVER | Bookings |
 | `GET` | `/api/bookings/{bookingId}` | USER (own) / ADMIN / DRIVER | Bookings |
 | `PUT` | `/api/bookings/{bookingId}` | USER (own) / ADMIN / DRIVER | Bookings |
@@ -583,7 +583,7 @@ Optional query parameters:
 | `condition` | `ConditionType` enum name |
 | `startDate` / `endDate` | ISO dates; both or neither for availability |
 
-**Success `200`:** array of `EquipmentResponse`, e.g.:
+**Success `200`:** array of `AssetResponse`, e.g.:
 
 ```json
 {
@@ -591,9 +591,9 @@ Optional query parameters:
   "name": "CAT 320 Excavator",
   "category": "Excavator",
   "baseDailyRate": 450.00,
-  "minDailyRate": 400.00,
-  "maxDailyRate": 500.00,
-  "capacity": null,
+  "minDailyRate": 380.00,
+  "maxDailyRate": 520.00,
+  "capacity": 3500,
   "platformHeight": null,
   "purchaseYear": 2021,
   "condition": "GOOD",
@@ -602,8 +602,8 @@ Optional query parameters:
   "img": "data:image/jpeg;base64,/9j/...",
   "location": "Tuas",
   "tags": [],
-  "serialno": "CAT320-2021-0042",
-  "lastConditionUpdatedAt": "2026-08-10T09:15:00",
+  "serialno": "SN-EXC-000320",
+  "lastConditionUpdatedAt": "2026-08-11T09:00:00",
   "utilization": 62.5
 }
 ```
@@ -658,7 +658,7 @@ Ownership is scoped to the JWT subject (email).
 }
 ```
 
-Creates a **DRAFT** plan. `siteAddress` is **optional**; WHEN PROVIDED it must end with a 6-digit postal code or `400 validation_failed`. One active (DRAFT/SAVED/QUOTED) plan per customer or `409`.
+Creates a **DRAFT** plan. `siteAddress` is **optional**; WHEN PROVIDED it must end with a 6-digit postal code or `400 bad_request`. One active (DRAFT/SAVED/QUOTED) plan per customer or `409`.
 
 #### `GET /api/rentalPlans`
 
@@ -684,7 +684,7 @@ Removes a line item; returns updated plan.
 
 #### `POST /api/rentalPlans/{id}/quote`
 
-Flag-gated Haystack pricing (see §5.3). Sets `QUOTED`, refreshes `updatedAt`. Re-quote allowed; `CONVERTED` → `409`. Optional `X-Correlation-Id`.
+Flag-gated Haystack pricing (see §5.3). Sets `QUOTED`, refreshes `updatedAt`. Re-quote allowed; `CONVERTED` → `409`. Optional inbound `X-Correlation-Id` (not CORS-allowed from a cross-origin browser).
 
 #### `POST /api/rentalPlans/{id}/cancel`
 
@@ -713,7 +713,7 @@ Sets `CANCELLED`, clears `totalAmount`. `CONVERTED` → `409 already_converted`;
 - Deposit rate **30%** of total  
 - Initial status: `PENDING_DEPOSIT`  
 - Overlapping active booking on any asset → `409 conflict`  
-- Bad postal `siteAddress` → `400 validation_failed`
+- Bad postal `siteAddress` → `400 bad_request`
 
 #### `GET /api/bookings`
 
@@ -725,7 +725,7 @@ Single booking or `404`.
 
 #### `PUT /api/bookings/{bookingId}`
 
-Update `startDate`, `endDate`, `siteAddress`, `deliveryNotes` (`BookingUpdateRequest`; postal rule applies).
+Full-replace `startDate`, `endDate`, `siteAddress`, `deliveryNotes` (`BookingUpdateRequest`). `siteAddress` is required (`@NotBlank` + 6-digit postal); omitting it is `400 bad_request`. Omitted dates/notes may become null. Status is not changeable here.
 
 **`BookingResponse`:**
 
@@ -736,7 +736,7 @@ Update `startDate`, `endDate`, `siteAddress`, `deliveryNotes` (`BookingUpdateReq
 | `startDate` / `endDate` | date |
 | `bookingStatus` | string |
 | `siteAddress` | string |
-| `items` | `{ assetName, serialNumber }[]` |
+| `items` | `{ assetId, assetName, serialNumber }[]` |
 | `deliveryNotes` | string |
 | `totalAmount` / `depositAmount` / `remainingBalance` | number |
 
@@ -828,7 +828,7 @@ Content-Type: application/json
 
 Requires access JWT (`ROLE_USER` or `ROLE_ADMIN`). Session ownership: matching user unless admin.
 
-Optional header on submit: `X-Correlation-Id` (propagated to Haystack; generated if absent).
+Optional header on submit: `X-Correlation-Id` (propagated to Haystack; generated if absent). CORS does not allow this header from a cross-origin browser.
 
 #### `POST /api/recommendations/project-spec` (JSON)
 
@@ -908,7 +908,7 @@ DB-only session summary: ingest id, summary, dates, budget, warnings, status, co
 
 | Condition | HTTP | `error` |
 |-----------|------|---------|
-| Validation | 400 | `bad_request` / `validation_failed` |
+| Validation | 400 | `bad_request` |
 | Not found | 404 | `not_found` |
 | Not owner | 403 | `forbidden` |
 | Haystack 4xx | 400/422 | mapped FastAPI error when present |
@@ -931,7 +931,7 @@ DB-only session summary: ingest id, summary, dates, budget, warnings, status, co
 | `PATCH` | `/api/users/{id}` | partial `{ name?, email?, role? }` | `UserResponse` |
 | `DELETE` | `/api/users/{id}` | — | `204` |
 
-`UserResponse`: `{ id, name, email, role }`.
+`UserResponse`: `{ id, name, email, role }` where `role` is the **frontend** string (`customer` ↔ USER, `employee` ↔ DRIVER, `admin` ↔ ADMIN). Create always provisions `USER` / `"customer"`; role changes only via PATCH.
 
 ---
 
@@ -947,12 +947,14 @@ Trailing six months:
 [
   {
     "id": 1,
-    "month": "2026-03",
+    "month": "Mar",
     "utilization": 12.5,
     "revenue": 1500.00
   }
 ]
 ```
+
+`month` is a short English name (`Jan`…`Dec`), not `YYYY-MM`. Six entries, oldest → newest.
 
 Utilization math uses shared `Booking.UTILIZATION_STATUSES` and inclusive overlap day counts so fleet-wide and per-asset views stay consistent.
 
@@ -1008,7 +1010,7 @@ Google Sign-In audience: `app.google.web-client-id` / `APP_GOOGLE_WEB_CLIENT_ID`
 |----------|-----|---------|
 | `app.cors.allowed-origins` | `APP_CORS_ALLOWED_ORIGINS` | `http://localhost:5173,http://localhost:4173` |
 
-No wildcard origin (incompatible with credentialed Authorization-header APIs).
+No wildcard origin (incompatible with credentialed Authorization-header APIs). Allowed request headers: `Authorization`, `Content-Type` only.
 
 ### 7.4 Stripe
 
@@ -1024,7 +1026,7 @@ Currency for PaymentIntents is hardcoded **`sgd`** as-built.
 
 | Property | Purpose | Default |
 |----------|---------|---------|
-| `haystack.base-url` | FastAPI base | `http://haystack-fast-api:8000` |
+| `haystack.base-url` | FastAPI base | `http://haystack-fast-api:8000` (`application.properties`; the Java POJO field default `http://localhost:8000` is overridden by this property) |
 | `haystack.timeouts.connect` | Connect timeout | `5s` |
 | `haystack.timeouts.health-read` | Health read | `5s` |
 | `haystack.timeouts.qa-read` | Call 3 | `45s` |
@@ -1114,12 +1116,13 @@ Notable suites:
 
 | Area | Classes |
 |------|---------|
+| Context | `RestApiApplicationTests` |
 | Auth | `AuthenticationIntegrationTest`, `AuthServiceTest` |
 | Recommender client resilience | `HaystackRecommenderClientTest`, `HaystackRetryIdempotencyTest`, `HaystackTimeoutRetryTest`, `HaystackCircuitBreakerTest`, `HaystackBulkheadTest` |
 | Recommender saga | `RecommenderSagaServiceTest`, `RecommenderSagaWireMockTest`, `RecommendationControllerIntegrationTest` |
 | Dynamic pricing / OneMap | `HaystackPricingClientTest`, `DynamicPricingServiceTest`, `DistanceServiceTest`, `OneMapClientTest`, `PostalCodeControllerIntegrationTest` |
 | Booking / plans / returns | `BookingServiceTest`, `RentalPlanServiceTest`, `RentalPlanControllerIntegrationTest`, `ReturnServiceTest`, `BookingOpsAccessIntegrationTest` |
-| Payments | `PaymentServiceTest`, `PaymentWebhookServiceTest`, `BalanceChargeSchedulerServiceTest` |
+| Payments | `PaymentServiceTest`, `PaymentWebhookServiceTest`, `BalanceChargeSchedulerServiceTest` (`PaymentReconciliationSchedulerService` has no dedicated test class) |
 | Admin assets | `AssetAdminIntegrationTest` |
 | Utilization | `MonthlyUtilizationAccuracyTest` |
 

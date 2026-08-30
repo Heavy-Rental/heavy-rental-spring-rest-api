@@ -38,6 +38,9 @@ Routes other than interim token, login, health, and Stripe webhook need an **acc
 | `mei.lin@example.sg` | `customer456` | USER (no plans — cart → quote → checkout) |
 | `admin@localhost` | `admin1234` | ADMIN |
 | `ah.tan@example.sg` | `driver123` | DRIVER (deliveries/returns + all bookings) |
+| `ravi.kumar@example.sg` | `admin123` | ADMIN |
+| `mei.ling@example.sg` | `customer234` | USER |
+| `farid.rahman@example.sg` | `customer345` | USER |
 
 A `ROLE_DRIVER` token can also be obtained via **Auth → 2b. Login with Google** (first-time
 sign-in auto-provisions a driver if the Google email is new).
@@ -60,7 +63,7 @@ sign-in auto-provisions a driver if the Google email is new).
 ## Recommendations (S2b) checklist
 
 1. Complete **Auth** login.
-2. Ensure **haystack-fast-api** is up (`haystack.base-url`, default `http://localhost:8000`).
+2. Ensure **haystack-fast-api** is up (`haystack.base-url` in `application.properties` defaults to `http://haystack-fast-api:8000`; for a local FastAPI process set `HAYSTACK_BASE_URL=http://localhost:8000`).
 3. Run **Submit project-spec** — expects `quoteRef` + `items` (not `answer`).
 4. Run **Knowledge query** — expects Call 3 `answer`.
 5. Run **Get recommendation session** — DB only.
@@ -77,7 +80,7 @@ Submit test script asserts the portal body is **quote-shaped** and stores `recom
 6. If `409 quote_expired`, run **Request quote** again then retry checkout.
 7. Alex Tan can skip Create: **Request quote** on seeded plan `3`, then checkout.
 
-`siteAddress` is optional at **Create** (the "Skip for now" cart flow — omit it or send `null`); WHEN provided it must end with a 6-digit postal code or the API returns `400 validation_failed`. Same rule applies to **Update site address**, which sets it later on a plan created without one. Setting it on a `QUOTED` plan reverts status to `DRAFT` and clears `totalAmount` — same as add/remove item.
+`siteAddress` is optional at **Create** (the "Skip for now" cart flow — omit it or send `null`); WHEN provided it must end with a 6-digit postal code or the API returns `400 bad_request`. Same rule applies to **Update site address**, which sets it later on a plan created without one. Setting it on a `QUOTED` plan reverts status to `DRAFT` and clears `totalAmount` — same as add/remove item.
 
 ## Variables
 

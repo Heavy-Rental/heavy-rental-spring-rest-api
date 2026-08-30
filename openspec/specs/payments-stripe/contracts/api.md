@@ -26,7 +26,7 @@ Content-Type: application/json
 
 **Success:** `{ "clientSecret": "...", "paymentIntentId": "pi_..." }` (field names per `PaymentIntentResponse`).
 
-**409** if a non-FAIL DEPOSIT or FULL_PAYMENT payment already exists on the booking.
+**409** if a non-FAIL DEPOSIT or FULL_PAYMENT already exists (deposit-intent also rejects when a FULL_PAYMENT is already on the booking so the booking cannot be paid twice).
 
 ## `POST /api/payments/full-payment-intent`
 

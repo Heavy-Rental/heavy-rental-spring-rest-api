@@ -59,7 +59,7 @@
 #
 # Authoring copy lives in this tree. Install into the Spring repo as
 #   .github/workflows/integration-pipeline.yml
-# There is no .github/workflows/rest-api-ci.yml mirror in this repo.
+# A `.github/workflows/rest-api-ci.yml` copy in pipeline-development (if present) can lag.
 #
 # Local validation (pipeline-development repo root, in the devcontainer):
 #   actionlint heavy-rental-rest-api/integration-pipeline/integration-pipeline.yml

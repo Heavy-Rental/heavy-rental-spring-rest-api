@@ -31,11 +31,11 @@ The system MUST provide `GET /api/bookings` and `GET /api/bookings/{id}` returni
 
 ### Requirement: FR-BDR-002 Update booking details without status
 
-`PUT /api/bookings/{id}` MUST full-replace `startDate`, `endDate`, `siteAddress`, `deliveryNotes` from the body (omitted fields may become null). Status MUST NOT be changeable via this endpoint.
+`PUT /api/bookings/{id}` MUST write `startDate`, `endDate`, `siteAddress`, and `deliveryNotes` from the body. Omitted `startDate` / `endDate` / `deliveryNotes` MAY become null. `siteAddress` MUST NOT be omitted — it is `@NotBlank` plus the postal-code pattern (FR-BDR-008); a missing or malformed address is `400` `bad_request`, not a null write. Status MUST NOT be changeable via this endpoint.
 
 #### Scenario: PUT does not change status
 - GIVEN an existing booking
-- WHEN `PUT` with updated notes/dates
+- WHEN `PUT` with updated notes/dates and a valid `siteAddress`
 - THEN status is unchanged
 - AND body fields are written as a full replace
 
@@ -116,12 +116,12 @@ When `rentalPlanId` is absent, `POST /api/bookings` MUST price with inclusive da
 
 ### Requirement: FR-BDR-008 Site address ends with a 6-digit postal code
 
-`PUT /api/bookings/{id}` and `POST /api/bookings` `siteAddress` MUST be non-blank and MUST end with a 6-digit postal code (`^.*\d{6}$`). Leading/trailing whitespace MUST be stripped before validation. Invalid or missing address MUST return `400` with `error` = `validation_failed` before any write. The `Booking.siteAddress` column itself remains an unconstrained nullable string (seed/direct writes are not DTO-validated).
+`PUT /api/bookings/{id}` and `POST /api/bookings` `siteAddress` MUST be non-blank and MUST end with a 6-digit postal code (`^.*\d{6}$`). Leading/trailing whitespace MUST be stripped before validation. Invalid or missing address MUST return `400` with `error` = `bad_request` before any write. The `Booking.siteAddress` column itself remains an unconstrained nullable string (seed/direct writes are not DTO-validated).
 
 #### Scenario: PUT without postal code leaves booking unchanged
 - GIVEN an existing booking
 - WHEN `PUT` sends a blank `siteAddress` or one that does not end in six digits
-- THEN `400` `validation_failed`
+- THEN `400` `bad_request`
 - AND the booking row is unchanged
 
 ## Known gaps (documented, not fixed here)

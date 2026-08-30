@@ -20,7 +20,7 @@ Legend: **Shared** = web + mobile; **Web** / **Mobile** / **Admin** = primary cl
 
 | Method | Path | Client | Roles | Contract |
 |--------|------|--------|-------|----------|
-| `POST` | `/api/bookings` | Shared | USER/ADMIN (caller = customer) | create + plan-backed checkout [booking-delivery-return](../../booking-delivery-return/) · [checkout](../../rental-plan-quote/contracts/checkout.md) |
+| `POST` | `/api/bookings` | Shared | USER/ADMIN/DRIVER (`SecurityConfig`); caller JWT subject is the customer | create + plan-backed checkout [booking-delivery-return](../../booking-delivery-return/) · [checkout](../../rental-plan-quote/contracts/checkout.md) |
 | `GET` | `/api/bookings` | Mobile+ | USER (own only) / ADMIN / DRIVER | [booking-delivery-return](../../booking-delivery-return/) |
 | `GET` | `/api/bookings/{id}` | Mobile+ | USER (own only, else `403`) / ADMIN / DRIVER | same |
 | `PUT` | `/api/bookings/{id}` | Mobile+ | USER (own only, else `403`) / ADMIN / DRIVER | same |
@@ -47,7 +47,7 @@ Legend: **Shared** = web + mobile; **Web** / **Mobile** / **Admin** = primary cl
 | `POST` | `/api/rentalPlans/{id}/items` | Web | owner | same |
 | `DELETE` | `/api/rentalPlans/{id}/items/{itemId}` | Web | owner | same |
 | `PATCH` | `/api/rentalPlans/{id}` | Web | owner | same — set/correct `siteAddress` (FR-RP-011) |
-| `POST` | `/api/rentalPlans/{id}/quote` | Web | owner | same — **flag-gated** haystack `POST /internal/v1/pricing/quote` (`pricing.dynamic-enabled`; module default **on**); Spring fallback per item |
+| `POST` | `/api/rentalPlans/{id}/quote` | Web | owner | same — **flag-gated** haystack `POST /internal/v1/pricing/quote` (`pricing.dynamic-enabled`; module default **on**); Spring fallback per item. Optional inbound `X-Correlation-Id` is forwarded when the flag is on; CORS `allowedHeaders` are `Authorization` and `Content-Type` only, so a cross-origin browser cannot send that header unless a same-origin proxy is used |
 | `POST` | `/api/rentalPlans/{id}/cancel` | Web | owner | same |
 | `GET` | `/api/postalCodes/{postalCode}` | Web | USER/ADMIN | [postal-code-validation](../../postal-code-validation/) — OneMap, not Haystack |
 

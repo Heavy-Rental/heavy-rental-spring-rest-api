@@ -8,7 +8,7 @@
 | Class | Asserts |
 |-------|---------|
 | `RestApiApplicationTests` | Context loads |
-| `AuthenticationIntegrationTest` | Interim → login → access → logout; role gates; denylist |
+| `AuthenticationIntegrationTest` | Interim → login → access → logout; role gates; denylist; Bean Validation `400` `bad_request` |
 | `AuthServiceTest` | Login/logout/Google provisioning |
 
 ## S2b haystack (WireMock / unit — no live FastAPI)
@@ -42,7 +42,7 @@
 |-------|---------|
 | `BookingServiceTest` | Direct create + plan-backed checkout; overlap 409; inclusive days |
 | `BookingOpsAccessIntegrationTest` | USER own-only; ADMIN/DRIVER see all; deliveries/returns ADMIN/DRIVER |
-| `PaymentServiceTest` / `PaymentWebhookServiceTest` / `BalanceChargeSchedulerServiceTest` | Deposit, full-payment GST, webhook, scheduler |
+| `PaymentServiceTest` / `PaymentWebhookServiceTest` / `BalanceChargeSchedulerServiceTest` | Deposit, full-payment GST, webhook, scheduler. `PaymentReconciliationSchedulerService` has no dedicated test class as-built |
 | `AssetAdminIntegrationTest` | Admin-only writes, serialno/timestamp, photo upload, duplicate name 409 |
 | `MonthlyUtilizationAccuracyTest` | Inclusive overlap day counts |
 | `ReturnServiceTest` / `BookingMapperTest` / `CurrentUserServiceTest` | Ops mapping / ownership helpers |

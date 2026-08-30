@@ -22,11 +22,13 @@ Array of:
 ```json
 {
   "id": 1,
-  "month": "2026-03",
+  "month": "Mar",
   "utilization": 12.5,
   "revenue": 1500.00
 }
 ```
+
+`month` is a short English name (`Jan`…`Dec`), not `YYYY-MM`. `id` is `1`…`6` from oldest to newest of the trailing six calendar months.
 
 Field types follow `MonthlyUtilizationResponse` record as-built.
 

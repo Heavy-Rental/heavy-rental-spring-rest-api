@@ -4,7 +4,7 @@
 
 30% deposit PaymentIntent (client-initiated), signature-verified webhook, and daily off-session 70% balance charge one day before rental start.
 
-**Status:** **As-built** on payment checkout branch lineage; verify against live code for `paidStatus` model drift  
+**Status:** **As-built**. Payment state lives on `Payment` rows and `Booking.status` — there is no `Booking.paidStatus` column.  
 **HTTP / config:** [`contracts/api.md`](./contracts/api.md)  
 **Auth:** deposit-intent and full-payment-intent require access JWT (owner or admin); webhook is public + Stripe signature
 

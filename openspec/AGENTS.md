@@ -8,6 +8,8 @@
 4. Owning `specs/<capability>/`  
 5. Active work under [`changes/`](./changes/) if present  
 
+As-built reminders: Bean Validation `@Valid` → HTTP `400` `error=bad_request`; CORS allowed headers are `Authorization` and `Content-Type` only (`X-Correlation-Id` is not CORS-allowed). Living `specs/` win over as-built change packs and Feasibility notes.  
+
 ## By area
 
 | Area | Capability |

@@ -25,6 +25,8 @@ The API MUST run STATELESS sessions, disable CSRF for the API, store passwords w
 - WHEN called without a valid access JWT
 - THEN the response is unauthorized/forbidden per security config
 
+CORS on `/api/**` MUST use the configured origin list (`app.cors.allowed-origins`; defaults `http://localhost:5173` and `http://localhost:4173`), methods GET/POST/PUT/PATCH/DELETE/OPTIONS, and allowed headers **`Authorization` and `Content-Type` only**. `X-Correlation-Id` is accepted by controllers when present but is **not** a CORS-allowed header, so a cross-origin browser cannot send it (Postman and a same-origin proxy can).
+
 ### Requirement: FR-ENV-003 Config via properties and env
 
 Runtime settings MUST be overridable by environment variables for datasource and `app.jwt.*` (secret ≥ 32 chars, issuer, expiration minutes). Production MUST supply strong secrets.
@@ -69,7 +71,7 @@ New feature contracts MUST be added under `openspec/specs/` or `openspec/changes
 
 ### Requirement: FR-ENV-007 Request-body Bean Validation
 
-Write DTOs that carry format rules (for example `siteAddress` postal code) MUST use Jakarta Bean Validation (`@NotBlank`, `@Pattern`) on the request record and `@Valid` on the controller parameter. `MethodArgumentNotValidException` MUST map to HTTP `400` with `error` = `validation_failed` and the shared `{ "error", "message" }` body. Entity columns MUST NOT be the enforcement point for those format rules.
+Write DTOs that carry format rules (for example `siteAddress` postal code) MUST use Jakarta Bean Validation (`@NotBlank`, `@Pattern`) on the request record and `@Valid` on the controller parameter. `MethodArgumentNotValidException` MUST map to HTTP `400` with `error` = `bad_request` and the shared `{ "error", "message" }` body (`RestExceptionHandler`). Entity columns MUST NOT be the enforcement point for those format rules.
 
 ## Stack (normative summary)
 

@@ -6,6 +6,7 @@
 | **Version** | **2.1.1** |
 | **Date** | 2026-08-13 |
 | **S2b in this Spring repo** | **As-built** (HR-106) |
+| **Product SoT** | OpenSpec `openspec/specs/` — this handoff is a 2026-08-13 wire snapshot, not a living backlog |
 | **Upstream repo** | [Heavy-Rental/haystack-fast-api](https://github.com/Heavy-Rental/haystack-fast-api) (**read-only**) |
 | **Synced from** | `develop` @ `12f89dda9b27ba0196c7a37f7f4310459731cb1e` |
 

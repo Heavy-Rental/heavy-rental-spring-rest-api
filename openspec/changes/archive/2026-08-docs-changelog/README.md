@@ -7,6 +7,6 @@ Historical plain-language change logs migrated out of `specification/` during Op
 | `CHANGES-monthly-utilization.md` | [`../../../specs/monthly-utilization/`](../../../specs/monthly-utilization/) |
 | `CHANGES-equipment-frontend-integration.md` | [`../../../specs/equipment-browse/`](../../../specs/equipment-browse/) (equipment API) |
 
-These files are **audit history only** — do not treat as living contracts.
+These files are **audit history only** — do not treat as living contracts. Paths such as `/api/equipment` and DTO names `EquipmentResponse` describe the API as of those dates; living routes are `/api/assets` / `AssetResponse`. Monthly-utilization `month` in living contracts is a short English name (`Mar`), not `YYYY-MM`.
 
 Leftover long-form `specification/SPEC-*.md` files (api-index, booking-delivery-return, entity-repository, project-environment, rental-plan-quote) were retired after this archive era. As-built SoT is `openspec/specs/`. Checkout work is as-built under [`../../../specs/rental-plan-quote/`](../../../specs/rental-plan-quote/); design archive: [`../2026-08-13-rental-plan-checkout-conversion/`](../2026-08-13-rental-plan-checkout-conversion/). Full SDD narratives remain in git history.

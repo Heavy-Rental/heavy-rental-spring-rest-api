@@ -56,8 +56,8 @@ SELECT setval(pg_get_serial_sequence('asset_categories', 'id'), COALESCE((SELECT
 -- one of two spec-band roles per category: a 4-asset "main" band (real depth,
 -- e.g. period_utilization can read 0/4..4/4) or a 1-asset "filler" band (real
 -- coverage of that size range, not an empty gap). 19 new assets (ids 9-27)
--- complete each category's band shape -- see specification/temporary/
--- data-seeding-design (executed here, not mirrored into this file as prose).
+-- complete each category's band shape. Seed design is documented in
+-- openspec/specs/seed-data/ (not duplicated as prose in this file).
 -- New assets are new models under an already-seeded brand; their asset_images
 -- row (below) reuses that brand's existing photo -- no new image files.
 INSERT INTO assets (id, name, serialno, category_id, capacity, platform_height, description, base_daily_rate, min_daily_rate, max_daily_rate, condition, last_condition_updated_at, purchase_year, location) VALUES
