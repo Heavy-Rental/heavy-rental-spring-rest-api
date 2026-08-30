@@ -20,9 +20,9 @@ Roles: `ROLE_USER`, `ROLE_ADMIN` (blanket SecurityConfig rule — also serves th
   "name": "CAT 320 Excavator",
   "category": "Excavator",
   "baseDailyRate": 450.00,
-  "minDailyRate": 400.00,
-  "maxDailyRate": 500.00,
-  "capacity": null,
+  "minDailyRate": 380.00,
+  "maxDailyRate": 520.00,
+  "capacity": 3500,
   "platformHeight": null,
   "purchaseYear": 2021,
   "condition": "GOOD",
@@ -31,8 +31,8 @@ Roles: `ROLE_USER`, `ROLE_ADMIN` (blanket SecurityConfig rule — also serves th
   "img": "data:image/jpeg;base64,/9j/...",
   "location": "Tuas",
   "tags": [],
-  "serialno": "CAT320-2021-0042",
-  "lastConditionUpdatedAt": "2026-08-10T09:15:00",
+  "serialno": "SN-EXC-000320",
+  "lastConditionUpdatedAt": "2026-08-11T09:00:00",
   "utilization": 62.5
 }
 ```

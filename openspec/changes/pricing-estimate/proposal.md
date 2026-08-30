@@ -11,7 +11,7 @@
 
 The web portal needs a side-effect-free “what would this cost?” estimate for assets + dates **without** creating a `RentalPlan` or locking quote state. This is **not** a haystack proxy and **not** a resurrection of a phantom estimate-proxy row removed from the old API index.
 
-Distinct from `POST /api/rentalPlans/{id}/quote` (requires owned plan, locks to `QUOTED`).
+Distinct from `POST /api/rentalPlans/{id}/quote` (requires owned plan, locks to `QUOTED`). As-built quote (when `pricing.dynamic-enabled=true`) calls haystack `POST /internal/v1/pricing/quote` with Spring fallback. This estimate remains **Spring-only by design**, so a cart preview using `baseDailyRate × inclusive days` can differ from a later quoted `totalAmount`. That divergence is accepted until this change is redesigned.
 
 ## What changes
 

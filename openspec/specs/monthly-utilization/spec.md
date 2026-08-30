@@ -11,7 +11,7 @@ Admin Overview metric: trailing six calendar months of utilization % and payment
 
 ### Requirement: FR-MU-001 Trailing six months
 
-`GET /api/monthly-utilization` MUST return exactly six entries (oldest → newest or documented order), each with `id`, `month`, `utilization`, and `revenue` for that calendar month.
+`GET /api/monthly-utilization` MUST return exactly six entries (oldest → newest), each with `id`, `month`, `utilization`, and `revenue` for that calendar month. `month` MUST be the short English month name from `Month.getDisplayName(TextStyle.SHORT, Locale.ENGLISH)` (for example `"Mar"`, `"Apr"`) — **not** `YYYY-MM`.
 
 #### Scenario: Admin receives six months
 - GIVEN a valid `ROLE_ADMIN` access token
@@ -43,8 +43,9 @@ The route MUST be gated to `ROLE_ADMIN`. Unauthenticated → `401`; `ROLE_USER` 
 ## Known open items
 
 - Current month uses full month length in the denominator (not days elapsed so far).  
-- `BigDecimal.ZERO` may serialize as `0` vs `0.00` (cosmetic).  
-- No permanent automated test in suite as-built (manual + one-time accuracy test only).
+- `BigDecimal.ZERO` may serialize as `0` vs `0.00` (cosmetic).
+
+Automated evidence: `MonthlyUtilizationAccuracyTest` (inclusive overlap day counts).
 
 ## Related
 

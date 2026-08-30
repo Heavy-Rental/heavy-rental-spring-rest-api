@@ -9,13 +9,13 @@
 
 | Method | Path | Notes |
 |--------|------|--------|
-| `POST` | `/api/rentalPlans` | Create `{ startDate, endDate, siteAddress? }` → `201` DRAFT. `siteAddress` is optional; WHEN PROVIDED MUST end with a 6-digit postal code or `400 validation_failed` |
+| `POST` | `/api/rentalPlans` | Create `{ startDate, endDate, siteAddress? }` → `201` DRAFT. `siteAddress` is optional; WHEN PROVIDED MUST end with a 6-digit postal code or `400 bad_request` |
 | `GET` | `/api/rentalPlans` | Caller's plans only |
 | `GET` | `/api/rentalPlans/{id}` | Owner or `404` |
 | `PATCH` | `/api/rentalPlans/{id}` | `{ siteAddress }` — set/correct address (FR-RP-011). On `QUOTED`, reverts to `DRAFT` and clears `totalAmount`. `CONVERTED` → `409 already_converted`; `CANCELLED` → `409 already_cancelled` |
-| `POST` | `/api/rentalPlans/{id}/items` | `{ assetId }`. On `QUOTED`, succeeds and reverts to `DRAFT` (clears `totalAmount`) |
+| `POST` | `/api/rentalPlans/{id}/items` | `{ assetId }` → `201`. On `QUOTED`, succeeds and reverts to `DRAFT` (clears `totalAmount`) |
 | `DELETE` | `/api/rentalPlans/{id}/items/{itemId}` | Same revert-to-`DRAFT` on `QUOTED` |
-| `POST` | `/api/rentalPlans/{id}/quote` | Freezes totals; sets `QUOTED` and refreshes `updatedAt`. Re-quote of `QUOTED` allowed; `CONVERTED` → `409`. Optional `X-Correlation-Id` is propagated to haystack when dynamic pricing is on |
+| `POST` | `/api/rentalPlans/{id}/quote` | Freezes totals; sets `QUOTED` and refreshes `updatedAt`. Re-quote of `QUOTED` allowed; `CONVERTED` → `409`. Optional inbound `X-Correlation-Id` is propagated to haystack when dynamic pricing is on (not a CORS-allowed browser header) |
 | `POST` | `/api/rentalPlans/{id}/cancel` | Sets `CANCELLED`, clears `totalAmount`, refreshes `updatedAt`. Allowed from `DRAFT`/`SAVED`/`QUOTED`. `CONVERTED` → `409 already_converted`; already `CANCELLED` → `409 already_cancelled` |
 
 Day count: inclusive `ChronoUnit.DAYS.between(start, end) + 1` (as-built convention; bookings use the same inclusive count).

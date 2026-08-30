@@ -13,6 +13,8 @@
 **Wire / orchestration notes:** this package.  
 **Upstream contracts (read-only):** haystack OpenSpec Call 1/2/3 under that repo’s `openspec/specs/`.
 
+> **Do not treat this package as the product SoT.** It is a 2026-08-13 Haystack Call 1/2/3 wire snapshot (S2b as-built). Later as-built work lives only in OpenSpec: FR-S2B-011 quantity pass-through, flag-gated `POST /internal/v1/pricing/quote` on plan quote, and OneMap postal/distance. Implementation-plan checklists here describe the original S2b build; they are not an unimplemented backlog.
+
 ### Aligned with haystack (Call numbering)
 
 | Call | Path | Role | Upstream contract (haystack-fast-api) |

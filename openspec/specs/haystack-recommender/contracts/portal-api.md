@@ -6,7 +6,7 @@
 | **Status** | **As-built** |
 | **Behavior SoT** | [`../spec.md`](../spec.md) |
 | **Upstream haystack (read-only)** | [Heavy-Rental/haystack-fast-api](https://github.com/Heavy-Rental/haystack-fast-api) Call 1/2/3 OpenSpec contracts |
-Auth: access JWT with `ROLE_USER` or `ROLE_ADMIN`. Ownership: session `user` must match JWT principal unless admin. Haystack `user_id` is **server-derived** — never trust a client-supplied haystack user id.
+Auth: access JWT with `ROLE_USER` or `ROLE_ADMIN`. Ownership: session `user` must match JWT principal unless admin. Haystack `user_id` is **server-derived** — never trust a client-supplied haystack user id. Optional inbound `X-Correlation-Id` is propagated when present (otherwise generated); it is not a CORS-allowed browser header.
 
 ---
 
@@ -144,6 +144,7 @@ Returns stored session summary (ids, summary, dates, budget, warnings, status, c
 | CB open / bulkhead | 503 | `recommender_unavailable` |
 | Timeout | 504 | `recommender_timeout` |
 | Upstream 5xx after policy | 502/503 | `recommender_upstream_error` |
+| Payload too large | 413 | `payload_too_large` |
 
 ```json
 { "error": "<code>", "message": "<human-readable reason>" }
@@ -169,4 +170,4 @@ Upstream contracts (read-only): haystack-fast-api `openspec/specs/...` (see [`AG
 
 - Rental date range is **not** an input to Call 2 pricing (`HR-111`); `startDate`/`endDate` are tentative session fields only.
 - Portal-facing summaries elsewhere MUST link here rather than re-derive field tables.
-- React `QuoteResultScreen` (as of `heavy-rental-react-web-portal` `develop`) hardcodes `Qty: 1` and does not put `quantity` on `RecItem`. Quote **totals** still use summed `lineTotal`. Displaying collapsed quantity and carrying it into the rental plan is a **React follow-up**, not a Spring field change.
+- Displaying collapsed `quantity` and carrying it into the rental-plan cart is a **frontend follow-up**, not a Spring field change. Quote **totals** use summed `lineTotal`.

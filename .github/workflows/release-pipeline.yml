@@ -44,8 +44,9 @@
 # Application:
 #   https://github.com/Heavy-Rental/heavy-rental-spring-rest-api
 #   Spring Boot 4.x · Java 21 · Maven (mvnw) · PostgreSQL · WAR packaging
-#   DEFAULT_APP_REPOSITORY below is Heavy-Rental (not the SA62-team1 act
-#   fallback used by Fast Feedback / Integration CI). Checkout is always master.
+#   DEFAULT_APP_REPOSITORY below is Heavy-Rental (same as Integration CI;
+#   Fast Feedback still uses the SA62-team1 act fallback). The env var is
+#   not interpolated. Checkout is always master.
 #
 # How the REST API uses this on release
 # -------------------------------------
@@ -62,7 +63,7 @@
 #
 # Authoring copy lives in this tree. Install into the Spring repo as
 #   .github/workflows/release-pipeline.yml
-# There is no .github/workflows/rest-api-release.yml mirror in this repo.
+# A `.github/workflows/rest-api-release.yml` copy in pipeline-development (if present) can lag.
 #
 # Local validation (pipeline-development repo root, in the devcontainer):
 #   actionlint heavy-rental-rest-api/release-pipeline/release-pipeline.yml

@@ -63,7 +63,7 @@ The system MUST send an `Idempotency-Key` header on every Call 1 POST. When inge
 
 ### Requirement: FR-S2B-004 Correlation headers
 
-The system MUST send `X-Correlation-Id` on every haystack call (health, Call 1, Call 2, Call 3). The system MAY send W3C `traceparent` when tracing is available. If the inbound request already carries `X-Correlation-Id`, that value SHOULD be propagated.
+The system MUST send `X-Correlation-Id` on every haystack call (health, Call 1, Call 2, Call 3). The system MAY send W3C `traceparent` when tracing is available. If the inbound request already carries `X-Correlation-Id`, that value SHOULD be propagated. CORS `allowedHeaders` do not include `X-Correlation-Id`; a missing inbound header MUST still produce a generated correlation id outbound.
 
 #### Scenario: Correlation on ingest and recommend
 - GIVEN a correlation id C for a portal submit
@@ -226,4 +226,4 @@ Change pack: [`../../changes/2026-08-20-call2-quote-quantity-passthrough/`](../.
 - gRPC or message queues (C3)
 - Writing `recommendation_items` rows from Call 2 (portal maps quote JSON; optional later)
 - Shared multi-replica FastAPI session store (Phase 5)
-- React quote-card quantity UI / rental-plan cart conversion (portal still hardcodes `Qty: 1`; follow-up in `heavy-rental-react-web-portal`)
+- React quote-card quantity UI / rental-plan cart conversion (Spring pass-through is complete; displaying quantity and carrying it into the cart is a frontend follow-up)

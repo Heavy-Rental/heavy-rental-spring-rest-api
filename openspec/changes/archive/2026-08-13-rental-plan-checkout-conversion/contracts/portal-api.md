@@ -3,7 +3,7 @@
 | Field | Value |
 |-------|--------|
 | **Change** | `rental-plan-checkout-conversion` (archived) |
-| **Status** | **As-built** — living contract: [`../../../../specs/rental-plan-quote/contracts/checkout.md`](../../../../specs/rental-plan-quote/contracts/checkout.md) |
+| **Status** | **As-built (historical snapshot)** — living contract: [`../../../../specs/rental-plan-quote/contracts/checkout.md`](../../../../specs/rental-plan-quote/contracts/checkout.md). Living SoT also includes `CANCELLED` plan status and Bean Validation `400` `bad_request` (this snapshot still says `validation_failed`). |
 | **Behavior** | [`../proposal.md`](../proposal.md) · [`../design.md`](../design.md) |
 
 ## Status enum — wire format is UPPERCASE

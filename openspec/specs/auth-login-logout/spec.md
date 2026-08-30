@@ -124,13 +124,24 @@ Login MUST pass the **plain** password from the request into `AuthenticationMana
 
 ### Requirement: FR-AUTH-L-005 Security matchers
 
+As-built `SecurityConfig` matchers (order matters; first match wins):
+
 | Matcher | Rule |
 |---------|------|
 | `GET /api/auth/getBearerToken` | `permitAll` (auth-interim-token) |
 | `POST /api/auth/login` | `hasAuthority("ROLE_INTERIM")` |
 | `POST /api/auth/google` | `hasAuthority("ROLE_INTERIM")` |
 | `POST /api/auth/logout` | `hasAnyAuthority("ROLE_USER", "ROLE_ADMIN", "ROLE_DRIVER")` |
-| Other API requests | `hasAnyAuthority("ROLE_USER", "ROLE_ADMIN")` |
+| `/error`, `GET /actuator/health`, `GET /actuator/info` | `permitAll` |
+| `/api/monthly-utilization` | `hasAuthority("ROLE_ADMIN")` |
+| `/api/users/**` | `hasAuthority("ROLE_ADMIN")` |
+| `POST`/`PUT`/`PATCH`/`DELETE /api/assets/**` | `hasAuthority("ROLE_ADMIN")` |
+| `POST /api/payments/webhook` | `permitAll` (auth = Stripe-Signature) |
+| `/api/bookings/**` | `hasAnyAuthority("ROLE_USER", "ROLE_ADMIN", "ROLE_DRIVER")` |
+| `/api/deliveries/**`, `/api/returns/**` | `hasAnyAuthority("ROLE_ADMIN", "ROLE_DRIVER")` |
+| Any other request (assets GET, plans, payments except webhook, recommendations, postal codes, depots) | `hasAnyAuthority("ROLE_USER", "ROLE_ADMIN")` |
+
+`ROLE_DRIVER` is issued by Google first-time sign-in and the seed driver. It MUST reach bookings/deliveries/returns/logout. It MUST NOT reach the catch-all (assets, rental plans, payments, recommendations, postal codes, admin).
 
 #### Scenario: Matcher matrix holds
 - GIVEN SecurityConfig as-built

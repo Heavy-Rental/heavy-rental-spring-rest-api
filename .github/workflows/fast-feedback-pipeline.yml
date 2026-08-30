@@ -30,8 +30,8 @@
 # The caller invokes this workflow with:
 #   uses: ./.github/workflows/fast-feedback-pipeline.yml
 #
-# Authoring copy lives in this tree. There is no
-# .github/workflows/rest-api-fast-feedback.yml mirror in this repo.
+# Authoring copy lives in this tree. Copy this file into the Spring app repo.
+# A `.github/workflows/` copy in pipeline-development (if present) can lag.
 #
 # No database secrets required (Integration stage does not start Postgres).
 # =============================================================================

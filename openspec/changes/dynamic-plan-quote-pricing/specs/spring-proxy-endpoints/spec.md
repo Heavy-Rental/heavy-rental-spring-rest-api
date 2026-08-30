@@ -18,7 +18,7 @@ The system MUST implement `POST /api/rentalPlans/{id}/quote` using `DynamicPrici
 - THEN Spring computes that item's total from `Asset.baseDailyRate` without failing the request
 
 #### Scenario: Flag off is unchanged Spring-only behavior
-- GIVEN `pricing.dynamic-enabled=false` (default)
+- GIVEN `pricing.dynamic-enabled=false` (module default is **on**; this scenario is the explicit off path)
 - WHEN the owner requests a quote
 - THEN Spring computes totals from stored rates without an HTTP call to haystack, exactly as before this change
 

@@ -30,6 +30,8 @@ Integrator overview (non-normative): [`../DOCUMENTATION.md`](../DOCUMENTATION.md
 | Layering | Thin controllers; no external HTTP from controllers |
 | Schema | default: Hibernate `ddl-auto=update`; prod: Flyway + `validate` |
 | Seed | `data.sql` after Hibernate DDL (dev only) |
+| Bean Validation | `@Valid` failures → HTTP `400` `error=bad_request` (not `validation_failed`) |
+| CORS headers | `Authorization`, `Content-Type` only |
 | Process | New work → OpenSpec change pack (`proposal` + REASONS `design.md` + `adr.md` + spec deltas) |
 
 ## Living domains

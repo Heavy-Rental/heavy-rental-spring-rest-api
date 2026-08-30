@@ -2,6 +2,21 @@
 
 Release notes for this module live as **OpenSpec change packs** under [`openspec/changes/`](openspec/changes/) (proposal + OpenSPDD REASONS `design.md` + ADR + spec deltas). Living behavior is in [`openspec/specs/`](openspec/specs/). Historical plain-language logs: [`openspec/changes/archive/2026-08-docs-changelog/`](openspec/changes/archive/2026-08-docs-changelog/).
 
+## 2026-08-30 — Documentation / specification consistency
+
+Aligned living OpenSpec, `DOCUMENTATION.md`, README, Postman, and Feasibility banners with as-built code (no product behavior change):
+
+- Bean Validation `@Valid` failures are HTTP `400` `error=bad_request` (`RestExceptionHandler`); docs no longer claim `validation_failed`.
+- Monthly utilization `month` is a short English name (`Mar`), not `YYYY-MM`.
+- Asset list DTO is `AssetResponse` (not `EquipmentResponse`); seed serial/rates match `data.sql`.
+- `BookingResponse.items[]` includes `assetId`; amount fields are always present.
+- Add-item `POST /api/rentalPlans/{id}/items` is `201`.
+- Auth matcher table includes DRIVER on bookings/deliveries/returns (not only the USER/ADMIN catch-all).
+- Seed user list is complete (7 users); repository count is 13.
+- CORS allowed headers are `Authorization` + `Content-Type` only (`X-Correlation-Id` is not CORS-allowed).
+- Haystack properties default base URL is `http://haystack-fast-api:8000`.
+- `POST /api/pricing/estimate` remains **design only**.
+
 ## 2026-08-27 — Documentation / specification sync
 
 Folded as-built code into living OpenSpec, OpenSPDD, and ADRs (no product behavior change):

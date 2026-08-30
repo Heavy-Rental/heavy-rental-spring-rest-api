@@ -7,6 +7,8 @@ Discovery layer for the full Spring REST surface: every route, client audience, 
 **Status:** **As-built** (route map)  
 **Route tables:** [`contracts/routes.md`](./contracts/routes.md)
 
+`GET /api/depots` is listed as a stub (`[]`, no Depot entity) so clients that also request depots do not 404. It has no dedicated capability.
+
 ## Requirements
 
 ### Requirement: FR-IDX-001 Single discovery map

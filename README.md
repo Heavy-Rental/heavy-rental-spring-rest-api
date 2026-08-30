@@ -57,12 +57,16 @@ instead of `./mvnw spring-boot:run` alone. Isolated forwarder: `./scripts/dev-we
 
 ## Seed users (dev)
 
+Full table: [`openspec/specs/seed-data/contracts/seed-summary.md`](openspec/specs/seed-data/contracts/seed-summary.md). Commonly used:
+
 | Email | Password | Role |
 |-------|----------|------|
 | `admin@localhost` | `admin1234` | ADMIN |
-| `alex.tan@example.sg` | `customer123` | USER |
+| `alex.tan@example.sg` | `customer123` | USER (has an active QUOTED plan) |
 | `ah.tan@example.sg` | `driver123` | DRIVER |
-| `mei.lin@example.sg` | `customer456` | USER (no active plan — cart walk) |
+| `mei.lin@example.sg` | `customer456` | USER (no plans — cart walk) |
+
+Also seeded: `ravi.kumar@example.sg` / `admin123` (ADMIN), `mei.ling@example.sg` / `customer234` (USER), `farid.rahman@example.sg` / `customer345` (USER).
 
 ## Related
 

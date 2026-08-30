@@ -8,7 +8,7 @@ last-inspection timestamp, and a photo-upload endpoint. This is the first admin-
 area documented under this capability; future admin-portal features can be added here as new
 requirements.
 
-**Status:** **As-built** — 15/15 new tests pass (`AssetAdminIntegrationTest`), full suite 61/61, no regressions.
+**Status:** **As-built**. Automated evidence: `AssetAdminIntegrationTest` (see [`testing/contracts/test-inventory.md`](../testing/contracts/test-inventory.md)).
 **HTTP shapes:** [`equipment-browse/contracts/api.md`](../equipment-browse/contracts/api.md) — this
 capability governs *who* may call `/api/assets` writes and the admin-only fields/endpoint added to
 that surface; it does not restate the wire contract, which lives with equipment-browse since it's
@@ -18,14 +18,10 @@ the same route family.
 
 ## Why this feature exists
 
-The React admin portal's Asset Records tab already called the real `/api/equipment` endpoints, but
-two gaps stopped it from being a genuine admin feature: `SecurityConfig` had no matcher for the
-route, so writes fell through to the blanket `ROLE_USER`/`ROLE_ADMIN` rule — any authenticated
-customer could create/edit/delete equipment, not just admins — and the API never returned
-`serialno`/`lastConditionUpdatedAt` (both already columns on `Asset`) or offered a way to upload a
-photo, so the frontend synthesized all three client-side. This feature closes both gaps and, per a
-deliberate rename, moves the route family from `/api/equipment` to `/api/assets` to match the
-`Asset`/`AssetService`/`AssetRepository` naming already used underneath.
+The living route family is `/api/assets` (`AssetController` / `AssetRequest` / `AssetResponse`).
+It was renamed from `/api/equipment`. Admin-only writes, real `serialno` / `lastConditionUpdatedAt`,
+and JSON base64 photo upload close the earlier gap where any authenticated user could mutate the
+catalog and the API never returned those fields.
 
 ## Requirements
 
@@ -116,11 +112,9 @@ exempt — its "null means unchanged" contract is incompatible with required-fie
 
 ## Out of scope
 
-- **Frontend changes.** `heavy-rental-react-web-portal`'s `equipmentApi` still calls `/api/equipment`,
-  which no longer exists — it will 404 until repointed at `/api/assets` in a follow-up change that
-  also drops `deriveAssetRecord()`'s client-side synthesis now that the backend returns real data.
+- **Frontend clients** — this module owns `/api/assets` only. A client still calling `/api/equipment` will `404`.
 - **`AssetCategory` admin CRUD** — only reads exist today.
-- **Pagination or thumbnails** on the browse endpoint — unchanged from prior behavior.
+- **Pagination or thumbnails** on the browse endpoint.
 
 ## Related
 

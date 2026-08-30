@@ -42,7 +42,7 @@ Full historical field tables: git history (former `specification/SPEC-entity-rep
 
 ## Repositories
 
-Spring Data JPA repositories under `repository/` (≈12 interfaces) with derived `findBy…` methods. Prefer repository queries over inventing bidirectional entity graphs.
+Spring Data JPA repositories under `repository/` (**13** interfaces: one per entity above) with derived `findBy…` methods. Prefer repository queries over inventing bidirectional entity graphs.
 
 ## Related
 
